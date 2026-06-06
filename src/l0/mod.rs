@@ -76,7 +76,8 @@ impl L0CircuitBreaker {
             (budget_remaining as f32 / budget_requested as f32).clamp(0.0, 1.0)
         };
         let depth_factor = if depth == 0 { 1.0 } else { 1.0 / depth as f32 };
-        0.6 * budget_ratio + 0.4 * depth_factor
+        crate::core::types::BUDGET_PRIORITY_WEIGHT * budget_ratio
+            + crate::core::types::DEPTH_PRIORITY_WEIGHT * depth_factor
     }
 }
 

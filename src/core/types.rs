@@ -1,3 +1,51 @@
+/// Embedding vector dimension (OpenAI text-embedding-ada-002).
+pub const EMBEDDING_DIM: usize = 768;
+
+/// Default LLM temperature for chat agents.
+pub const DEFAULT_TEMPERATURE: f64 = 0.7;
+
+/// Default max tokens for chat agents.
+pub const DEFAULT_MAX_TOKENS: u64 = 4000;
+
+/// Priority weight for budget ratio (vs depth factor).
+pub const BUDGET_PRIORITY_WEIGHT: f32 = 0.6;
+
+/// Priority weight for depth factor (vs budget ratio).
+pub const DEPTH_PRIORITY_WEIGHT: f32 = 0.4;
+
+/// Default L1 confidence threshold.
+pub const DEFAULT_L1_CONFIDENCE: f32 = 0.5;
+
+/// Default semantic conflict threshold.
+pub const DEFAULT_SEMANTIC_THRESHOLD: f32 = -0.6;
+
+/// Default budget for a new runtime.
+pub const DEFAULT_RUNTIME_BUDGET: u64 = 10_000;
+
+/// Default max agent spawn depth.
+pub const DEFAULT_MAX_DEPTH: u32 = 5;
+
+/// Default max concurrent agents.
+pub const DEFAULT_MAX_AGENTS: usize = 10;
+
+/// Default admission timeout in ms.
+pub const DEFAULT_ADMISSION_TIMEOUT_MS: u64 = 100;
+
+/// Default suspend timeout in ms.
+pub const DEFAULT_SUSPEND_TIMEOUT_MS: u64 = 50;
+
+/// Default side width for TUI sidebar.
+pub const SIDEBAR_WIDTH: u16 = 28;
+
+/// Max consecutive failures before L2 collapses.
+pub const MAX_CONSECUTIVE_FAILURES: u32 = 5;
+
+/// Default max_tokens for L2 LLM judge.
+pub const L2_JUDGE_MAX_TOKENS: u64 = 500;
+
+/// Default temperature for L2 LLM judge.
+pub const L2_JUDGE_TEMPERATURE: f64 = 0.3;
+
 pub type TaskId = [u8; 16];
 pub type TraceId = [u8; 16];
 pub type SpanId = u64;
@@ -15,9 +63,9 @@ pub struct SpawnRequest {
     pub trace_id: TraceId,
     pub span_id: SpanId,
     pub parent_span_id: SpanId,
-    pub task_description_embedding: [f32; 768],
-    pub role_description_embedding: [f32; 768],
-    pub value_statement_embedding: [f32; 768],
+    pub task_description_embedding: [f32; EMBEDDING_DIM],
+    pub role_description_embedding: [f32; EMBEDDING_DIM],
+    pub value_statement_embedding: [f32; EMBEDDING_DIM],
     pub requested_budget: u64,
     pub current_depth: u32,
     pub responsibility_chain: Vec<AgentId>,
@@ -59,7 +107,7 @@ pub enum SpawnRejection {
 #[repr(C)]
 #[derive(Clone)]
 pub struct ExperienceEntry {
-    pub embedding: [f32; 768],
+    pub embedding: [f32; EMBEDDING_DIM],
     pub applicability_vector: [f32; 128],
     pub tool_bitmap: u64,
     pub role_template_id: Option<u32>,

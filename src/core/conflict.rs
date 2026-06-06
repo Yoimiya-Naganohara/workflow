@@ -1,3 +1,4 @@
+use crate::core::types::EMBEDDING_DIM;
 use crate::core::types::{AgentId, ChildAgentConfig, TraceId};
 use smallvec::SmallVec;
 
@@ -14,7 +15,7 @@ pub struct L2AuditResult {
 /// Patch injected into L1 experience pool to bias future decisions.
 #[derive(Debug, Clone)]
 pub struct OverridePatch {
-    pub embedding: [f32; 768],
+    pub embedding: [f32; EMBEDDING_DIM],
     pub weight: f32,
     pub decay_days: u32,
 }
@@ -32,7 +33,7 @@ pub struct ConflictManifest {
     pub conflict_type: ConflictType,
     pub contending_agents: SmallVec<[AgentId; 2]>,
     pub trace_id: TraceId,
-    pub context_embeddings: SmallVec<[[f32; 768]; 2]>,
+    pub context_embeddings: SmallVec<[[f32; EMBEDDING_DIM]; 2]>,
     pub dynamic_priority_scores: SmallVec<[f32; 2]>,
 }
 

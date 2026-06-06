@@ -1,6 +1,7 @@
 pub mod arbitration;
 pub mod classifier;
 
+use crate::core::types::EMBEDDING_DIM;
 use crate::core::simd::cosine_similarity_768;
 use crate::core::types::{ExperienceEntry, SpawnRejection};
 pub use arbitration::L1ArbitrationResult;
@@ -27,7 +28,7 @@ impl L1Retriever {
         self.experiences.push(entry);
     }
 
-    pub fn retrieve(&self, query_embedding: &[f32; 768], k: usize) -> Vec<(&ExperienceEntry, f32)> {
+    pub fn retrieve(&self, query_embedding: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(&ExperienceEntry, f32)> {
         let mut scored: Vec<(&ExperienceEntry, f32)> = self
             .experiences
             .iter()
@@ -44,8 +45,8 @@ impl L1Retriever {
 
     pub fn check_confidence(
         &self,
-        task_embedding: &[f32; 768],
-        role_embedding: &[f32; 768],
+        task_embedding: &[f32; EMBEDDING_DIM],
+        role_embedding: &[f32; EMBEDDING_DIM],
     ) -> Result<L1Assessment, SpawnRejection> {
         if self.experiences.is_empty() {
             return Ok(L1Assessment {
@@ -117,7 +118,7 @@ pub struct L1Assessment {
 mod tests {
     use super::*;
 
-    fn make_experience(embedding: [f32; 768], weight: f32, tools: u64) -> ExperienceEntry {
+    fn make_experience(embedding: [f32; EMBEDDING_DIM], weight: f32, tools: u64) -> ExperienceEntry {
         ExperienceEntry {
             embedding,
             applicability_vector: [0.0f32; 128],
@@ -167,18 +168,18 @@ mod tests {
 
 /// L1: Experience-driven confidence assessment.
 pub trait ExperienceRetrieval: Send + Sync {
-    fn retrieve(&self, query: &[f32; 768], k: usize) -> Vec<(ExperienceEntry, f32)>;
+    fn retrieve(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)>;
     fn check_confidence(
         &self,
-        task_embedding: &[f32; 768],
-        role_embedding: &[f32; 768],
+        task_embedding: &[f32; EMBEDDING_DIM],
+        role_embedding: &[f32; EMBEDDING_DIM],
     ) -> Result<L1Assessment, SpawnRejection>;
     fn add_experience(&mut self, entry: ExperienceEntry);
     fn experience_count(&self) -> usize;
 }
 
 impl ExperienceRetrieval for L1Retriever {
-    fn retrieve(&self, query: &[f32; 768], k: usize) -> Vec<(ExperienceEntry, f32)> {
+    fn retrieve(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)> {
         self.retrieve(query, k)
             .into_iter()
             .map(|(e, s)| (e.clone(), s))
@@ -187,8 +188,8 @@ impl ExperienceRetrieval for L1Retriever {
 
     fn check_confidence(
         &self,
-        task_embedding: &[f32; 768],
-        role_embedding: &[f32; 768],
+        task_embedding: &[f32; EMBEDDING_DIM],
+        role_embedding: &[f32; EMBEDDING_DIM],
     ) -> Result<L1Assessment, SpawnRejection> {
         self.check_confidence(task_embedding, role_embedding)
     }

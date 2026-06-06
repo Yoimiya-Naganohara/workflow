@@ -20,8 +20,8 @@ impl SuspendConfig {
 impl Default for SuspendConfig {
     fn default() -> Self {
         Self {
-            hard_timeout_ms: 50,
-            dynamic_timeout_ms: 50,
+            hard_timeout_ms: crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS,
+            dynamic_timeout_ms: crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS,
         }
     }
 }

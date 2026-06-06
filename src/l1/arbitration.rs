@@ -1,3 +1,4 @@
+use crate::core::types::EMBEDDING_DIM;
 use crate::core::conflict::{ConflictManifest, ConflictType};
 use crate::core::simd::cosine_similarity_768;
 use crate::core::types::AgentId;
@@ -12,7 +13,7 @@ impl L1Arbitrator {
         Self { semantic_threshold }
     }
 
-    pub fn detect_semantic_conflict(&self, embedding_a: &[f32; 768], embedding_b: &[f32; 768]) -> bool {
+    pub fn detect_semantic_conflict(&self, embedding_a: &[f32; EMBEDDING_DIM], embedding_b: &[f32; EMBEDDING_DIM]) -> bool {
         let sim = cosine_similarity_768(embedding_a, embedding_b);
         sim < self.semantic_threshold
     }
@@ -21,8 +22,8 @@ impl L1Arbitrator {
         &self,
         agent_a: AgentId,
         agent_b: AgentId,
-        embedding_a: [f32; 768],
-        embedding_b: [f32; 768],
+        embedding_a: [f32; EMBEDDING_DIM],
+        embedding_b: [f32; EMBEDDING_DIM],
         trace_id: [u8; 16],
     ) -> ConflictManifest {
         let sim = cosine_similarity_768(&embedding_a, &embedding_b);

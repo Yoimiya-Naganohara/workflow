@@ -1,3 +1,4 @@
+use crate::core::types::EMBEDDING_DIM;
 use super::EmbeddingService as EmbeddingServiceTrait;
 use crate::core::simd::cosine_similarity_768;
 use crate::llm::LlmProvider;
@@ -7,7 +8,7 @@ use std::sync::Arc;
 
 pub struct EmbeddingService {
     provider: Arc<LlmProvider>,
-    cache: DashMap<String, [f32; 768]>,
+    cache: DashMap<String, [f32; EMBEDDING_DIM]>,
 }
 
 impl EmbeddingService {
@@ -18,7 +19,7 @@ impl EmbeddingService {
         }
     }
 
-    pub async fn embed(&self, text: &str) -> Result<[f32; 768]> {
+    pub async fn embed(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
         if let Some(cached) = self.cache.get(text) {
             return Ok(*cached);
         }
@@ -30,7 +31,7 @@ impl EmbeddingService {
         Ok(normalized)
     }
 
-    pub async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; 768]>> {
+    pub async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; EMBEDDING_DIM]>> {
         use std::collections::HashMap;
 
         let mut results = vec![[0.0f32; 768]; texts.len()];
@@ -54,7 +55,7 @@ impl EmbeddingService {
         Ok(results)
     }
 
-    pub fn similarity(&self, a: &[f32; 768], b: &[f32; 768]) -> f32 {
+    pub fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
         cosine_similarity_768(a, b)
     }
 
@@ -69,15 +70,15 @@ impl EmbeddingService {
 
 #[async_trait::async_trait]
 impl EmbeddingServiceTrait for EmbeddingService {
-    async fn embed(&self, text: &str) -> Result<[f32; 768]> {
+    async fn embed(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
         self.embed(text).await
     }
 
-    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; 768]>> {
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; EMBEDDING_DIM]>> {
         self.embed_batch(texts).await
     }
 
-    fn similarity(&self, a: &[f32; 768], b: &[f32; 768]) -> f32 {
+    fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
         self.similarity(a, b)
     }
 
@@ -90,7 +91,7 @@ impl EmbeddingServiceTrait for EmbeddingService {
     }
 }
 
-fn normalize_embedding(mut embedding: [f32; 768]) -> [f32; 768] {
+fn normalize_embedding(mut embedding: [f32; EMBEDDING_DIM]) -> [f32; EMBEDDING_DIM] {
     let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 0.0 {
         for value in &mut embedding {

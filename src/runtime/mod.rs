@@ -34,13 +34,13 @@ pub struct AgentRuntimeConfig {
 impl Default for AgentRuntimeConfig {
     fn default() -> Self {
         Self {
-            max_concurrent_agents: 10,
-            admission_timeout_ms: 100,
-            max_depth: 5,
-            initial_budget: 10000,
-            l1_confidence_threshold: 0.7,
-            semantic_conflict_threshold: -0.6,
-            suspend_timeout_ms: 50,
+            max_concurrent_agents: crate::core::types::DEFAULT_MAX_AGENTS,
+            admission_timeout_ms: crate::core::types::DEFAULT_ADMISSION_TIMEOUT_MS,
+            max_depth: crate::core::types::DEFAULT_MAX_DEPTH,
+            initial_budget: crate::core::types::DEFAULT_RUNTIME_BUDGET,
+            l1_confidence_threshold: crate::core::types::DEFAULT_L1_CONFIDENCE,
+            semantic_conflict_threshold: crate::core::types::DEFAULT_SEMANTIC_THRESHOLD,
+            suspend_timeout_ms: crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS,
         }
     }
 }
@@ -700,13 +700,13 @@ mod tests {
 
     #[async_trait::async_trait]
     impl EmbeddingService for MockEmbedding {
-        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; 768]> {
+        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; EMBEDDING_DIM]> {
             let mut emb = [0.0f32; 768];
             emb[0] = 1.0;
             Ok(emb)
         }
 
-        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; 768]>> {
+        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; EMBEDDING_DIM]>> {
             let mut results = Vec::with_capacity(texts.len());
             for _ in texts {
                 let mut emb = [0.0f32; 768];
@@ -716,7 +716,7 @@ mod tests {
             Ok(results)
         }
 
-        fn similarity(&self, a: &[f32; 768], b: &[f32; 768]) -> f32 {
+        fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
             crate::simd::cosine_similarity_768(a, b)
         }
 

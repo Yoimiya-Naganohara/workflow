@@ -1,3 +1,4 @@
+use crate::core::types::EMBEDDING_DIM;
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len());
 
@@ -15,11 +16,11 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if denom == 0.0 { 0.0 } else { dot / denom }
 }
 
-pub fn cosine_similarity_768(a: &[f32; 768], b: &[f32; 768]) -> f32 {
+pub fn cosine_similarity_768(a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
     cosine_similarity(a, b)
 }
 
-pub fn find_top_k(query: &[f32; 768], entries: &[[f32; 768]], k: usize) -> Vec<(usize, f32)> {
+pub fn find_top_k(query: &[f32; EMBEDDING_DIM], entries: &[[f32; EMBEDDING_DIM]], k: usize) -> Vec<(usize, f32)> {
     let mut scores: Vec<(usize, f32)> = entries
         .iter()
         .enumerate()

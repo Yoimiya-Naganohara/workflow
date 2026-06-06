@@ -54,28 +54,40 @@ impl DecisionPipelineBuilder {
     /// Build the pipeline, using defaults for any unset dependencies.
     pub fn build(self) -> DecisionPipeline {
         DecisionPipeline {
-            admission: self
-                .admission
-                .unwrap_or_else(|| Box::new(crate::admission::AdmissionController::new(10, 100))),
+            admission: self.admission.unwrap_or_else(|| {
+                Box::new(crate::admission::AdmissionController::new(
+                    crate::core::types::DEFAULT_MAX_AGENTS,
+                    crate::core::types::DEFAULT_ADMISSION_TIMEOUT_MS,
+                ))
+            }),
             circuit_breaker: self.circuit_breaker.unwrap_or_else(|| {
-                let state = crate::l0::resource::TaskResourceState::new(10000, 10);
+                let state = crate::l0::resource::TaskResourceState::new(
+                    crate::core::types::DEFAULT_RUNTIME_BUDGET,
+                    crate::core::types::DEFAULT_MAX_DEPTH,
+                );
                 Box::new(crate::l0::L0CircuitBreaker::new(state))
             }),
             experience: Mutex::new(
-                self.experience
-                    .unwrap_or_else(|| Box::new(crate::l1::L1Retriever::new(0.5))),
+                self.experience.unwrap_or_else(|| {
+                    Box::new(crate::l1::L1Retriever::new(crate::core::types::DEFAULT_L1_CONFIDENCE))
+                }),
             ),
-            audit_engine: Mutex::new(
-                self.audit_engine
-                    .unwrap_or_else(|| Box::new(crate::l2::L2RuleAuditEngine::new(5))),
-            ),
+            audit_engine: Mutex::new(self.audit_engine.unwrap_or_else(|| {
+                Box::new(crate::l2::L2RuleAuditEngine::new(
+                    crate::core::types::MAX_CONSECUTIVE_FAILURES,
+                ))
+            })),
             embedding: self
                 .embedding
                 .unwrap_or_else(|| panic!("DecisionPipelineBuilder: embedding is required")),
-            suspend: Mutex::new(
-                self.suspend
-                    .unwrap_or_else(|| Box::new(crate::agent::suspend::SuspendQueue::new(Default::default()))),
-            ),
+            suspend: Mutex::new(self.suspend.unwrap_or_else(|| {
+                Box::new(crate::agent::suspend::SuspendQueue::new(
+                    crate::agent::suspend::SuspendConfig {
+                        hard_timeout_ms: crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS,
+                        dynamic_timeout_ms: crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS,
+                    },
+                ))
+            })),
             plans: Arc::new(RwLock::new(
                 self.plans
                     .unwrap_or_else(|| Box::new(crate::agent::plan::PlanRegistry::new())),

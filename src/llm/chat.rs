@@ -17,8 +17,8 @@ macro_rules! build_chat_agent {
         $client
             .agent($model)
             .preamble($system)
-            .temperature(0.7)
-            .max_tokens(4000)
+            .temperature(crate::core::types::DEFAULT_TEMPERATURE)
+            .max_tokens(crate::core::types::DEFAULT_MAX_TOKENS)
             .build()
     };
 }

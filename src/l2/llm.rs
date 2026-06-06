@@ -16,9 +16,9 @@ impl Default for L2LlmConfig {
     fn default() -> Self {
         Self {
             model_id: String::new(),
-            temperature: 0.3,
-            max_tokens: 500,
-            max_consecutive_failures: 5,
+            temperature: crate::core::types::L2_JUDGE_TEMPERATURE,
+            max_tokens: crate::core::types::L2_JUDGE_MAX_TOKENS,
+            max_consecutive_failures: crate::core::types::MAX_CONSECUTIVE_FAILURES,
         }
     }
 }

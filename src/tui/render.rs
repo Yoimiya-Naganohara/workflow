@@ -43,7 +43,10 @@ impl Tui {
         self.terminal.draw(|f| {
             let main_chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(28), Constraint::Min(0)])
+                .constraints([
+                    Constraint::Length(crate::core::types::SIDEBAR_WIDTH),
+                    Constraint::Min(0),
+                ])
                 .split(f.area());
 
             render_sidebar(f, main_chunks[0], &state);
