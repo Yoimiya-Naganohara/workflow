@@ -66,18 +66,57 @@ impl Tui {
         Ok(())
     }
 
-    fn render_chat(f: &mut Frame, area: Rect, _state: &AppState, visible_lines: &[ratatui::text::Line<'static>]) {
+    fn render_chat(f: &mut Frame, area: Rect, state: &AppState, visible_lines: &[ratatui::text::Line<'static>]) {
+        let chunks = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                ratatui::layout::Constraint::Min(0),
+                ratatui::layout::Constraint::Length(3),
+            ])
+            .split(area);
+
+        // Chat message area
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Chat ")
             .style(Style::default().fg(Color::Blue));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-
+        let inner = block.inner(chunks[0]);
+        f.render_widget(block, chunks[0]);
         f.render_widget(
             ratatui::widgets::Paragraph::new(ratatui::text::Text::from(visible_lines.to_vec())),
             inner,
         );
+
+        // Input box
+        let input_style = if state.focus == crate::tui::state::Focus::Input {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        };
+        let input_text = if state.input.is_empty() {
+            "Type a message or /command..."
+        } else {
+            state.input.as_str()
+        };
+        let input_display_style = if state.input.is_empty() {
+            input_style.fg(Color::DarkGray)
+        } else {
+            input_style
+        };
+        f.render_widget(
+            ratatui::widgets::Paragraph::new(input_text)
+                .style(input_display_style)
+                .block(Block::default().borders(Borders::ALL)),
+            chunks[1],
+        );
+
+        // Cursor
+        if state.focus == crate::tui::state::Focus::Input {
+            let prefix_width = crate::tui::chat_lines::display_width_up_to(&state.input, state.input_cursor);
+            let cursor_x = chunks[1].x + prefix_width as u16 + 1;
+            let cursor_y = chunks[1].y + 1;
+            f.set_cursor_position((cursor_x.min(chunks[1].right().saturating_sub(1)), cursor_y));
+        }
     }
 
     fn render_status_bar(f: &mut Frame, area: Rect, state: &AppState) {

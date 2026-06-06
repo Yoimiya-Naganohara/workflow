@@ -691,15 +691,41 @@ fn parse_role_assignments(response: &str) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::embedding::EmbeddingService as EmbeddingServiceImpl;
-    use crate::llm::LlmProvider;
     use std::sync::Arc;
 
+    /// Mock embedding service that returns a fixed vector without API calls.
+    struct MockEmbedding;
+
+    #[async_trait::async_trait]
+    impl EmbeddingService for MockEmbedding {
+        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; 768]> {
+            let mut emb = [0.0f32; 768];
+            emb[0] = 1.0;
+            Ok(emb)
+        }
+
+        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; 768]>> {
+            let mut results = Vec::with_capacity(texts.len());
+            for _ in texts {
+                let mut emb = [0.0f32; 768];
+                emb[0] = 1.0;
+                results.push(emb);
+            }
+            Ok(results)
+        }
+
+        fn similarity(&self, a: &[f32; 768], b: &[f32; 768]) -> f32 {
+            crate::simd::cosine_similarity_768(a, b)
+        }
+
+        fn cache_size(&self) -> usize {
+            0
+        }
+        fn clear_cache(&self) {}
+    }
+
     fn dummy_embedding() -> Arc<dyn EmbeddingService> {
-        let provider = Arc::new(LlmProvider::OpenAi(
-            rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
-        ));
-        Arc::new(EmbeddingServiceImpl::new(provider))
+        Arc::new(MockEmbedding)
     }
 
     #[tokio::test]
