@@ -179,7 +179,7 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
         .iter()
         .map(|(p, m)| {
             let needs_key = !state.configured_providers.iter().any(|id| id == &p.id)
-                && !crate::controller::is_no_auth_provider(&p.id);
+                && !crate::tui::controller::is_no_auth_provider(&p.id);
             ListItem::new(Line::from(vec![
                 Span::styled(&p.name, Style::default().fg(Color::DarkGray)),
                 Span::raw(" / "),

@@ -1,15 +1,19 @@
+pub mod resource;
+
+pub use resource::*;
+
+// Re-export l0.rs content (moved from src/l0.rs)
+use crate::core::types::SpawnRejection;
+use crate::core::types::*;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::resource::TaskResourceState;
-use crate::types::{SpawnRejection, TaskId};
-
 pub struct L0CircuitBreaker {
-    resource_state: Arc<TaskResourceState>,
+    resource_state: Arc<resource::TaskResourceState>,
 }
 
 impl L0CircuitBreaker {
-    pub fn new(resource_state: Arc<TaskResourceState>) -> Self {
+    pub fn new(resource_state: Arc<resource::TaskResourceState>) -> Self {
         Self { resource_state }
     }
 
@@ -47,7 +51,6 @@ impl L0CircuitBreaker {
         }
 
         if self.resource_state.increment_depth().is_err() {
-            // Depth exceeded: revert budget and tool deductions
             self.resource_state.release_budget(allocated);
             if requested_tools != 0 {
                 self.resource_state.release_tools(requested_tools);
@@ -80,7 +83,7 @@ impl L0CircuitBreaker {
 pub struct L0Permit {
     budget_amount: u64,
     requested_tools: u64,
-    resource_state: Arc<TaskResourceState>,
+    resource_state: Arc<resource::TaskResourceState>,
 }
 
 impl L0Permit {
@@ -88,15 +91,13 @@ impl L0Permit {
         self.budget_amount
     }
 
-    pub fn into_budget_guard(self, task_id: TaskId) -> Option<crate::resource::BudgetGuard> {
-        // Resources already acquired by try_acquire, so this should not fail
-        let guard = crate::resource::BudgetGuard::new(
+    pub fn into_budget_guard(self, task_id: TaskId) -> Option<resource::BudgetGuard> {
+        resource::BudgetGuard::new(
             task_id,
             self.budget_amount,
             self.resource_state.clone(),
             self.requested_tools,
-        )?;
-        Some(guard)
+        )
     }
 }
 
@@ -110,77 +111,7 @@ impl Drop for L0Permit {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_l0_basic_acquire() {
-        let state = TaskResourceState::new(1000, 10);
-        let breaker = L0CircuitBreaker::new(state);
-        let permit = breaker.try_acquire(500, 0, 0);
-        assert!(permit.is_ok());
-    }
-
-    #[test]
-    fn test_l0_depth_exceeded() {
-        let state = TaskResourceState::new(1000, 2);
-        let breaker = L0CircuitBreaker::new(state);
-        assert!(matches!(
-            breaker.try_acquire(100, 2, 0),
-            Err(SpawnRejection::DepthExceeded { .. })
-        ));
-    }
-
-    #[test]
-    fn test_l0_budget_exhausted() {
-        let state = TaskResourceState::new(100, 10);
-        let breaker = L0CircuitBreaker::new(state);
-        assert!(matches!(
-            breaker.try_acquire(200, 0, 0),
-            Err(SpawnRejection::BudgetExhausted { .. })
-        ));
-    }
-
-    #[test]
-    fn test_l0_tool_conflict() {
-        let state = TaskResourceState::new(1000, 10);
-        let breaker = L0CircuitBreaker::new(state);
-        let _permit = breaker.try_acquire(100, 0, 0b101).unwrap();
-        assert!(matches!(
-            breaker.try_acquire(100, 0, 0b100),
-            Err(SpawnRejection::ResourceConflict { .. })
-        ));
-    }
-
-    #[test]
-    fn test_l0_permit_drop_rollback() {
-        let state = TaskResourceState::new(1000, 10);
-        let breaker = L0CircuitBreaker::new(state.clone());
-        {
-            let _permit = breaker.try_acquire(500, 0, 0b1).unwrap();
-            assert_eq!(state.remaining_budget.load(Ordering::Relaxed), 500);
-            assert_eq!(state.tool_bitmap.load(Ordering::Relaxed), 0b1);
-            assert_eq!(state.current_depth.load(Ordering::Relaxed), 1);
-        }
-        assert_eq!(state.remaining_budget.load(Ordering::Relaxed), 1000);
-        assert_eq!(state.tool_bitmap.load(Ordering::Relaxed), 0);
-        assert_eq!(state.current_depth.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
-    fn test_priority_formula() {
-        let p1 = L0CircuitBreaker::calculate_priority(1000, 500, 1);
-        let p2 = L0CircuitBreaker::calculate_priority(100, 500, 1);
-        assert!(p1 > p2);
-
-        let p3 = L0CircuitBreaker::calculate_priority(500, 500, 1);
-        let p4 = L0CircuitBreaker::calculate_priority(500, 500, 5);
-        assert!(p3 > p4);
-    }
-}
-
-impl crate::traits::CircuitBreaker for L0CircuitBreaker {
+impl crate::core::traits::CircuitBreaker for L0CircuitBreaker {
     fn try_acquire(
         &self,
         requested_budget: u64,
@@ -198,5 +129,74 @@ impl crate::traits::CircuitBreaker for L0CircuitBreaker {
         self.resource_state
             .remaining_budget
             .load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_l0_basic_acquire() {
+        let state = resource::TaskResourceState::new(1000, 10);
+        let breaker = L0CircuitBreaker::new(state);
+        let permit = breaker.try_acquire(500, 0, 0);
+        assert!(permit.is_ok());
+    }
+
+    #[test]
+    fn test_l0_depth_exceeded() {
+        let state = resource::TaskResourceState::new(1000, 2);
+        let breaker = L0CircuitBreaker::new(state);
+        assert!(matches!(
+            breaker.try_acquire(100, 2, 0),
+            Err(SpawnRejection::DepthExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn test_l0_budget_exhausted() {
+        let state = resource::TaskResourceState::new(100, 10);
+        let breaker = L0CircuitBreaker::new(state);
+        assert!(matches!(
+            breaker.try_acquire(200, 0, 0),
+            Err(SpawnRejection::BudgetExhausted { .. })
+        ));
+    }
+
+    #[test]
+    fn test_l0_tool_conflict() {
+        let state = resource::TaskResourceState::new(1000, 10);
+        let breaker = L0CircuitBreaker::new(state);
+        let _permit = breaker.try_acquire(100, 0, 0b101).unwrap();
+        assert!(matches!(
+            breaker.try_acquire(100, 0, 0b100),
+            Err(SpawnRejection::ResourceConflict { .. })
+        ));
+    }
+
+    #[test]
+    fn test_l0_permit_drop_rollback() {
+        let state = resource::TaskResourceState::new(1000, 10);
+        let breaker = L0CircuitBreaker::new(state.clone());
+        {
+            let _permit = breaker.try_acquire(500, 0, 0b1).unwrap();
+            assert_eq!(state.remaining_budget.load(Ordering::Relaxed), 500);
+            assert_eq!(state.tool_bitmap.load(Ordering::Relaxed), 0b1);
+            assert_eq!(state.current_depth.load(Ordering::Relaxed), 1);
+        }
+        assert_eq!(state.remaining_budget.load(Ordering::Relaxed), 1000);
+        assert_eq!(state.tool_bitmap.load(Ordering::Relaxed), 0);
+        assert_eq!(state.current_depth.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_priority_formula() {
+        let p1 = L0CircuitBreaker::calculate_priority(1000, 500, 1);
+        let p2 = L0CircuitBreaker::calculate_priority(100, 500, 1);
+        assert!(p1 > p2);
+        let p3 = L0CircuitBreaker::calculate_priority(500, 500, 1);
+        let p4 = L0CircuitBreaker::calculate_priority(500, 500, 5);
+        assert!(p3 > p4);
     }
 }

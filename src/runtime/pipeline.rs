@@ -12,10 +12,10 @@ use tokio::sync::RwLock;
 use crate::admission::AdmissionPermit;
 use crate::l0::L0Permit;
 use crate::l1::L1Assessment;
-use crate::traits::{
+use crate::core::traits::{
     AdmissionControl, AuditEngine, CircuitBreaker, EmbeddingService, ExperienceRetrieval, PlanRegistry, SuspendQueue,
 };
-use crate::types::*;
+use crate::core::types::*;
 
 // ============================================================================
 //  Builder
@@ -54,7 +54,7 @@ impl DecisionPipelineBuilder {
                 .admission
                 .unwrap_or_else(|| Box::new(crate::admission::AdmissionController::new(10, 100))),
             circuit_breaker: self.circuit_breaker.unwrap_or_else(|| {
-                let state = crate::resource::TaskResourceState::new(10000, 10);
+                let state = crate::l0::resource::TaskResourceState::new(10000, 10);
                 Box::new(crate::l0::L0CircuitBreaker::new(state))
             }),
             experience: Mutex::new(
@@ -70,10 +70,10 @@ impl DecisionPipelineBuilder {
                 .unwrap_or_else(|| panic!("DecisionPipelineBuilder: embedding is required")),
             suspend: Mutex::new(
                 self.suspend
-                    .unwrap_or_else(|| Box::new(crate::suspend::SuspendQueue::new(Default::default()))),
+                    .unwrap_or_else(|| Box::new(crate::agent::suspend::SuspendQueue::new(Default::default()))),
             ),
             plans: Arc::new(RwLock::new(
-                self.plans.unwrap_or_else(|| Box::new(crate::plan::PlanRegistry::new())),
+                self.plans.unwrap_or_else(|| Box::new(crate::agent::plan::PlanRegistry::new())),
             )),
         }
     }
@@ -205,7 +205,7 @@ pub(crate) use builder_method;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::embedding::EmbeddingService as EmbeddingServiceImpl;
+    use crate::llm::embedding::EmbeddingService as EmbeddingServiceImpl;
     use crate::llm::LlmProvider;
     use std::sync::Arc;
 
@@ -244,7 +244,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pipeline_rejects_budget_exhausted() {
-        let state = crate::resource::TaskResourceState::new(50, 10);
+        let state = crate::l0::resource::TaskResourceState::new(50, 10);
         let breaker = Box::new(crate::l0::L0CircuitBreaker::new(state));
 
         let pipeline = DecisionPipelineBuilder::new()

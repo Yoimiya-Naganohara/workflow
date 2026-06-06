@@ -3,14 +3,14 @@
 //! This file only handles input events and mutates UI-level state
 //! (cursor position, dialog visibility, scroll, selection).
 //! All business logic (provider config, chat, persistence, shell)
-//! is delegated to [`crate::controller`].
+//! is delegated to [`crate::tui::controller`].
 
 use crossterm::event::KeyCode;
 use futures::future::AbortHandle;
 
 use super::Tui;
 use super::state::{AppMode, AppState, COMMANDS, ChatMessage, Focus, MessageRole, MessageStatus, Panel, SelectedModel};
-use crate::controller;
+use crate::tui::controller;
 use crate::models::filter_providers;
 
 impl Tui {
@@ -556,7 +556,7 @@ impl Tui {
 
         if trimmed == "/apply" {
             if let Some(plan) = &mut state.current_plan {
-                if plan.status == crate::plan::PlanStatus::Draft {
+                if plan.status == crate::agent::plan::PlanStatus::Draft {
                     plan.approve();
                     state.mode = AppMode::Build;
                     state.messages.push(ChatMessage {
@@ -565,8 +565,8 @@ impl Tui {
                         timestamp: now.clone(),
                         status: MessageStatus::Completed,
                     });
-                } else if plan.status == crate::plan::PlanStatus::Approved {
-                    plan.status = crate::plan::PlanStatus::Executing;
+                } else if plan.status == crate::agent::plan::PlanStatus::Approved {
+                    plan.status = crate::agent::plan::PlanStatus::Executing;
                     let plan_summary = plan.summary();
                     state.messages.push(ChatMessage {
                         role: MessageRole::System,

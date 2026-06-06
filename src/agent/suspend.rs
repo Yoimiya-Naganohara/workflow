@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
-use crate::types::SpawnRequest;
+use crate::core::types::SpawnRequest;
 
 pub struct SuspendConfig {
     pub hard_timeout_ms: u64,
@@ -102,7 +102,7 @@ impl SuspendQueue {
     }
 }
 
-impl crate::traits::SuspendQueue for SuspendQueue {
+impl crate::core::traits::SuspendQueue for SuspendQueue {
     fn enqueue(&mut self, request: SpawnRequest, priority: f32) {
         self.enqueue(request, priority)
     }

@@ -9,11 +9,11 @@
 //! structs to avoid unnecessary indirection.
 
 use crate::admission::AdmissionPermit;
-use crate::conflict::{ConflictManifest, L2AuditResult};
+use crate::core::conflict::{ConflictManifest, L2AuditResult};
 use crate::l0::L0Permit;
 use crate::l1::L1Assessment;
-use crate::plan::PlanEntity;
-use crate::types::*;
+use crate::agent::plan::PlanEntity;
+use crate::core::types::*;
 use anyhow::Result;
 use async_trait::async_trait;
 
@@ -96,7 +96,7 @@ pub trait ExperienceRetrieval: Send + Sync {
 /// Receives escalated conflicts from L1 and produces a final
 /// arbitration decision. The two canonical implementations are
 /// [`L2RuleAuditEngine`](crate::l2::L2RuleAuditEngine) and
-/// [`L2LlmAuditEngine`](crate::l2_llm::L2LlmAuditEngine).
+/// [`L2LlmAuditEngine`](crate::l2::llm::L2LlmAuditEngine).
 #[async_trait]
 pub trait AuditEngine: Send + Sync {
     /// Audit a conflict manifest and return a result.
@@ -127,7 +127,7 @@ pub trait EmbeddingService: Send + Sync {
 /// Priority-ordered queue for deferred spawn requests.
 pub trait SuspendQueue: Send + Sync {
     fn enqueue(&mut self, request: SpawnRequest, priority: f32);
-    fn dequeue(&mut self) -> Option<crate::suspend::SuspendedRequest>;
+    fn dequeue(&mut self) -> Option<crate::agent::suspend::SuspendedRequest>;
     fn prune_expired(&mut self) -> Vec<SpawnRequest>;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;

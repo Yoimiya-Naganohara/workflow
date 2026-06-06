@@ -289,7 +289,7 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
                     };
                     message.status = MessageStatus::Completed;
                 }
-                if let Some(mut plan) = crate::plan::Plan::parse_from_response(&response) {
+                if let Some(mut plan) = crate::agent::plan::Plan::parse_from_response(&response) {
                     plan.goal = input_clone.clone();
                     s.current_plan = Some(plan);
                     s.messages.push(ChatMessage {
@@ -343,7 +343,7 @@ pub fn execute_plan(state: &Arc<RwLock<AppState>>) {
                 .map(|p| {
                     p.tasks
                         .iter()
-                        .filter(|t| t.status == crate::plan::TaskStatus::Pending)
+                        .filter(|t| t.status == crate::agent::plan::TaskStatus::Pending)
                         .map(|t| (t.id, t.description.clone()))
                         .collect()
                 })
@@ -411,7 +411,7 @@ pub fn execute_plan(state: &Arc<RwLock<AppState>>) {
 
         let mut s = state_clone.write().await;
         if let Some(p) = &s.current_plan
-            && p.status == crate::plan::PlanStatus::Completed
+            && p.status == crate::agent::plan::PlanStatus::Completed
         {
             s.messages.push(ChatMessage {
                 role: MessageRole::System,

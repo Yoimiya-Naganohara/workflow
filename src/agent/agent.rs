@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
-use crate::types::AgentId;
+use crate::core::types::AgentId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {

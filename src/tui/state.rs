@@ -55,7 +55,7 @@ pub struct AppState {
     pub model_picker_search_cursor: usize,
     pub return_to_model_picker: bool,
     pub selected_models: Vec<SelectedModel>,
-    pub current_plan: Option<crate::plan::Plan>,
+    pub current_plan: Option<crate::agent::plan::Plan>,
     pub agent_pool: Arc<RwLock<crate::agent::AgentPool>>,
     pub provider_clients: HashMap<String, Arc<crate::llm::LlmProvider>>,
     pub active_chat_request_id: u64,

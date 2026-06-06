@@ -3,11 +3,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use workflow::embedding::EmbeddingService;
+use workflow::core::types::*;
 use workflow::llm::LlmProvider;
+use workflow::llm::embedding::EmbeddingService;
 use workflow::runtime::{AgentRuntime, AgentRuntimeConfig};
 use workflow::tui::{AppState, Tui};
-use workflow::types::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -35,7 +35,7 @@ async fn run_tui() -> Result<()> {
 
     let provider = select_provider()?;
     let svc = EmbeddingService::new(provider.clone());
-    let embedding_service: Arc<dyn workflow::traits::EmbeddingService> = Arc::new(svc);
+    let embedding_service: Arc<dyn workflow::core::traits::EmbeddingService> = Arc::new(svc);
     let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
     let runtime = Arc::new(RwLock::new(runtime));
 
@@ -56,7 +56,7 @@ async fn run_tui() -> Result<()> {
 async fn run_cli() -> Result<()> {
     let provider = select_provider()?;
     let svc = EmbeddingService::new(provider);
-    let embedding_service: Arc<dyn workflow::traits::EmbeddingService> = Arc::new(svc);
+    let embedding_service: Arc<dyn workflow::core::traits::EmbeddingService> = Arc::new(svc);
     let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
 
     info!("Holographic Self-Evolving Multi-Agent System v0.1.0");

@@ -1,6 +1,6 @@
-use crate::conflict::{ConflictManifest, ConflictType};
-use crate::simd::cosine_similarity_768;
-use crate::types::AgentId;
+use crate::core::conflict::{ConflictManifest, ConflictType};
+use crate::core::simd::cosine_similarity_768;
+use crate::core::types::AgentId;
 use smallvec::SmallVec;
 
 pub struct L1Arbitrator {

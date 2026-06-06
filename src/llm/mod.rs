@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod embed;
+pub mod embedding;
 pub mod factory;
 pub mod types;
 

@@ -1,15 +1,17 @@
+pub mod pipeline;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::RwLock;
 
+use crate::agent::plan::{PlanEntity, PlanRegistry as PlanRegistryConcrete, PlanStatus, Task, TaskStatus};
 use crate::agent::{Agent, AgentPool, AgentStatus};
+use crate::core::traits::EmbeddingService;
+use crate::core::types::*;
 use crate::llm::LlmProvider;
-use crate::pipeline::{DecisionPipeline, DecisionPipelineBuilder};
-use crate::plan::{PlanEntity, PlanRegistry as PlanRegistryConcrete, PlanStatus, Task, TaskStatus};
-use crate::traits::EmbeddingService;
-use crate::types::*;
+use crate::runtime::pipeline::{DecisionPipeline, DecisionPipelineBuilder};
 
 // ============================================================================
 //  Runtime Configuration
@@ -70,7 +72,7 @@ pub struct RoleTemplate {
 /// [`AgentRuntime::from_pipeline`]:
 ///
 /// ```ignore
-/// use workflow::pipeline::DecisionPipelineBuilder;
+/// use workflow::runtime::pipeline::DecisionPipelineBuilder;
 /// use workflow::runtime::AgentRuntime;
 ///
 /// let pipeline = DecisionPipelineBuilder::new()
@@ -98,11 +100,11 @@ impl AgentRuntime {
     /// implementation tuned by `config`.
     pub fn new(config: AgentRuntimeConfig, embedding_service: Arc<dyn EmbeddingService>) -> Self {
         use crate::admission::AdmissionController;
+        use crate::agent::suspend::{SuspendConfig, SuspendQueue as SuspendQueueConcrete};
         use crate::l0::L0CircuitBreaker;
+        use crate::l0::resource::TaskResourceState;
         use crate::l1::L1Retriever;
         use crate::l2::L2RuleAuditEngine;
-        use crate::resource::TaskResourceState;
-        use crate::suspend::{SuspendConfig, SuspendQueue as SuspendQueueConcrete};
 
         let state = TaskResourceState::new(config.initial_budget, config.max_depth);
 

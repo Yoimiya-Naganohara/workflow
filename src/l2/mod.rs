@@ -1,5 +1,7 @@
-use crate::conflict::{ArbitrationResult, ConflictManifest};
-use crate::types::AgentId;
+pub mod llm;
+
+use crate::core::conflict::{ArbitrationResult, ConflictManifest};
+use crate::core::types::AgentId;
 
 pub struct L2RuleAuditEngine {
     max_consecutive_failures: u32,
@@ -67,13 +69,13 @@ impl L2RuleAuditEngine {
         }
     }
 
-    fn generate_override_patch(&self, manifest: &ConflictManifest) -> crate::conflict::OverridePatch {
+    fn generate_override_patch(&self, manifest: &ConflictManifest) -> crate::core::conflict::OverridePatch {
         let mut embedding = [0.0f32; 768];
         if !manifest.context_embeddings.is_empty() {
             embedding.copy_from_slice(&manifest.context_embeddings[0]);
         }
 
-        crate::conflict::OverridePatch {
+        crate::core::conflict::OverridePatch {
             embedding,
             weight: 2.0,
             decay_days: 90,
@@ -86,10 +88,13 @@ impl L2RuleAuditEngine {
 }
 
 #[async_trait::async_trait]
-impl crate::traits::AuditEngine for L2RuleAuditEngine {
-    async fn audit(&mut self, manifest: &crate::conflict::ConflictManifest) -> crate::conflict::L2AuditResult {
+impl crate::core::traits::AuditEngine for L2RuleAuditEngine {
+    async fn audit(
+        &mut self,
+        manifest: &crate::core::conflict::ConflictManifest,
+    ) -> crate::core::conflict::L2AuditResult {
         let result = self.audit(manifest);
-        crate::conflict::L2AuditResult {
+        crate::core::conflict::L2AuditResult {
             decision: result.decision,
             risk_statement: result.risk_statement,
             lesson_learned: result.lesson_learned,
@@ -112,7 +117,7 @@ pub struct L2RuleAuditResult {
     pub decision: ArbitrationResult,
     pub risk_statement: String,
     pub lesson_learned: String,
-    pub l1_override_vector_patch: Option<crate::conflict::OverridePatch>,
+    pub l1_override_vector_patch: Option<crate::core::conflict::OverridePatch>,
 }
 
 #[cfg(test)]
@@ -123,7 +128,7 @@ mod tests {
     fn make_manifest(agents: Vec<AgentId>, priorities: Vec<f32>) -> ConflictManifest {
         ConflictManifest {
             conflict_id: [0u8; 16],
-            conflict_type: crate::conflict::ConflictType::ActionContradiction,
+            conflict_type: crate::core::conflict::ConflictType::ActionContradiction,
             contending_agents: SmallVec::from_vec(agents),
             trace_id: [0u8; 16],
             context_embeddings: SmallVec::from_vec(vec![[0.0f32; 768]; 2]),

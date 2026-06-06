@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::agent::{Agent, AgentConfig, AgentPool, AgentStatus};
-use crate::types::AgentId;
+use crate::core::types::AgentId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plan {
@@ -78,7 +78,7 @@ impl PlanRegistry {
     }
 }
 
-impl crate::traits::PlanRegistry for PlanRegistry {
+impl crate::core::traits::PlanRegistry for PlanRegistry {
     fn insert(&mut self, entity: PlanEntity) {
         self.insert(entity)
     }

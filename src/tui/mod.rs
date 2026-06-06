@@ -1,4 +1,5 @@
 pub mod chat_lines;
+pub mod controller;
 pub mod dialogs;
 pub mod handler;
 pub mod keymap;
@@ -54,7 +55,7 @@ impl Tui {
     pub async fn run(&mut self) -> Result<()> {
         {
             let mut state = self.state.write().await;
-            crate::controller::load_initial_state(&mut state).await;
+            crate::tui::controller::load_initial_state(&mut state).await;
         }
 
         let mut last_tick = Instant::now();

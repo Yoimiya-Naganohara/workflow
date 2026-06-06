@@ -1,4 +1,4 @@
-use crate::conflict::{ArbitrationResult, ConflictManifest, ConflictType};
+use crate::core::conflict::{ArbitrationResult, ConflictManifest, ConflictType};
 use crate::llm::LlmProvider;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -182,13 +182,13 @@ Please respond with JSON:
         }
     }
 
-    fn generate_override_patch(&self, manifest: &ConflictManifest) -> crate::conflict::OverridePatch {
+    fn generate_override_patch(&self, manifest: &ConflictManifest) -> crate::core::conflict::OverridePatch {
         let mut embedding = [0.0f32; 768];
         if !manifest.context_embeddings.is_empty() {
             embedding.copy_from_slice(&manifest.context_embeddings[0]);
         }
 
-        crate::conflict::OverridePatch {
+        crate::core::conflict::OverridePatch {
             embedding,
             weight: 2.0,
             decay_days: 90,
@@ -201,22 +201,22 @@ Please respond with JSON:
 }
 
 #[async_trait::async_trait]
-impl crate::traits::AuditEngine for L2LlmAuditEngine {
-    async fn audit(&mut self, manifest: &crate::conflict::ConflictManifest) -> crate::conflict::L2AuditResult {
+impl crate::core::traits::AuditEngine for L2LlmAuditEngine {
+    async fn audit(&mut self, manifest: &crate::core::conflict::ConflictManifest) -> crate::core::conflict::L2AuditResult {
         match self.audit(manifest).await {
-            Ok(result) => crate::conflict::L2AuditResult {
+            Ok(result) => crate::core::conflict::L2AuditResult {
                 decision: result.decision,
                 risk_statement: result.risk_statement,
                 lesson_learned: result.lesson_learned,
-                override_patch: result.l1_override_vector_patch.map(|p| crate::conflict::OverridePatch {
+                override_patch: result.l1_override_vector_patch.map(|p| crate::core::conflict::OverridePatch {
                     embedding: p.embedding,
                     weight: p.weight,
                     decay_days: p.decay_days,
                 }),
                 tokens_used: result.tokens_used,
             },
-            Err(e) => crate::conflict::L2AuditResult {
-                decision: crate::conflict::ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
+            Err(e) => crate::core::conflict::L2AuditResult {
+                decision: crate::core::conflict::ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
                 risk_statement: format!("LLM audit error: {}", e),
                 lesson_learned: "LLM audit failed, pruning for safety".to_string(),
                 override_patch: None,
@@ -234,14 +234,14 @@ pub struct L2LlmAuditResult {
     pub decision: ArbitrationResult,
     pub risk_statement: String,
     pub lesson_learned: String,
-    pub l1_override_vector_patch: Option<crate::conflict::OverridePatch>,
+    pub l1_override_vector_patch: Option<crate::core::conflict::OverridePatch>,
     pub tokens_used: u32,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::AgentId;
+    use crate::core::types::AgentId;
     use smallvec::SmallVec;
 
     fn make_manifest(agents: Vec<AgentId>, priorities: Vec<f32>) -> ConflictManifest {

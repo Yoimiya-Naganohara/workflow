@@ -1,7 +1,9 @@
+pub mod arbitration;
 pub mod classifier;
 
-use crate::simd::cosine_similarity_768;
-use crate::types::{ExperienceEntry, SpawnRejection};
+use crate::core::simd::cosine_similarity_768;
+use crate::core::types::{ExperienceEntry, SpawnRejection};
+pub use arbitration::L1ArbitrationResult;
 pub use classifier::{L1ValueClassifier, ValueAssessment};
 
 pub struct L1Retriever {
@@ -163,7 +165,7 @@ mod tests {
     }
 }
 
-impl crate::traits::ExperienceRetrieval for L1Retriever {
+impl crate::core::traits::ExperienceRetrieval for L1Retriever {
     fn retrieve(&self, query: &[f32; 768], k: usize) -> Vec<(ExperienceEntry, f32)> {
         self.retrieve(query, k)
             .into_iter()

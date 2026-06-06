@@ -1,4 +1,4 @@
-use crate::types::{AgentId, ChildAgentConfig, TraceId};
+use crate::core::types::{AgentId, ChildAgentConfig, TraceId};
 use smallvec::SmallVec;
 
 /// Unified result returned by any L2 audit engine (rule or LLM).

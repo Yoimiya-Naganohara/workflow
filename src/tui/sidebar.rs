@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use super::state::{AppMode, AppState};
-use crate::plan::PlanStatus;
+use crate::agent::plan::PlanStatus;
 
 pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
@@ -121,22 +121,22 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
         let completed = plan
             .tasks
             .iter()
-            .filter(|t| t.status == crate::plan::TaskStatus::Completed)
+            .filter(|t| t.status == crate::agent::plan::TaskStatus::Completed)
             .count();
         let running = plan
             .tasks
             .iter()
-            .filter(|t| t.status == crate::plan::TaskStatus::Running)
+            .filter(|t| t.status == crate::agent::plan::TaskStatus::Running)
             .count();
         let pending = plan
             .tasks
             .iter()
-            .filter(|t| t.status == crate::plan::TaskStatus::Pending)
+            .filter(|t| t.status == crate::agent::plan::TaskStatus::Pending)
             .count();
         let failed = plan
             .tasks
             .iter()
-            .filter(|t| t.status == crate::plan::TaskStatus::Failed)
+            .filter(|t| t.status == crate::agent::plan::TaskStatus::Failed)
             .count();
 
         let plan_color = if failed > 0 {

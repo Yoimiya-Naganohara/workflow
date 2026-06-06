@@ -3,7 +3,7 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
 
-use crate::types::SpawnRejection;
+use crate::core::types::SpawnRejection;
 
 pub struct AdmissionController {
     semaphore: Arc<Semaphore>,
@@ -38,7 +38,7 @@ impl AdmissionController {
 }
 
 #[async_trait::async_trait]
-impl crate::traits::AdmissionControl for AdmissionController {
+impl crate::core::traits::AdmissionControl for AdmissionController {
     async fn acquire(&self) -> Result<AdmissionPermit, SpawnRejection> {
         self.acquire_owned().await
     }
