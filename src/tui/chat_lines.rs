@@ -3,7 +3,6 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::keymap::Action;
 use super::state::{AppState, MessageRole, MessageStatus};
 
 /// Build styled chat lines from the message list.
@@ -148,34 +147,4 @@ pub(crate) fn display_width_up_to(s: &str, char_idx: usize) -> usize {
         .take(char_idx)
         .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
         .sum()
-}
-
-pub(crate) fn format_action(action: &Action) -> String {
-    match action {
-        Action::Quit => "Quit the application",
-        Action::CancelResponse => "Cancel current response",
-        Action::ToggleStatusPanel => "Show/hide status panel",
-        Action::MoveUp => "Move up / Previous item",
-        Action::MoveDown => "Move down / Next item",
-        Action::MoveLeft => "Move cursor left",
-        Action::MoveRight => "Move cursor right",
-        Action::ScrollUp => "Scroll chat up",
-        Action::ScrollDown => "Scroll chat down",
-        Action::ScrollToTop => "Scroll to top",
-        Action::ScrollToBottom => "Scroll to bottom",
-        Action::Confirm => "Confirm selection",
-        Action::Cancel => "Cancel / Close dialog",
-        Action::OpenModelPicker => "Open model picker",
-        Action::OpenProviderDialog => "Open provider dialog",
-        Action::SwitchPanel => "Switch panel",
-        Action::SendMessage => "Send message",
-        Action::TypeChar(_) => "Type character",
-        Action::DeleteChar => "Delete character",
-        Action::HistoryPrev => "Previous input history",
-        Action::HistoryNext => "Next input history",
-        Action::CommandPrev => "Previous command",
-        Action::CommandNext => "Next command",
-        Action::None => "",
-    }
-    .to_string()
 }

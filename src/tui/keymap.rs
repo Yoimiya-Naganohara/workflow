@@ -43,9 +43,7 @@ pub struct Keymap {
 
 impl Keymap {
     pub fn new() -> Self {
-        Self {
-            global: Vec::new(),
-        }
+        Self { global: Vec::new() }
     }
 
     pub fn bind(&mut self, key: KeyEvent, action: Action) {
@@ -83,22 +81,25 @@ impl Default for Keymap {
         let mut km = Self::new();
 
         // Global
-        km.bind(
-            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-            Action::Quit,
-        );
+        km.bind(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), Action::Quit);
         km.bind(
             KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
             Action::CancelResponse,
         );
-        km.bind(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), Action::ToggleStatusPanel);
+        km.bind(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            Action::ToggleStatusPanel,
+        );
 
         // Navigation
         km.bind(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), Action::MoveUp);
         km.bind(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), Action::MoveDown);
         km.bind(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), Action::MoveLeft);
         km.bind(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), Action::MoveRight);
-        km.bind(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE), Action::ScrollToTop);
+        km.bind(
+            KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            Action::ScrollToTop,
+        );
         km.bind(
             KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT),
             Action::ScrollToBottom,
@@ -115,7 +116,10 @@ impl Default for Keymap {
             KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
             Action::OpenProviderDialog,
         );
-        km.bind(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE), Action::DeleteChar);
+        km.bind(
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            Action::DeleteChar,
+        );
 
         // Chat input
         km.bind(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), Action::SendMessage);
@@ -154,4 +158,35 @@ fn format_key(key: &KeyEvent) -> String {
         _ => s.push_str(&format!("{:?}", key.code)),
     }
     s
+}
+
+/// Format an `Action` as a human-readable description string.
+pub fn format_action(action: &Action) -> String {
+    match action {
+        Action::Quit => "Quit the application",
+        Action::CancelResponse => "Cancel current response",
+        Action::ToggleStatusPanel => "Show/hide status panel",
+        Action::MoveUp => "Move up / Previous item",
+        Action::MoveDown => "Move down / Next item",
+        Action::MoveLeft => "Move cursor left",
+        Action::MoveRight => "Move cursor right",
+        Action::ScrollUp => "Scroll chat up",
+        Action::ScrollDown => "Scroll chat down",
+        Action::ScrollToTop => "Scroll to top",
+        Action::ScrollToBottom => "Scroll to bottom",
+        Action::Confirm => "Confirm selection",
+        Action::Cancel => "Cancel / Close dialog",
+        Action::OpenModelPicker => "Open model picker",
+        Action::OpenProviderDialog => "Open provider dialog",
+        Action::SwitchPanel => "Switch panel",
+        Action::SendMessage => "Send message",
+        Action::TypeChar(_) => "Type character",
+        Action::DeleteChar => "Delete character",
+        Action::HistoryPrev => "Previous input history",
+        Action::HistoryNext => "Next input history",
+        Action::CommandPrev => "Previous command",
+        Action::CommandNext => "Next command",
+        Action::None => "",
+    }
+    .to_string()
 }
