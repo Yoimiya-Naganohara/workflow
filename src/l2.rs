@@ -67,13 +67,13 @@ impl L2RuleAuditEngine {
         }
     }
 
-    fn generate_override_patch(&self, manifest: &ConflictManifest) -> RuleOverridePatch {
+    fn generate_override_patch(&self, manifest: &ConflictManifest) -> crate::conflict::OverridePatch {
         let mut embedding = [0.0f32; 768];
         if !manifest.context_embeddings.is_empty() {
             embedding.copy_from_slice(&manifest.context_embeddings[0]);
         }
 
-        RuleOverridePatch {
+        crate::conflict::OverridePatch {
             embedding,
             weight: 2.0,
             decay_days: 90,
@@ -87,19 +87,14 @@ impl L2RuleAuditEngine {
 
 #[async_trait::async_trait]
 impl crate::traits::AuditEngine for L2RuleAuditEngine {
-    async fn audit(&mut self, manifest: &crate::conflict::ConflictManifest) -> crate::traits::AuditOutcome {
+    async fn audit(&mut self, manifest: &crate::conflict::ConflictManifest) -> crate::conflict::L2AuditResult {
         let result = self.audit(manifest);
-        crate::traits::AuditOutcome {
+        crate::conflict::L2AuditResult {
             decision: result.decision,
             risk_statement: result.risk_statement,
             lesson_learned: result.lesson_learned,
-            override_patch: result
-                .l1_override_vector_patch
-                .map(|p| crate::traits::UnifiedOverridePatch {
-                    embedding: p.embedding,
-                    weight: p.weight,
-                    decay_days: p.decay_days,
-                }),
+            override_patch: result.l1_override_vector_patch,
+            tokens_used: 0,
         }
     }
 
@@ -117,13 +112,7 @@ pub struct L2RuleAuditResult {
     pub decision: ArbitrationResult,
     pub risk_statement: String,
     pub lesson_learned: String,
-    pub l1_override_vector_patch: Option<RuleOverridePatch>,
-}
-
-pub struct RuleOverridePatch {
-    pub embedding: [f32; 768],
-    pub weight: f32,
-    pub decay_days: u32,
+    pub l1_override_vector_patch: Option<crate::conflict::OverridePatch>,
 }
 
 #[cfg(test)]

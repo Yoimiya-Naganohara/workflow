@@ -156,48 +156,6 @@ impl Drop for BudgetGuard {
 unsafe impl Send for BudgetGuard {}
 unsafe impl Sync for BudgetGuard {}
 
-impl crate::traits::ResourcePool for TaskResourceState {
-    fn try_acquire_budget(&self, requested: u64) -> Option<u64> {
-        self.try_acquire_budget(requested)
-    }
-
-    fn release_budget(&self, amount: u64) {
-        self.release_budget(amount);
-    }
-
-    fn try_lock_tools(&self, bitmap: u64) -> Result<(), u64> {
-        self.try_acquire_tools(bitmap)
-    }
-
-    fn release_tools(&self, bitmap: u64) {
-        self.release_tools(bitmap);
-    }
-
-    fn try_increment_depth(&self) -> Result<u32, u32> {
-        self.increment_depth()
-    }
-
-    fn decrement_depth(&self) {
-        self.decrement_depth();
-    }
-
-    fn increment_spawned(&self) -> u32 {
-        self.increment_spawned()
-    }
-
-    fn remaining_budget(&self) -> i64 {
-        self.remaining_budget.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn current_depth(&self) -> u32 {
-        self.current_depth.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn max_depth(&self) -> u32 {
-        self.max_dynamic_depth.load(std::sync::atomic::Ordering::Relaxed)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

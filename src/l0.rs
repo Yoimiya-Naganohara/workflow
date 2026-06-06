@@ -193,4 +193,10 @@ impl crate::traits::CircuitBreaker for L0CircuitBreaker {
     fn calculate_priority(&self, budget_remaining: i64, budget_requested: u64, depth: u32) -> f32 {
         Self::calculate_priority(budget_remaining, budget_requested, depth)
     }
+
+    fn remaining_budget(&self) -> i64 {
+        self.resource_state
+            .remaining_budget
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
 }

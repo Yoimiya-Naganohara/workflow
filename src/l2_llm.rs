@@ -157,13 +157,13 @@ Please respond with JSON:
         }
     }
 
-    fn generate_override_patch(&self, manifest: &ConflictManifest) -> LlmOverridePatch {
+    fn generate_override_patch(&self, manifest: &ConflictManifest) -> crate::conflict::OverridePatch {
         let mut embedding = [0.0f32; 768];
         if !manifest.context_embeddings.is_empty() {
             embedding.copy_from_slice(&manifest.context_embeddings[0]);
         }
 
-        LlmOverridePatch {
+        crate::conflict::OverridePatch {
             embedding,
             weight: 2.0,
             decay_days: 90,
@@ -177,25 +177,25 @@ Please respond with JSON:
 
 #[async_trait::async_trait]
 impl crate::traits::AuditEngine for L2LlmAuditEngine {
-    async fn audit(&mut self, manifest: &crate::conflict::ConflictManifest) -> crate::traits::AuditOutcome {
+    async fn audit(&mut self, manifest: &crate::conflict::ConflictManifest) -> crate::conflict::L2AuditResult {
         match self.audit(manifest).await {
-            Ok(result) => crate::traits::AuditOutcome {
+            Ok(result) => crate::conflict::L2AuditResult {
                 decision: result.decision,
                 risk_statement: result.risk_statement,
                 lesson_learned: result.lesson_learned,
-                override_patch: result
-                    .l1_override_vector_patch
-                    .map(|p| crate::traits::UnifiedOverridePatch {
-                        embedding: p.embedding,
-                        weight: p.weight,
-                        decay_days: p.decay_days,
-                    }),
+                override_patch: result.l1_override_vector_patch.map(|p| crate::conflict::OverridePatch {
+                    embedding: p.embedding,
+                    weight: p.weight,
+                    decay_days: p.decay_days,
+                }),
+                tokens_used: result.tokens_used,
             },
-            Err(e) => crate::traits::AuditOutcome {
+            Err(e) => crate::conflict::L2AuditResult {
                 decision: crate::conflict::ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
                 risk_statement: format!("LLM audit error: {}", e),
                 lesson_learned: "LLM audit failed, pruning for safety".to_string(),
                 override_patch: None,
+                tokens_used: 0,
             },
         }
     }
@@ -209,14 +209,8 @@ pub struct L2LlmAuditResult {
     pub decision: ArbitrationResult,
     pub risk_statement: String,
     pub lesson_learned: String,
-    pub l1_override_vector_patch: Option<LlmOverridePatch>,
+    pub l1_override_vector_patch: Option<crate::conflict::OverridePatch>,
     pub tokens_used: u32,
-}
-
-pub struct LlmOverridePatch {
-    pub embedding: [f32; 768],
-    pub weight: f32,
-    pub decay_days: u32,
 }
 
 #[cfg(test)]

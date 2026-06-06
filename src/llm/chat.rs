@@ -2,11 +2,26 @@ use super::*;
 use anyhow::Result;
 use async_stream::stream;
 use futures::StreamExt;
+use rig::OneOrMany;
 use rig::agent::{MultiTurnStreamItem, StreamingResult};
 use rig::completion::message::{AssistantContent, UserContent};
 use rig::message::Text;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
-use rig::OneOrMany;
+
+/// Build a chat agent with standard temperature/max_tokens configuration.
+///
+/// All rig provider clients share the same builder pattern but return
+/// different concrete types — a macro avoids 9× repetition.
+macro_rules! build_chat_agent {
+    ($client:expr, $model:expr, $system:expr) => {
+        $client
+            .agent($model)
+            .preamble($system)
+            .temperature(0.7)
+            .max_tokens(4000)
+            .build()
+    };
+}
 
 impl LlmProvider {
     pub async fn chat(&self, model: &str, system: &str, message: &str) -> Result<String> {
@@ -56,105 +71,33 @@ impl LlmProvider {
     ) -> Result<ChatStream> {
         let history = Self::build_history(history);
         match self {
-            Self::OpenAi(c) => {
-                let agent = c
-                    .agent(model)
-                    .preamble(system)
-                    .temperature(0.7)
-                    .max_tokens(4000)
-                    .build();
-                Ok(Self::wrap_chat_stream(
-                    agent.stream_chat(message, history).await,
-                ))
-            }
-            Self::Anthropic(c) => {
-                let agent = c
-                    .agent(model)
-                    .preamble(system)
-                    .temperature(0.7)
-                    .max_tokens(4000)
-                    .build();
-                Ok(Self::wrap_chat_stream(
-                    agent.stream_chat(message, history).await,
-                ))
-            }
-            Self::Cohere(c) => {
-                let agent = c
-                    .agent(model)
-                    .preamble(system)
-                    .temperature(0.7)
-                    .max_tokens(4000)
-                    .build();
-                Ok(Self::wrap_chat_stream(
-                    agent.stream_chat(message, history).await,
-                ))
-            }
-            Self::Gemini(c) => {
-                let agent = c
-                    .agent(model)
-                    .preamble(system)
-                    .temperature(0.7)
-                    .max_tokens(4000)
-                    .build();
-                Ok(Self::wrap_chat_stream(
-                    agent.stream_chat(message, history).await,
-                ))
-            }
-            Self::Mistral(c) => {
-                let agent = c
-                    .agent(model)
-                    .preamble(system)
-                    .temperature(0.7)
-                    .max_tokens(4000)
-                    .build();
-                Ok(Self::wrap_chat_stream(
-                    agent.stream_chat(message, history).await,
-                ))
-            }
-            Self::Ollama(c) => {
-                let agent = c
-                    .agent(model)
-                    .preamble(system)
-                    .temperature(0.7)
-                    .max_tokens(4000)
-                    .build();
-                Ok(Self::wrap_chat_stream(
-                    agent.stream_chat(message, history).await,
-                ))
-            }
-            Self::Llamafile(c) => {
-                let agent = c
-                    .agent(model)
-                    .preamble(system)
-                    .temperature(0.7)
-                    .max_tokens(4000)
-                    .build();
-                Ok(Self::wrap_chat_stream(
-                    agent.stream_chat(message, history).await,
-                ))
-            }
-            Self::Azure(c) => {
-                let agent = c
-                    .agent(model)
-                    .preamble(system)
-                    .temperature(0.7)
-                    .max_tokens(4000)
-                    .build();
-                Ok(Self::wrap_chat_stream(
-                    agent.stream_chat(message, history).await,
-                ))
-            }
-            Self::Copilot(c) => {
-                let agent = c
-                    .agent(model)
-                    .preamble(system)
-                    .temperature(0.7)
-                    .max_tokens(4000)
-                    .build();
-                Ok(Self::wrap_chat_stream(
-                    agent.stream_chat(message, history).await,
-                ))
-            }
+            Self::OpenAi(c) => Ok(Self::wrap_chat_stream(
+                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+            )),
+            Self::Anthropic(c) => Ok(Self::wrap_chat_stream(
+                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+            )),
+            Self::Cohere(c) => Ok(Self::wrap_chat_stream(
+                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+            )),
+            Self::Gemini(c) => Ok(Self::wrap_chat_stream(
+                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+            )),
+            Self::Mistral(c) => Ok(Self::wrap_chat_stream(
+                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+            )),
+            Self::Ollama(c) => Ok(Self::wrap_chat_stream(
+                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+            )),
+            Self::Llamafile(c) => Ok(Self::wrap_chat_stream(
+                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+            )),
+            Self::Azure(c) => Ok(Self::wrap_chat_stream(
+                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+            )),
+            Self::Copilot(c) => Ok(Self::wrap_chat_stream(
+                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+            )),
         }
     }
 

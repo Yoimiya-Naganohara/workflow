@@ -100,8 +100,6 @@ impl AgentRuntime {
         use crate::admission::AdmissionController;
         use crate::l0::L0CircuitBreaker;
         use crate::l1::L1Retriever;
-        use crate::l1::classifier::L1ValueClassifier;
-        use crate::l1_arbitration::L1Arbitrator;
         use crate::l2::L2RuleAuditEngine;
         use crate::resource::TaskResourceState;
         use crate::suspend::{SuspendConfig, SuspendQueue as SuspendQueueConcrete};
@@ -113,11 +111,8 @@ impl AgentRuntime {
                 config.max_concurrent_agents,
                 config.admission_timeout_ms,
             )))
-            .circuit_breaker(Box::new(L0CircuitBreaker::new(state.clone())))
-            .resources(state as Arc<dyn crate::traits::ResourcePool>)
+            .circuit_breaker(Box::new(L0CircuitBreaker::new(state)))
             .experience(Box::new(L1Retriever::new(config.l1_confidence_threshold)))
-            .value_classifier(Box::new(L1ValueClassifier::new(vec![])))
-            .conflict_detector(Box::new(L1Arbitrator::new(config.semantic_conflict_threshold)))
             .audit_engine(Box::new(L2RuleAuditEngine::new(5)))
             .embedding(embedding_service)
             .suspend(Box::new(SuspendQueueConcrete::new(SuspendConfig {

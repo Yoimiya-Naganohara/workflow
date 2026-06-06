@@ -1,6 +1,24 @@
 use crate::types::{AgentId, ChildAgentConfig, TraceId};
 use smallvec::SmallVec;
 
+/// Unified result returned by any L2 audit engine (rule or LLM).
+#[derive(Debug, Clone)]
+pub struct L2AuditResult {
+    pub decision: ArbitrationResult,
+    pub risk_statement: String,
+    pub lesson_learned: String,
+    pub override_patch: Option<OverridePatch>,
+    pub tokens_used: u32,
+}
+
+/// Patch injected into L1 experience pool to bias future decisions.
+#[derive(Debug, Clone)]
+pub struct OverridePatch {
+    pub embedding: [f32; 768],
+    pub weight: f32,
+    pub decay_days: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictType {
     ResourceLockContention,
