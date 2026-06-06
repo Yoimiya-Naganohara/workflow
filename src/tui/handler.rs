@@ -746,6 +746,7 @@ impl Tui {
                             // Ensure provider is synced to runtime
                             if let Some(selected) = state.selected_models.first() {
                                 let provider_id = selected.provider_id.clone();
+                                let model_id = selected.model_id.clone();
                                 if !state.configured_providers.iter().any(|id| id == &provider_id) {
                                     return Err::<String, anyhow::Error>(anyhow::anyhow!(
                                         "Provider {} is not configured",
@@ -757,6 +758,7 @@ impl Tui {
                                 {
                                     let mut rt = runtime.write().await;
                                     rt.set_provider_from_state(client);
+                                    rt.set_model_id(&model_id);
                                 }
                             }
                             drop(state);

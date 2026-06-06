@@ -53,6 +53,7 @@ pub struct AgentRuntime {
     suspend_queue: Mutex<SuspendQueue>,
     pub plan_registry: Arc<RwLock<PlanRegistry>>,
     pub provider: Option<Arc<LlmProvider>>,
+    pub model_id: String,
     role_templates: HashMap<String, RoleTemplate>,
 }
 
@@ -129,6 +130,7 @@ impl AgentRuntime {
             suspend_queue: Mutex::new(suspend_queue),
             plan_registry: Arc::new(RwLock::new(PlanRegistry::new())),
             provider: None,
+            model_id: String::new(),
             role_templates,
         }
     }
@@ -226,6 +228,10 @@ impl AgentRuntime {
         self.provider = Some(state_provider);
     }
 
+    pub fn set_model_id(&mut self, model_id: &str) {
+        self.model_id = model_id.to_string();
+    }
+
     pub async fn chat_with_goal(&self, goal: &str, agent_pool: &Arc<RwLock<AgentPool>>) -> Result<String> {
         let agent_id = {
             let mut pool = agent_pool.write().await;
@@ -310,6 +316,7 @@ impl AgentRuntime {
                     depth: 0,
                     goal: goal.to_string(),
                     config: crate::agent::AgentConfig {
+                        model_id: self.model_id.clone(),
                         system_prompt: role_tpl.system_prompt,
                         ..Default::default()
                     },
@@ -379,6 +386,7 @@ impl AgentRuntime {
                     depth: parent_depth + 1,
                     goal: goal.to_string(),
                     config: crate::agent::AgentConfig {
+                        model_id: self.model_id.clone(),
                         system_prompt: role_tpl.system_prompt,
                         ..Default::default()
                     },
