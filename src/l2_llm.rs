@@ -175,6 +175,36 @@ Please respond with JSON:
     }
 }
 
+#[async_trait::async_trait]
+impl crate::traits::AuditEngine for L2LlmAuditEngine {
+    async fn audit(&mut self, manifest: &crate::conflict::ConflictManifest) -> crate::traits::AuditOutcome {
+        match self.audit(manifest).await {
+            Ok(result) => crate::traits::AuditOutcome {
+                decision: result.decision,
+                risk_statement: result.risk_statement,
+                lesson_learned: result.lesson_learned,
+                override_patch: result
+                    .l1_override_vector_patch
+                    .map(|p| crate::traits::UnifiedOverridePatch {
+                        embedding: p.embedding,
+                        weight: p.weight,
+                        decay_days: p.decay_days,
+                    }),
+            },
+            Err(e) => crate::traits::AuditOutcome {
+                decision: crate::conflict::ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
+                risk_statement: format!("LLM audit error: {}", e),
+                lesson_learned: "LLM audit failed, pruning for safety".to_string(),
+                override_patch: None,
+            },
+        }
+    }
+
+    fn reset(&mut self) {
+        self.reset_failures();
+    }
+}
+
 pub struct L2LlmAuditResult {
     pub decision: ArbitrationResult,
     pub risk_statement: String,

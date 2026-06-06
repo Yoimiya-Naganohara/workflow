@@ -162,3 +162,28 @@ mod tests {
         assert!(result.is_ok());
     }
 }
+
+impl crate::traits::ExperienceRetrieval for L1Retriever {
+    fn retrieve(&self, query: &[f32; 768], k: usize) -> Vec<(ExperienceEntry, f32)> {
+        self.retrieve(query, k)
+            .into_iter()
+            .map(|(e, s)| (e.clone(), s))
+            .collect()
+    }
+
+    fn check_confidence(
+        &self,
+        task_embedding: &[f32; 768],
+        role_embedding: &[f32; 768],
+    ) -> Result<L1Assessment, SpawnRejection> {
+        self.check_confidence(task_embedding, role_embedding)
+    }
+
+    fn add_experience(&mut self, entry: ExperienceEntry) {
+        self.add_experience(entry)
+    }
+
+    fn experience_count(&self) -> usize {
+        self.experience_count()
+    }
+}

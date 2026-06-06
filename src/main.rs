@@ -34,10 +34,9 @@ async fn run_tui() -> Result<()> {
     };
 
     let provider = select_provider()?;
-    let embedding_service = Arc::new(EmbeddingService::new(provider.clone()));
-    let config = AgentRuntimeConfig::default();
-    let mut runtime = AgentRuntime::new(config, embedding_service);
-    runtime.set_provider((*provider).clone());
+    let svc = EmbeddingService::new(provider.clone());
+    let embedding_service: Arc<dyn workflow::traits::EmbeddingService> = Arc::new(svc);
+    let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
     let runtime = Arc::new(RwLock::new(runtime));
 
     {
@@ -56,9 +55,9 @@ async fn run_tui() -> Result<()> {
 
 async fn run_cli() -> Result<()> {
     let provider = select_provider()?;
-    let embedding_service = Arc::new(EmbeddingService::new(provider));
-    let config = AgentRuntimeConfig::default();
-    let mut runtime = AgentRuntime::new(config, embedding_service);
+    let svc = EmbeddingService::new(provider);
+    let embedding_service: Arc<dyn workflow::traits::EmbeddingService> = Arc::new(svc);
+    let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
 
     info!("Holographic Self-Evolving Multi-Agent System v0.1.0");
     info!("Architecture: L-1/L0/L1/L2 Decision Pipeline");

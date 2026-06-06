@@ -1,5 +1,6 @@
 use crate::llm::LlmProvider;
 use crate::simd::cosine_similarity_768;
+use crate::traits::EmbeddingService as EmbeddingServiceTrait;
 use anyhow::Result;
 use dashmap::DashMap;
 use std::sync::Arc;
@@ -63,6 +64,29 @@ impl EmbeddingService {
 
     pub fn clear_cache(&self) {
         self.cache.clear();
+    }
+}
+
+#[async_trait::async_trait]
+impl EmbeddingServiceTrait for EmbeddingService {
+    async fn embed(&self, text: &str) -> Result<[f32; 768]> {
+        self.embed(text).await
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; 768]>> {
+        self.embed_batch(texts).await
+    }
+
+    fn similarity(&self, a: &[f32; 768], b: &[f32; 768]) -> f32 {
+        self.similarity(a, b)
+    }
+
+    fn cache_size(&self) -> usize {
+        self.cache_size()
+    }
+
+    fn clear_cache(&self) {
+        self.clear_cache();
     }
 }
 

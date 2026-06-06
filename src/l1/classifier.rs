@@ -53,3 +53,9 @@ mod tests {
         assert!(!assessment.is_jargon);
     }
 }
+
+impl crate::traits::ValueClassifier for L1ValueClassifier {
+    fn classify(&self, text: &str) -> ValueAssessment {
+        self.classify(text)
+    }
+}

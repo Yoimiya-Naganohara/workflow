@@ -179,3 +179,18 @@ mod tests {
         assert!(p3 > p4);
     }
 }
+
+impl crate::traits::CircuitBreaker for L0CircuitBreaker {
+    fn try_acquire(
+        &self,
+        requested_budget: u64,
+        current_depth: u32,
+        requested_tools: u64,
+    ) -> Result<L0Permit, SpawnRejection> {
+        self.try_acquire(requested_budget, current_depth, requested_tools)
+    }
+
+    fn calculate_priority(&self, budget_remaining: i64, budget_requested: u64, depth: u32) -> f32 {
+        Self::calculate_priority(budget_remaining, budget_requested, depth)
+    }
+}

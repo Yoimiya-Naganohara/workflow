@@ -102,6 +102,28 @@ impl SuspendQueue {
     }
 }
 
+impl crate::traits::SuspendQueue for SuspendQueue {
+    fn enqueue(&mut self, request: SpawnRequest, priority: f32) {
+        self.enqueue(request, priority)
+    }
+
+    fn dequeue(&mut self) -> Option<SuspendedRequest> {
+        self.dequeue()
+    }
+
+    fn prune_expired(&mut self) -> Vec<SpawnRequest> {
+        self.prune_expired()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -24,6 +24,7 @@ pub struct SpawnRequest {
     pub raw_text_ref: Option<RawTextRef>,
 }
 
+#[derive(Debug, Clone)]
 pub struct ChildAgentConfig {
     pub agent_id: AgentId,
     pub task_id: TaskId,
@@ -37,18 +38,26 @@ pub enum SpawnDecision {
     Rejected(SpawnRejection),
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SpawnRejection {
+    #[error("system overloaded")]
     SystemOverloaded,
+    #[error("budget exhausted: requested {requested}, remaining {remaining}")]
     BudgetExhausted { requested: u64, remaining: i64 },
+    #[error("depth exceeded: current {current}, max {max}")]
     DepthExceeded { current: u32, max: u32 },
+    #[error("resource conflict on tool {tool_id}")]
     ResourceConflict { tool_id: u64, holder: AgentId },
+    #[error("L1 rejected: {reason}")]
     L1Rejected { reason: String, confidence: f32 },
+    #[error("L2 rejected ({category}): {reason}")]
     L2Rejected { reason: String, category: String },
+    #[error("L2 collapsed")]
     L2Collapsed,
 }
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct ExperienceEntry {
     pub embedding: [f32; 768],
     pub applicability_vector: [f32; 128],

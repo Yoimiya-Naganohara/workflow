@@ -37,6 +37,17 @@ impl AdmissionController {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::traits::AdmissionControl for AdmissionController {
+    async fn acquire(&self) -> Result<AdmissionPermit, SpawnRejection> {
+        self.acquire_owned().await
+    }
+
+    fn available_permits(&self) -> usize {
+        AdmissionController::available_permits(self)
+    }
+}
+
 pub struct AdmissionPermit {
     _permit: tokio::sync::OwnedSemaphorePermit,
 }

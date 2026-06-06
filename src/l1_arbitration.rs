@@ -69,6 +69,27 @@ pub enum L1ArbitrationResult {
     RequiresL2,
 }
 
+impl crate::traits::ConflictDetector for L1Arbitrator {
+    fn detect(&self, a: &[f32; 768], b: &[f32; 768]) -> bool {
+        self.detect_semantic_conflict(a, b)
+    }
+
+    fn create_manifest(
+        &self,
+        agent_a: AgentId,
+        agent_b: AgentId,
+        embedding_a: [f32; 768],
+        embedding_b: [f32; 768],
+        trace_id: [u8; 16],
+    ) -> ConflictManifest {
+        self.create_conflict_manifest(agent_a, agent_b, embedding_a, embedding_b, trace_id)
+    }
+
+    fn arbitrate(&self, manifest: &ConflictManifest) -> L1ArbitrationResult {
+        self.arbitrate_by_priority(manifest)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -85,6 +85,29 @@ impl L2RuleAuditEngine {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::traits::AuditEngine for L2RuleAuditEngine {
+    async fn audit(&mut self, manifest: &crate::conflict::ConflictManifest) -> crate::traits::AuditOutcome {
+        let result = self.audit(manifest);
+        crate::traits::AuditOutcome {
+            decision: result.decision,
+            risk_statement: result.risk_statement,
+            lesson_learned: result.lesson_learned,
+            override_patch: result
+                .l1_override_vector_patch
+                .map(|p| crate::traits::UnifiedOverridePatch {
+                    embedding: p.embedding,
+                    weight: p.weight,
+                    decay_days: p.decay_days,
+                }),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.reset_failures();
+    }
+}
+
 struct RiskAssessment {
     is_high: bool,
     statement: String,

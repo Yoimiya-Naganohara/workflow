@@ -8,6 +8,7 @@ pub enum ConflictType {
     ValueDivergence,
 }
 
+#[derive(Debug, Clone)]
 pub struct ConflictManifest {
     pub conflict_id: [u8; 16],
     pub conflict_type: ConflictType,
@@ -17,6 +18,7 @@ pub struct ConflictManifest {
     pub dynamic_priority_scores: SmallVec<[f32; 2]>,
 }
 
+#[derive(Debug, Clone)]
 pub enum ArbitrationResult {
     Override {
         winner: AgentId,
