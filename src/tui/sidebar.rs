@@ -212,23 +212,24 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
         ),
     ]));
     if let Some(runtime) = &state.runtime {
-        let rt = runtime.blocking_read();
-        let exp_count = rt.experience_count();
-        let pending = rt.pending_suspended();
-        lines.push(Line::from(vec![
-            Span::styled("  pool    ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("{} entries", exp_count),
-                Style::default().fg(if exp_count > 0 { Color::Green } else { Color::DarkGray }),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("  suspend ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("{} queued", pending),
-                Style::default().fg(if pending > 0 { Color::Yellow } else { Color::DarkGray }),
-            ),
-        ]));
+        if let Ok(rt) = runtime.try_read() {
+            let exp_count = rt.experience_count();
+            let pending = rt.pending_suspended();
+            lines.push(Line::from(vec![
+                Span::styled("  pool    ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{} entries", exp_count),
+                    Style::default().fg(if exp_count > 0 { Color::Green } else { Color::DarkGray }),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  suspend ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{} queued", pending),
+                    Style::default().fg(if pending > 0 { Color::Yellow } else { Color::DarkGray }),
+                ),
+            ]));
+        }
     }
 
     // ── Runtime ──

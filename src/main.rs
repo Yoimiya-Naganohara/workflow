@@ -36,7 +36,8 @@ async fn run_tui() -> Result<()> {
     let provider = select_provider()?;
     let svc = EmbeddingService::new(provider.clone());
     let embedding_service: Arc<dyn workflow::llm::EmbeddingService> = Arc::new(svc);
-    let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
+    let mut runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
+    runtime.set_provider((*provider).clone());
     let runtime = Arc::new(RwLock::new(runtime));
 
     {
