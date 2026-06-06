@@ -13,11 +13,11 @@ use workflow::types::*;
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.contains(&"--tui".to_string()) {
-        run_tui().await
-    } else {
+    if args.contains(&"--cli".to_string()) {
         tracing_subscriber::fmt::init();
         run_cli().await
+    } else {
+        run_tui().await
     }
 }
 
