@@ -11,13 +11,12 @@ use workflow::types::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
-
     let args: Vec<String> = std::env::args().collect();
 
     if args.contains(&"--tui".to_string()) {
         run_tui().await
     } else {
+        tracing_subscriber::fmt::init();
         run_cli().await
     }
 }
@@ -35,9 +34,11 @@ async fn run_tui() -> Result<()> {
     };
 
     let provider = select_provider()?;
-    let embedding_service = Arc::new(EmbeddingService::new(provider));
+    let embedding_service = Arc::new(EmbeddingService::new(provider.clone()));
     let config = AgentRuntimeConfig::default();
-    let _runtime = Arc::new(RwLock::new(AgentRuntime::new(config, embedding_service)));
+    let mut runtime = AgentRuntime::new(config, embedding_service);
+    runtime.set_provider((*provider).clone());
+    let runtime = Arc::new(RwLock::new(runtime));
 
     {
         let mut state = state.write().await;
@@ -45,6 +46,7 @@ async fn run_tui() -> Result<()> {
         state.budget_used = 0;
         state.permits_total = 10;
         state.permits_available = 10;
+        state.runtime = Some(runtime);
     }
 
     tui.run().await?;
@@ -71,10 +73,7 @@ async fn run_cli() -> Result<()> {
     info!("Task: {}", task);
     info!("Role: {}", role);
 
-    match runtime
-        .process_with_text(task, role, value, 1000, 0)
-        .await?
-    {
+    match runtime.process_with_text(task, role, value, 1000, 0).await? {
         SpawnDecision::Approved(config) => {
             info!("Spawn APPROVED");
             info!("  Agent ID: {:?}", config.agent_id);
@@ -96,16 +95,16 @@ async fn run_cli() -> Result<()> {
 fn select_provider() -> Result<Arc<LlmProvider>> {
     if std::env::var("OPENAI_API_KEY").is_ok() {
         info!("Using OpenAI provider");
-        return Ok(Arc::new(LlmProvider::openai_from_env()?));
+        return Ok(Arc::new(LlmProvider::from_env()?));
     }
 
     if std::env::var("ANTHROPIC_API_KEY").is_ok() {
         info!("Using Anthropic provider");
-        return Ok(Arc::new(LlmProvider::anthropic_from_env()?));
+        return Ok(Arc::new(LlmProvider::from_env()?));
     }
 
     warn!("No API key found, using OpenAI provider with test key");
     Ok(Arc::new(LlmProvider::OpenAi(
-        rig::providers::openai::Client::new("test-key")?,
+        rig::providers::openai::CompletionsClient::new("test-key")?,
     )))
 }

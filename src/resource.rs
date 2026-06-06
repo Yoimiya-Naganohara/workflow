@@ -30,12 +30,10 @@ impl TaskResourceState {
                 return None;
             }
             let new = current - requested as i64;
-            match self.remaining_budget.compare_exchange_weak(
-                current,
-                new,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
+            match self
+                .remaining_budget
+                .compare_exchange_weak(current, new, Ordering::AcqRel, Ordering::Acquire)
+            {
                 Ok(_) => return Some(requested),
                 Err(actual) => current = actual,
             }
@@ -49,12 +47,10 @@ impl TaskResourceState {
                 return Err(current);
             }
             let new = current | tool_bitmap;
-            match self.tool_bitmap.compare_exchange_weak(
-                current,
-                new,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
+            match self
+                .tool_bitmap
+                .compare_exchange_weak(current, new, Ordering::AcqRel, Ordering::Acquire)
+            {
                 Ok(_) => return Ok(()),
                 Err(actual) => current = actual,
             }
@@ -62,8 +58,7 @@ impl TaskResourceState {
     }
 
     pub fn release_budget(&self, amount: u64) {
-        self.remaining_budget
-            .fetch_add(amount as i64, Ordering::AcqRel);
+        self.remaining_budget.fetch_add(amount as i64, Ordering::AcqRel);
     }
 
     pub fn release_tools(&self, tool_bitmap: u64) {

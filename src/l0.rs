@@ -19,10 +19,7 @@ impl L0CircuitBreaker {
         current_depth: u32,
         requested_tools: u64,
     ) -> Result<L0Permit, SpawnRejection> {
-        let max_depth = self
-            .resource_state
-            .max_dynamic_depth
-            .load(Ordering::Acquire);
+        let max_depth = self.resource_state.max_dynamic_depth.load(Ordering::Acquire);
         if current_depth >= max_depth {
             return Err(SpawnRejection::DepthExceeded {
                 current: current_depth,
@@ -30,13 +27,13 @@ impl L0CircuitBreaker {
             });
         }
 
-        let allocated = self
-            .resource_state
-            .try_acquire_budget(requested_budget)
-            .ok_or(SpawnRejection::BudgetExhausted {
-                requested: requested_budget,
-                remaining: self.resource_state.remaining_budget.load(Ordering::Acquire),
-            })?;
+        let allocated =
+            self.resource_state
+                .try_acquire_budget(requested_budget)
+                .ok_or(SpawnRejection::BudgetExhausted {
+                    requested: requested_budget,
+                    remaining: self.resource_state.remaining_budget.load(Ordering::Acquire),
+                })?;
 
         if requested_tools != 0
             && let Err(_holder_bitmap) = self.resource_state.try_acquire_tools(requested_tools)
@@ -49,7 +46,17 @@ impl L0CircuitBreaker {
             });
         }
 
-        let _ = self.resource_state.increment_depth();
+        if self.resource_state.increment_depth().is_err() {
+            // Depth exceeded: revert budget and tool deductions
+            self.resource_state.release_budget(allocated);
+            if requested_tools != 0 {
+                self.resource_state.release_tools(requested_tools);
+            }
+            return Err(SpawnRejection::DepthExceeded {
+                current: self.resource_state.current_depth.load(Ordering::Acquire),
+                max: self.resource_state.max_dynamic_depth.load(Ordering::Acquire),
+            });
+        }
         self.resource_state.increment_spawned();
 
         Ok(L0Permit {
@@ -81,14 +88,15 @@ impl L0Permit {
         self.budget_amount
     }
 
-    pub fn into_budget_guard(self, task_id: TaskId) -> crate::resource::BudgetGuard {
-        crate::resource::BudgetGuard::new(
+    pub fn into_budget_guard(self, task_id: TaskId) -> Option<crate::resource::BudgetGuard> {
+        // Resources already acquired by try_acquire, so this should not fail
+        let guard = crate::resource::BudgetGuard::new(
             task_id,
             self.budget_amount,
             self.resource_state.clone(),
             self.requested_tools,
-        )
-        .expect("L0Permit already acquired resources")
+        )?;
+        Some(guard)
     }
 }
 

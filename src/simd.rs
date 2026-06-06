@@ -1,5 +1,5 @@
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    assert_eq!(a.len(), b.len());
+    debug_assert_eq!(a.len(), b.len());
 
     let mut dot = 0.0f32;
     let mut norm_a = 0.0f32;

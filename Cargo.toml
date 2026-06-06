@@ -2,13 +2,21 @@
 name = "workflow"
 version = "0.1.0"
 edition = "2024"
+description = "Holographic self-evolving multi-agent system with layered decision architecture"
+authors = ["Workflow Team"]
+license = "MIT"
+repository = "https://github.com/user/workflow"
+readme = "README.md"
+keywords = ["agent", "multi-agent", "workflow", "ai", "llm"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.85"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 rayon = "1"
 smallvec = "1"
 memmap2 = "0.9"
-rand = "0.8"
+rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
@@ -18,12 +26,20 @@ anyhow = "1"
 thiserror = "2"
 dashmap = "6"
 async-trait = "0.1"
-rig-core = "0.37"
-rig = "0.37.0"
-ratatui = "0.29"
-crossterm = "0.28"
+rig-core = "0.38"
+rig = "0.38"
+ratatui = "0.30"
+crossterm = "0.29"
+unicode-width = "0.2"
 chrono = "0.4"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
+async-stream = "0.3"
+futures = "0.3"
 
 [dev-dependencies]
 tokio-test = "0.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

@@ -12,11 +12,7 @@ impl L1Arbitrator {
         Self { semantic_threshold }
     }
 
-    pub fn detect_semantic_conflict(
-        &self,
-        embedding_a: &[f32; 768],
-        embedding_b: &[f32; 768],
-    ) -> bool {
+    pub fn detect_semantic_conflict(&self, embedding_a: &[f32; 768], embedding_b: &[f32; 768]) -> bool {
         let sim = cosine_similarity_768(embedding_a, embedding_b);
         sim < self.semantic_threshold
     }

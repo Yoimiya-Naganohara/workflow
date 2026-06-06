@@ -69,10 +69,7 @@ impl L2LlmAuditEngine {
 
         let arbitration = match judge.decision.as_str() {
             "override" => {
-                let winner_idx = judge
-                    .winner
-                    .and_then(|w| w.parse::<usize>().ok())
-                    .unwrap_or(0);
+                let winner_idx = judge.winner.and_then(|w| w.parse::<usize>().ok()).unwrap_or(0);
                 let winner = manifest
                     .contending_agents
                     .get(winner_idx)
@@ -110,11 +107,7 @@ impl L2LlmAuditEngine {
             ConflictType::ValueDivergence => "value divergence",
         };
 
-        let agents: Vec<String> = manifest
-            .contending_agents
-            .iter()
-            .map(|a| format!("{:?}", a))
-            .collect();
+        let agents: Vec<String> = manifest.contending_agents.iter().map(|a| format!("{:?}", a)).collect();
 
         format!(
             r#"Analyze this multi-agent conflict:
@@ -216,15 +209,13 @@ mod tests {
     #[test]
     fn test_build_judge_prompt() {
         let provider = Arc::new(LlmProvider::OpenAi(
-            rig::providers::openai::Client::new("test-key").unwrap(),
+            rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
         ));
         let engine = L2LlmAuditEngine::new(provider, 3);
         let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.8, 0.3]);
 
         let prompt = engine.build_judge_prompt(&manifest);
-        assert!(
-            prompt.contains("resource lock contention") || prompt.contains("action contradiction")
-        );
+        assert!(prompt.contains("resource lock contention") || prompt.contains("action contradiction"));
         assert!(prompt.contains("override|merge|prune"));
     }
 }

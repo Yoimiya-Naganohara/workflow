@@ -125,10 +125,7 @@ mod tests {
         let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.8, 0.3]);
 
         let result = engine.audit(&manifest);
-        assert!(matches!(
-            result.decision,
-            ArbitrationResult::Override { .. }
-        ));
+        assert!(matches!(result.decision, ArbitrationResult::Override { .. }));
     }
 
     #[test]

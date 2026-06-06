@@ -23,27 +23,33 @@ impl EmbeddingService {
         }
 
         let embedding = self.provider.embed_768(text).await?;
-
-        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let normalized = if norm > 0.0 {
-            let mut result = [0.0f32; 768];
-            for i in 0..768 {
-                result[i] = embedding[i] / norm;
-            }
-            result
-        } else {
-            embedding
-        };
+        let normalized = normalize_embedding(embedding);
 
         self.cache.insert(text.to_string(), normalized);
         Ok(normalized)
     }
 
     pub async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; 768]>> {
-        let mut results = Vec::with_capacity(texts.len());
-        for text in texts {
-            results.push(self.embed(text).await?);
+        use std::collections::HashMap;
+
+        let mut results = vec![[0.0f32; 768]; texts.len()];
+        let mut pending: HashMap<&str, Vec<usize>> = HashMap::new();
+
+        for (index, text) in texts.iter().enumerate() {
+            if let Some(cached) = self.cache.get(*text) {
+                results[index] = *cached;
+            } else {
+                pending.entry(*text).or_default().push(index);
+            }
         }
+
+        for (text, indexes) in pending {
+            let embedding = self.embed(text).await?;
+            for index in indexes {
+                results[index] = embedding;
+            }
+        }
+
         Ok(results)
     }
 
@@ -60,30 +66,36 @@ impl EmbeddingService {
     }
 }
 
+fn normalize_embedding(mut embedding: [f32; 768]) -> [f32; 768] {
+    let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for value in &mut embedding {
+            *value /= norm;
+        }
+    }
+    embedding
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    struct MockProvider;
+    #[test]
+    fn test_normalize_embedding() {
+        let mut embedding = [0.0f32; 768];
+        embedding[0] = 3.0;
+        embedding[1] = 4.0;
 
-    impl MockProvider {
-        async fn embed_mock(&self, _text: &str) -> Result<[f32; 768]> {
-            let mut embedding = [0.0f32; 768];
-            embedding[0] = 1.0;
-            Ok(embedding)
-        }
+        let normalized = normalize_embedding(embedding);
+        assert!((normalized[0] - 0.6).abs() < 1e-6);
+        assert!((normalized[1] - 0.8).abs() < 1e-6);
     }
 
-    #[tokio::test]
-    async fn test_embed_cached() {
-        let provider = Arc::new(LlmProvider::OpenAi(
-            rig::providers::openai::Client::new("test-key").unwrap(),
-        ));
-        let service = EmbeddingService::new(provider);
-
-        let e1 = [0.1f32; 768];
-        let e2 = [0.1f32; 768];
-        assert_eq!(e1, e2);
+    #[test]
+    fn test_normalize_zero_embedding() {
+        let embedding = [0.0f32; 768];
+        let normalized = normalize_embedding(embedding);
+        assert_eq!(normalized, embedding);
     }
 
     #[test]

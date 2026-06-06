@@ -52,6 +52,21 @@ fn default_cost() -> Cost {
     }
 }
 
+pub(crate) fn matches_query(value: &str, query_lower: &str) -> bool {
+    query_lower.is_empty() || value.to_lowercase().contains(query_lower)
+}
+
+pub(crate) fn filter_providers<'a>(providers: &'a [Provider], query: &str) -> Vec<&'a Provider> {
+    if query.is_empty() {
+        return providers.iter().collect();
+    }
+    let query_lower = query.to_lowercase();
+    providers
+        .iter()
+        .filter(|p| matches_query(&p.name, &query_lower) || matches_query(&p.id, &query_lower))
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Modalities {
     pub input: Vec<String>,
@@ -78,6 +93,7 @@ pub struct Cost {
     pub reasoning: Option<f64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelRegistry {
     providers: Vec<Provider>,
     selected_provider: Option<String>,
@@ -93,10 +109,16 @@ impl ModelRegistry {
         }
     }
 
+    pub fn with_providers(providers: Vec<Provider>) -> Self {
+        Self {
+            providers,
+            selected_provider: None,
+            selected_model: None,
+        }
+    }
+
     pub async fn fetch(&mut self) -> Result<()> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()?;
+        let client = reqwest::Client::builder().timeout(Duration::from_secs(30)).build()?;
 
         let resp = client.get("https://models.dev/api.json").send().await?;
         let status = resp.status();
@@ -105,8 +127,8 @@ impl ModelRegistry {
         }
 
         let text = resp.text().await?;
-        let data: HashMap<String, Provider> = serde_json::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("Failed to parse models JSON: {}", e))?;
+        let data: HashMap<String, Provider> =
+            serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("Failed to parse models JSON: {}", e))?;
 
         self.providers = data
             .into_iter()
@@ -147,8 +169,7 @@ impl ModelRegistry {
     }
 
     pub fn get_model(&self, provider_id: &str, model_id: &str) -> Option<&Model> {
-        self.get_provider(provider_id)
-            .and_then(|p| p.models.get(model_id))
+        self.get_provider(provider_id).and_then(|p| p.models.get(model_id))
     }
 
     pub fn current_model(&self) -> Option<(&Provider, &Model)> {
@@ -160,26 +181,42 @@ impl ModelRegistry {
     }
 
     pub fn search_models(&self, query: &str) -> Vec<(&Provider, &Model)> {
-        let query_lower = query.to_lowercase();
-        let mut results = Vec::new();
-
-        for provider in &self.providers {
-            for model in provider.models.values() {
-                if model.name.to_lowercase().contains(&query_lower)
-                    || model.id.to_lowercase().contains(&query_lower)
-                    || model
-                        .family
-                        .as_ref()
-                        .map(|f| f.to_lowercase().contains(&query_lower))
-                        .unwrap_or(false)
-                {
-                    results.push((provider, model));
-                }
-            }
+        if query.is_empty() {
+            return self
+                .providers
+                .iter()
+                .flat_map(|p| p.models.values().map(move |m| (p, m)))
+                .collect();
         }
+        let query_lower = query.to_lowercase();
 
-        results.sort_by(|a, b| a.1.name.cmp(&b.1.name));
-        results
+        let query_lower2 = query_lower.clone();
+
+        self.providers
+            .iter()
+            .filter(|p| {
+                matches_query(&p.name, &query_lower)
+                    || matches_query(&p.id, &query_lower)
+                    || p.models.values().any(|m| {
+                        matches_query(&m.name, &query_lower)
+                            || matches_query(&m.id, &query_lower)
+                            || m.family.as_deref().is_some_and(|f| matches_query(f, &query_lower))
+                    })
+            })
+            .flat_map(move |p| {
+                let query_lower = query_lower2.clone();
+                p.models
+                    .values()
+                    .filter(move |m| {
+                        matches_query(&m.name, &query_lower)
+                            || matches_query(&m.id, &query_lower)
+                            || m.family.as_deref().is_some_and(|f| matches_query(f, &query_lower))
+                            || matches_query(&p.name, &query_lower)
+                            || matches_query(&p.id, &query_lower)
+                    })
+                    .map(move |m| (p, m))
+            })
+            .collect()
     }
 }
 
