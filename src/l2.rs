@@ -1,0 +1,168 @@
+use crate::conflict::{ArbitrationResult, ConflictManifest};
+use crate::types::AgentId;
+
+pub struct L2RuleAuditEngine {
+    max_consecutive_failures: u32,
+    consecutive_failures: u32,
+}
+
+impl L2RuleAuditEngine {
+    pub fn new(max_consecutive_failures: u32) -> Self {
+        Self {
+            max_consecutive_failures,
+            consecutive_failures: 0,
+        }
+    }
+
+    pub fn audit(&mut self, manifest: &ConflictManifest) -> L2RuleAuditResult {
+        if self.consecutive_failures >= self.max_consecutive_failures {
+            self.consecutive_failures += 1;
+            return L2RuleAuditResult {
+                decision: ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
+                risk_statement: "L2 collapsed due to consecutive failures".to_string(),
+                lesson_learned: "System needs stabilization".to_string(),
+                l1_override_vector_patch: None,
+            };
+        }
+
+        let risk = self.assess_risk(manifest);
+        let decision = if risk.is_high {
+            self.consecutive_failures += 1;
+            ArbitrationResult::Prune(manifest.contending_agents.to_vec())
+        } else {
+            self.consecutive_failures = 0;
+            let winner = manifest.contending_agents[0];
+            let losers: Vec<AgentId> = manifest.contending_agents[1..].to_vec();
+            ArbitrationResult::Override {
+                winner,
+                slash_targets: losers,
+            }
+        };
+
+        L2RuleAuditResult {
+            decision,
+            risk_statement: risk.statement,
+            lesson_learned: "Resolved via L2 audit".to_string(),
+            l1_override_vector_patch: Some(self.generate_override_patch(manifest)),
+        }
+    }
+
+    fn assess_risk(&self, manifest: &ConflictManifest) -> RiskAssessment {
+        let max_priority = manifest
+            .dynamic_priority_scores
+            .iter()
+            .cloned()
+            .fold(f32::MIN, f32::max);
+
+        if max_priority > 0.9 {
+            RiskAssessment {
+                is_high: true,
+                statement: "High risk: extreme priority divergence".to_string(),
+            }
+        } else {
+            RiskAssessment {
+                is_high: false,
+                statement: "Moderate risk".to_string(),
+            }
+        }
+    }
+
+    fn generate_override_patch(&self, manifest: &ConflictManifest) -> RuleOverridePatch {
+        let mut embedding = [0.0f32; 768];
+        if !manifest.context_embeddings.is_empty() {
+            embedding.copy_from_slice(&manifest.context_embeddings[0]);
+        }
+
+        RuleOverridePatch {
+            embedding,
+            weight: 2.0,
+            decay_days: 90,
+        }
+    }
+
+    pub fn reset_failures(&mut self) {
+        self.consecutive_failures = 0;
+    }
+}
+
+struct RiskAssessment {
+    is_high: bool,
+    statement: String,
+}
+
+pub struct L2RuleAuditResult {
+    pub decision: ArbitrationResult,
+    pub risk_statement: String,
+    pub lesson_learned: String,
+    pub l1_override_vector_patch: Option<RuleOverridePatch>,
+}
+
+pub struct RuleOverridePatch {
+    pub embedding: [f32; 768],
+    pub weight: f32,
+    pub decay_days: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smallvec::SmallVec;
+
+    fn make_manifest(agents: Vec<AgentId>, priorities: Vec<f32>) -> ConflictManifest {
+        ConflictManifest {
+            conflict_id: [0u8; 16],
+            conflict_type: crate::conflict::ConflictType::ActionContradiction,
+            contending_agents: SmallVec::from_vec(agents),
+            trace_id: [0u8; 16],
+            context_embeddings: SmallVec::from_vec(vec![[0.0f32; 768]; 2]),
+            dynamic_priority_scores: SmallVec::from_vec(priorities),
+        }
+    }
+
+    #[test]
+    fn test_basic_audit() {
+        let mut engine = L2RuleAuditEngine::new(3);
+        let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.8, 0.3]);
+
+        let result = engine.audit(&manifest);
+        assert!(matches!(
+            result.decision,
+            ArbitrationResult::Override { .. }
+        ));
+    }
+
+    #[test]
+    fn test_high_risk_prune() {
+        let mut engine = L2RuleAuditEngine::new(3);
+        let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.95, 0.1]);
+
+        let result = engine.audit(&manifest);
+        assert!(matches!(result.decision, ArbitrationResult::Prune(_)));
+    }
+
+    #[test]
+    fn test_collapse_after_failures() {
+        let mut engine = L2RuleAuditEngine::new(2);
+        let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.95, 0.1]);
+
+        engine.audit(&manifest);
+        engine.audit(&manifest);
+        let result = engine.audit(&manifest);
+
+        assert!(matches!(result.decision, ArbitrationResult::Prune(_)));
+        assert!(result.risk_statement.contains("collapsed"));
+    }
+
+    #[test]
+    fn test_reset_failures() {
+        let mut engine = L2RuleAuditEngine::new(2);
+        let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.95, 0.1]);
+
+        engine.audit(&manifest);
+        engine.audit(&manifest);
+        engine.reset_failures();
+
+        let result = engine.audit(&manifest);
+        assert!(!result.risk_statement.contains("collapsed"));
+    }
+}
