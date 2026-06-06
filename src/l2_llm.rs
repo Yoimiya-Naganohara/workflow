@@ -4,9 +4,30 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+/// Configuration for the LLM-powered audit engine.
+pub struct L2LlmConfig {
+    pub model_id: String,
+    pub temperature: f64,
+    pub max_tokens: u64,
+    pub max_consecutive_failures: u32,
+}
+
+impl Default for L2LlmConfig {
+    fn default() -> Self {
+        Self {
+            model_id: String::new(),
+            temperature: 0.3,
+            max_tokens: 500,
+            max_consecutive_failures: 5,
+        }
+    }
+}
+
 pub struct L2LlmAuditEngine {
     provider: Arc<LlmProvider>,
     model_id: String,
+    temperature: f64,
+    max_tokens: u64,
     max_consecutive_failures: u32,
     consecutive_failures: u32,
 }
@@ -21,11 +42,13 @@ struct JudgeDecision {
 }
 
 impl L2LlmAuditEngine {
-    pub fn new(provider: Arc<LlmProvider>, model_id: &str, max_consecutive_failures: u32) -> Self {
+    pub fn new(provider: Arc<LlmProvider>, config: L2LlmConfig) -> Self {
         Self {
             provider,
-            model_id: model_id.to_string(),
-            max_consecutive_failures,
+            model_id: config.model_id,
+            temperature: config.temperature,
+            max_tokens: config.max_tokens,
+            max_consecutive_failures: config.max_consecutive_failures,
             consecutive_failures: 0,
         }
     }
@@ -56,8 +79,8 @@ impl L2LlmAuditEngine {
                     content: prompt,
                 },
             ],
-            temperature: 0.3,
-            max_tokens: 500,
+            temperature: self.temperature,
+            max_tokens: self.max_tokens,
         };
 
         let response = self.provider.complete(request).await?;
@@ -237,7 +260,14 @@ mod tests {
         let provider = Arc::new(LlmProvider::OpenAi(
             rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
         ));
-        let engine = L2LlmAuditEngine::new(provider, "gpt-4", 3);
+        let engine = L2LlmAuditEngine::new(
+            provider,
+            L2LlmConfig {
+                model_id: "gpt-4".to_string(),
+                max_consecutive_failures: 3,
+                ..Default::default()
+            },
+        );
         let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.8, 0.3]);
 
         let prompt = engine.build_judge_prompt(&manifest);
