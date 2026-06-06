@@ -10,8 +10,8 @@ use futures::future::AbortHandle;
 
 use super::Tui;
 use super::state::{AppMode, AppState, COMMANDS, ChatMessage, Focus, MessageRole, MessageStatus, Panel, SelectedModel};
-use crate::tui::controller;
 use crate::models::filter_providers;
+use crate::tui::controller;
 
 impl Tui {
     pub(crate) fn handle_chat_keys(&self, state: &mut AppState, key: crossterm::event::KeyEvent) -> bool {
@@ -95,20 +95,17 @@ impl Tui {
                 state.input = state.input_history[new_idx].clone();
                 state.input_cursor = Self::char_count(&state.input);
             }
-            KeyCode::Down
-                if state.focus == Focus::Input
-                    && !state.input.starts_with('/')
-                    && state.input_history_idx.is_some() =>
-            {
-                let idx = state.input_history_idx.unwrap();
-                if idx + 1 < state.input_history.len() {
-                    state.input_history_idx = Some(idx + 1);
-                    state.input = state.input_history[idx + 1].clone();
-                } else {
-                    state.input_history_idx = None;
-                    state.input.clear();
+            KeyCode::Down if state.focus == Focus::Input && !state.input.starts_with('/') => {
+                if let Some(idx) = state.input_history_idx {
+                    if idx + 1 < state.input_history.len() {
+                        state.input_history_idx = Some(idx + 1);
+                        state.input = state.input_history[idx + 1].clone();
+                    } else {
+                        state.input_history_idx = None;
+                        state.input.clear();
+                    }
+                    state.input_cursor = Self::char_count(&state.input);
                 }
-                state.input_cursor = Self::char_count(&state.input);
             }
             KeyCode::Up if state.focus == Focus::Input && state.input.starts_with('/') => {
                 let prefix = state.input.trim().to_lowercase();

@@ -66,7 +66,7 @@ impl LlmProvider {
 
     fn is_ollama_running() -> bool {
         std::net::TcpStream::connect_timeout(
-            &"127.0.0.1:11434".parse().unwrap(),
+            &"127.0.0.1:11434".parse().expect("static socket addr"),
             std::time::Duration::from_millis(200),
         )
         .is_ok()

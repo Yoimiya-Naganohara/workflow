@@ -127,7 +127,10 @@ impl DecisionPipeline {
                         request.requested_budget,
                         request.current_depth,
                     );
-                    self.suspend.lock().unwrap().enqueue(request, priority);
+                    self.suspend
+                        .lock()
+                        .expect("suspend mutex poisoned")
+                        .enqueue(request, priority);
                 }
                 return Ok(SpawnDecision::Rejected(rejection));
             }
@@ -138,7 +141,7 @@ impl DecisionPipeline {
 
         // ── L1: Experience retrieval & confidence check ──
         let l1_assessment: L1Assessment = {
-            let exp = self.experience.lock().unwrap();
+            let exp = self.experience.lock().expect("experience mutex poisoned");
             exp.check_confidence(task_emb, role_emb)?
         };
 
@@ -168,15 +171,21 @@ impl DecisionPipeline {
     }
 
     pub fn add_experience(&self, entry: ExperienceEntry) {
-        self.experience.lock().unwrap().add_experience(entry);
+        self.experience
+            .lock()
+            .expect("experience mutex poisoned")
+            .add_experience(entry);
     }
 
     pub fn experience_count(&self) -> usize {
-        self.experience.lock().unwrap().experience_count()
+        self.experience
+            .lock()
+            .expect("experience mutex poisoned")
+            .experience_count()
     }
 
     pub fn pending_suspended(&self) -> usize {
-        self.suspend.lock().unwrap().len()
+        self.suspend.lock().expect("suspend mutex poisoned").len()
     }
 
     pub fn available_permits(&self) -> usize {
