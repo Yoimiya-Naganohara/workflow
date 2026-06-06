@@ -97,25 +97,10 @@ impl Tui {
                         let mut state = self.state.write().await;
 
                         // Global keys
-                        match key.code {
-                            KeyCode::Char('x') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                                if let Some(abort) = state.active_chat_abort.take() {
-                                    abort.abort();
-                                    state.messages.push(ChatMessage {
-                                        role: MessageRole::System,
-                                        content: "Stopped current response".to_string(),
-                                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                                        status: MessageStatus::Completed,
-                                    });
-                                }
-                            }
-                            KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                                return Ok(());
-                            }
-                            KeyCode::Tab => {
-                                state.show_status_panel = !state.show_status_panel;
-                            }
-                            _ => {}
+                        if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                            && key.code == KeyCode::Char('c')
+                        {
+                            return Ok(());
                         }
 
                         // Panel-specific keys
