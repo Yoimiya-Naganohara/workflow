@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 pub use self::state::AppState;
-use self::state::{ChatMessage, MessageRole, MessageStatus, Panel};
+use self::state::Panel;
 
 pub struct Tui {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
@@ -49,40 +49,9 @@ impl Tui {
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        let persisted = crate::persistence::load();
-        let selected_models_count = persisted.selected_models.len();
-
         {
             let mut state = self.state.write().await;
-            state.selected_models = persisted.selected_models;
-            state.configured_providers = persisted.configured_providers;
-            state.api_keys.extend(persisted.api_keys);
-            state.provider_clients.clear();
-
-            // Load provider cache so provider lookups work for configured providers
-            if !state.configured_providers.is_empty() || !state.selected_models.is_empty() {
-                if let Some(cached) = crate::persistence::load_provider_cache() {
-                    state.models = cached;
-                }
-            }
-
-            if selected_models_count > 0 {
-                state.messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: format!("Loaded {} selected models", selected_models_count),
-                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                    status: MessageStatus::Completed,
-                });
-            }
-
-            let warm_provider_ids: Vec<String> = state
-                .selected_models
-                .iter()
-                .map(|selected| selected.provider_id.clone())
-                .collect();
-            for provider_id in warm_provider_ids {
-                let _ = Self::get_or_create_provider_client(&mut state, &provider_id);
-            }
+            crate::controller::load_initial_state(&mut state).await;
         }
 
         let mut last_tick = Instant::now();

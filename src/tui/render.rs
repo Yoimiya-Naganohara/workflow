@@ -9,7 +9,7 @@ use ratatui::{
 
 use super::Tui;
 use super::state::{AppMode, AppState, COMMANDS, Focus, MessageRole, MessageStatus, Panel};
-use crate::models::{filter_providers, Model, Provider};
+use crate::models::{Model, Provider, filter_providers};
 
 impl Tui {
     pub(crate) async fn draw(&mut self) -> Result<()> {
@@ -266,7 +266,11 @@ impl Tui {
             Span::styled("  avail   ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 format!("{}", state.permits_available),
-                Style::default().fg(if state.permits_available > 0 { Color::Green } else { Color::Red }),
+                Style::default().fg(if state.permits_available > 0 {
+                    Color::Green
+                } else {
+                    Color::Red
+                }),
             ),
         ]));
         lines.push(Line::from(vec![
@@ -334,10 +338,26 @@ impl Tui {
             )));
 
             let total = plan.tasks.len();
-            let completed = plan.tasks.iter().filter(|t| t.status == crate::plan::TaskStatus::Completed).count();
-            let running = plan.tasks.iter().filter(|t| t.status == crate::plan::TaskStatus::Running).count();
-            let pending = plan.tasks.iter().filter(|t| t.status == crate::plan::TaskStatus::Pending).count();
-            let failed = plan.tasks.iter().filter(|t| t.status == crate::plan::TaskStatus::Failed).count();
+            let completed = plan
+                .tasks
+                .iter()
+                .filter(|t| t.status == crate::plan::TaskStatus::Completed)
+                .count();
+            let running = plan
+                .tasks
+                .iter()
+                .filter(|t| t.status == crate::plan::TaskStatus::Running)
+                .count();
+            let pending = plan
+                .tasks
+                .iter()
+                .filter(|t| t.status == crate::plan::TaskStatus::Pending)
+                .count();
+            let failed = plan
+                .tasks
+                .iter()
+                .filter(|t| t.status == crate::plan::TaskStatus::Failed)
+                .count();
 
             let plan_color = if failed > 0 {
                 Color::Red
@@ -432,7 +452,10 @@ impl Tui {
         ]));
         lines.push(Line::from(vec![
             Span::styled("  history ", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{} entries", state.input_history.len()), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{} entries", state.input_history.len()),
+                Style::default().fg(Color::White),
+            ),
         ]));
 
         // ── Experience ──
@@ -497,7 +520,11 @@ impl Tui {
             Span::styled("  agents  ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 format!("{}/{}", agents_running, agents_total),
-                Style::default().fg(if agents_running > 0 { Color::Green } else { Color::DarkGray }),
+                Style::default().fg(if agents_running > 0 {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                }),
             ),
         ]));
 
@@ -715,7 +742,7 @@ impl Tui {
         let items: Vec<ListItem> = results
             .iter()
             .map(|(p, m)| {
-                let needs_key = !configured.contains(&p.id) && !Self::is_no_auth_provider(&p.id);
+                let needs_key = !configured.contains(&p.id) && !crate::controller::is_no_auth_provider(&p.id);
                 ListItem::new(Line::from(vec![
                     Span::styled(&p.name, Style::default().fg(Color::DarkGray)),
                     Span::raw(" / "),
@@ -824,7 +851,11 @@ impl Tui {
                 } else if state.focus == Focus::Chat {
                     "Up/Down scroll | Ctrl+P models | Ctrl+C quit".to_string()
                 } else {
-                    let panel_hint = if state.show_status_panel { "Tab hide panel" } else { "Tab show panel" };
+                    let panel_hint = if state.show_status_panel {
+                        "Tab hide panel"
+                    } else {
+                        "Tab show panel"
+                    };
                     let mode_hint = match state.mode {
                         AppMode::Plan => "Type a goal · /apply build · /connect provider · /models pick",
                         AppMode::Build => "/apply execute · /connect provider · Ctrl+P models",
@@ -994,4 +1025,41 @@ impl Tui {
 
         spans
     }
+
+    pub(crate) fn display_width_up_to(s: &str, char_idx: usize) -> usize {
+        s.chars()
+            .take(char_idx)
+            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+            .sum()
+    }
+}
+
+pub(crate) fn format_action(action: &super::keymap::Action) -> String {
+    match action {
+        super::keymap::Action::Quit => "Quit the application",
+        super::keymap::Action::CancelResponse => "Cancel current response",
+        super::keymap::Action::ToggleStatusPanel => "Show/hide status panel",
+        super::keymap::Action::MoveUp => "Move up / Previous item",
+        super::keymap::Action::MoveDown => "Move down / Next item",
+        super::keymap::Action::MoveLeft => "Move cursor left",
+        super::keymap::Action::MoveRight => "Move cursor right",
+        super::keymap::Action::ScrollUp => "Scroll chat up",
+        super::keymap::Action::ScrollDown => "Scroll chat down",
+        super::keymap::Action::ScrollToTop => "Scroll to top",
+        super::keymap::Action::ScrollToBottom => "Scroll to bottom",
+        super::keymap::Action::Confirm => "Confirm selection",
+        super::keymap::Action::Cancel => "Cancel / Close dialog",
+        super::keymap::Action::OpenModelPicker => "Open model picker",
+        super::keymap::Action::OpenProviderDialog => "Open provider dialog",
+        super::keymap::Action::SwitchPanel => "Switch panel",
+        super::keymap::Action::SendMessage => "Send message",
+        super::keymap::Action::TypeChar(_) => "Type character",
+        super::keymap::Action::DeleteChar => "Delete character",
+        super::keymap::Action::HistoryPrev => "Previous input history",
+        super::keymap::Action::HistoryNext => "Next input history",
+        super::keymap::Action::CommandPrev => "Previous command",
+        super::keymap::Action::CommandNext => "Next command",
+        super::keymap::Action::None => "",
+    }
+    .to_string()
 }

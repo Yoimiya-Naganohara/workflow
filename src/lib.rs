@@ -1,6 +1,7 @@
 pub mod admission;
 pub mod agent;
 pub mod conflict;
+pub mod controller;
 pub mod embedding;
 pub mod l0;
 pub mod l1;
