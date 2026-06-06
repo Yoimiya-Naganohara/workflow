@@ -87,8 +87,18 @@ impl L2RuleAuditEngine {
     }
 }
 
+/// L2: High-level audit engine (rule-based or LLM-powered).
 #[async_trait::async_trait]
-impl crate::core::traits::AuditEngine for L2RuleAuditEngine {
+pub trait AuditEngine: Send + Sync {
+    async fn audit(
+        &mut self,
+        manifest: &crate::core::conflict::ConflictManifest,
+    ) -> crate::core::conflict::L2AuditResult;
+    fn reset(&mut self);
+}
+
+#[async_trait::async_trait]
+impl AuditEngine for L2RuleAuditEngine {
     async fn audit(
         &mut self,
         manifest: &crate::core::conflict::ConflictManifest,

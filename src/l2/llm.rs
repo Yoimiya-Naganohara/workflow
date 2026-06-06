@@ -201,18 +201,23 @@ Please respond with JSON:
 }
 
 #[async_trait::async_trait]
-impl crate::core::traits::AuditEngine for L2LlmAuditEngine {
-    async fn audit(&mut self, manifest: &crate::core::conflict::ConflictManifest) -> crate::core::conflict::L2AuditResult {
+impl super::AuditEngine for L2LlmAuditEngine {
+    async fn audit(
+        &mut self,
+        manifest: &crate::core::conflict::ConflictManifest,
+    ) -> crate::core::conflict::L2AuditResult {
         match self.audit(manifest).await {
             Ok(result) => crate::core::conflict::L2AuditResult {
                 decision: result.decision,
                 risk_statement: result.risk_statement,
                 lesson_learned: result.lesson_learned,
-                override_patch: result.l1_override_vector_patch.map(|p| crate::core::conflict::OverridePatch {
-                    embedding: p.embedding,
-                    weight: p.weight,
-                    decay_days: p.decay_days,
-                }),
+                override_patch: result
+                    .l1_override_vector_patch
+                    .map(|p| crate::core::conflict::OverridePatch {
+                        embedding: p.embedding,
+                        weight: p.weight,
+                        decay_days: p.decay_days,
+                    }),
                 tokens_used: result.tokens_used,
             },
             Err(e) => crate::core::conflict::L2AuditResult {

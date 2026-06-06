@@ -7,6 +7,18 @@ pub mod types;
 pub use types::*;
 
 use anyhow::Result;
+use async_trait::async_trait;
+
+/// Text-to-vector embedding service with caching.
+#[async_trait]
+pub trait EmbeddingService: Send + Sync {
+    async fn embed(&self, text: &str) -> Result<[f32; 768]>;
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; 768]>>;
+    fn similarity(&self, a: &[f32; 768], b: &[f32; 768]) -> f32;
+    fn cache_size(&self) -> usize;
+    fn clear_cache(&self);
+}
+
 use rig::client::CompletionClient;
 use rig::completion::Prompt;
 use rig::providers::anthropic;

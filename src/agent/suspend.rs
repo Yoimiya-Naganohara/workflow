@@ -102,7 +102,16 @@ impl SuspendQueue {
     }
 }
 
-impl crate::core::traits::SuspendQueue for SuspendQueue {
+/// Priority-ordered queue for deferred spawn requests.
+pub trait SuspendQueueOps: Send + Sync {
+    fn enqueue(&mut self, request: SpawnRequest, priority: f32);
+    fn dequeue(&mut self) -> Option<SuspendedRequest>;
+    fn prune_expired(&mut self) -> Vec<SpawnRequest>;
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool;
+}
+
+impl SuspendQueueOps for SuspendQueue {
     fn enqueue(&mut self, request: SpawnRequest, priority: f32) {
         self.enqueue(request, priority)
     }

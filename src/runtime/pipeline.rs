@@ -9,13 +9,17 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use tokio::sync::RwLock;
 
+use crate::admission::AdmissionControl;
 use crate::admission::AdmissionPermit;
-use crate::l0::L0Permit;
-use crate::l1::L1Assessment;
-use crate::core::traits::{
-    AdmissionControl, AuditEngine, CircuitBreaker, EmbeddingService, ExperienceRetrieval, PlanRegistry, SuspendQueue,
-};
+use crate::agent::plan::PlanRegistryOps;
+use crate::agent::suspend::SuspendQueueOps;
 use crate::core::types::*;
+use crate::l0::CircuitBreaker;
+use crate::l0::L0Permit;
+use crate::l1::ExperienceRetrieval;
+use crate::l1::L1Assessment;
+use crate::l2::AuditEngine;
+use crate::llm::EmbeddingService;
 
 // ============================================================================
 //  Builder
@@ -30,8 +34,8 @@ pub struct DecisionPipelineBuilder {
     experience: Option<Box<dyn ExperienceRetrieval>>,
     audit_engine: Option<Box<dyn AuditEngine>>,
     embedding: Option<Arc<dyn EmbeddingService>>,
-    suspend: Option<Box<dyn SuspendQueue>>,
-    plans: Option<Box<dyn PlanRegistry>>,
+    suspend: Option<Box<dyn SuspendQueueOps>>,
+    plans: Option<Box<dyn PlanRegistryOps>>,
 }
 
 impl DecisionPipelineBuilder {
@@ -44,8 +48,8 @@ impl DecisionPipelineBuilder {
     builder_method!(experience, Box<dyn ExperienceRetrieval>);
     builder_method!(audit_engine, Box<dyn AuditEngine>);
     builder_method!(embedding, Arc<dyn EmbeddingService>);
-    builder_method!(suspend, Box<dyn SuspendQueue>);
-    builder_method!(plans, Box<dyn PlanRegistry>);
+    builder_method!(suspend, Box<dyn SuspendQueueOps>);
+    builder_method!(plans, Box<dyn PlanRegistryOps>);
 
     /// Build the pipeline, using defaults for any unset dependencies.
     pub fn build(self) -> DecisionPipeline {
@@ -73,7 +77,8 @@ impl DecisionPipelineBuilder {
                     .unwrap_or_else(|| Box::new(crate::agent::suspend::SuspendQueue::new(Default::default()))),
             ),
             plans: Arc::new(RwLock::new(
-                self.plans.unwrap_or_else(|| Box::new(crate::agent::plan::PlanRegistry::new())),
+                self.plans
+                    .unwrap_or_else(|| Box::new(crate::agent::plan::PlanRegistry::new())),
             )),
         }
     }
@@ -94,8 +99,8 @@ pub struct DecisionPipeline {
     experience: Mutex<Box<dyn ExperienceRetrieval>>,
     audit_engine: Mutex<Box<dyn AuditEngine>>,
     embedding: Arc<dyn EmbeddingService>,
-    suspend: Mutex<Box<dyn SuspendQueue>>,
-    plans: Arc<RwLock<Box<dyn PlanRegistry>>>,
+    suspend: Mutex<Box<dyn SuspendQueueOps>>,
+    plans: Arc<RwLock<Box<dyn PlanRegistryOps>>>,
 }
 
 impl DecisionPipeline {
@@ -158,7 +163,7 @@ impl DecisionPipeline {
         &self.embedding
     }
 
-    pub fn plans(&self) -> &Arc<RwLock<Box<dyn PlanRegistry>>> {
+    pub fn plans(&self) -> &Arc<RwLock<Box<dyn PlanRegistryOps>>> {
         &self.plans
     }
 
@@ -205,8 +210,8 @@ pub(crate) use builder_method;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::embedding::EmbeddingService as EmbeddingServiceImpl;
     use crate::llm::LlmProvider;
+    use crate::llm::embedding::EmbeddingService as EmbeddingServiceImpl;
     use std::sync::Arc;
 
     fn dummy_embedding() -> Arc<dyn EmbeddingService> {

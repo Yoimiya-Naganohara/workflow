@@ -165,7 +165,19 @@ mod tests {
     }
 }
 
-impl crate::core::traits::ExperienceRetrieval for L1Retriever {
+/// L1: Experience-driven confidence assessment.
+pub trait ExperienceRetrieval: Send + Sync {
+    fn retrieve(&self, query: &[f32; 768], k: usize) -> Vec<(ExperienceEntry, f32)>;
+    fn check_confidence(
+        &self,
+        task_embedding: &[f32; 768],
+        role_embedding: &[f32; 768],
+    ) -> Result<L1Assessment, SpawnRejection>;
+    fn add_experience(&mut self, entry: ExperienceEntry);
+    fn experience_count(&self) -> usize;
+}
+
+impl ExperienceRetrieval for L1Retriever {
     fn retrieve(&self, query: &[f32; 768], k: usize) -> Vec<(ExperienceEntry, f32)> {
         self.retrieve(query, k)
             .into_iter()

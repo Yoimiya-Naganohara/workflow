@@ -37,8 +37,15 @@ impl AdmissionController {
     }
 }
 
+/// L-1: Concurrency admission for agent spawns.
 #[async_trait::async_trait]
-impl crate::core::traits::AdmissionControl for AdmissionController {
+pub trait AdmissionControl: Send + Sync {
+    async fn acquire(&self) -> Result<AdmissionPermit, SpawnRejection>;
+    fn available_permits(&self) -> usize;
+}
+
+#[async_trait::async_trait]
+impl AdmissionControl for AdmissionController {
     async fn acquire(&self) -> Result<AdmissionPermit, SpawnRejection> {
         self.acquire_owned().await
     }

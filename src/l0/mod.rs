@@ -111,7 +111,19 @@ impl Drop for L0Permit {
     }
 }
 
-impl crate::core::traits::CircuitBreaker for L0CircuitBreaker {
+/// L0: Physical-resource circuit breaker.
+pub trait CircuitBreaker: Send + Sync {
+    fn try_acquire(
+        &self,
+        requested_budget: u64,
+        current_depth: u32,
+        requested_tools: u64,
+    ) -> Result<L0Permit, SpawnRejection>;
+    fn calculate_priority(&self, budget_remaining: i64, budget_requested: u64, depth: u32) -> f32;
+    fn remaining_budget(&self) -> i64;
+}
+
+impl CircuitBreaker for L0CircuitBreaker {
     fn try_acquire(
         &self,
         requested_budget: u64,

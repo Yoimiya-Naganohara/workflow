@@ -1,6 +1,6 @@
-use crate::llm::LlmProvider;
+use super::EmbeddingService as EmbeddingServiceTrait;
 use crate::core::simd::cosine_similarity_768;
-use crate::core::traits::EmbeddingService as EmbeddingServiceTrait;
+use crate::llm::LlmProvider;
 use anyhow::Result;
 use dashmap::DashMap;
 use std::sync::Arc;

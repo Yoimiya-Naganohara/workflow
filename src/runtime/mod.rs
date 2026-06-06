@@ -8,8 +8,8 @@ use tokio::sync::RwLock;
 
 use crate::agent::plan::{PlanEntity, PlanRegistry as PlanRegistryConcrete, PlanStatus, Task, TaskStatus};
 use crate::agent::{Agent, AgentPool, AgentStatus};
-use crate::core::traits::EmbeddingService;
 use crate::core::types::*;
+use crate::llm::EmbeddingService;
 use crate::llm::LlmProvider;
 use crate::runtime::pipeline::{DecisionPipeline, DecisionPipelineBuilder};
 

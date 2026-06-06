@@ -78,7 +78,18 @@ impl PlanRegistry {
     }
 }
 
-impl crate::core::traits::PlanRegistry for PlanRegistry {
+/// Registry mapping agents to their plans and tasks.
+pub trait PlanRegistryOps: Send + Sync {
+    fn insert(&mut self, entity: PlanEntity);
+    fn get_by_name(&self, name: &str) -> Option<PlanEntity>;
+    fn get_by_agent(&self, agent_id: AgentId) -> Vec<PlanEntity>;
+    fn search(&self, query: &str) -> Vec<PlanEntity>;
+    fn all(&self) -> Vec<PlanEntity>;
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool;
+}
+
+impl PlanRegistryOps for PlanRegistry {
     fn insert(&mut self, entity: PlanEntity) {
         self.insert(entity)
     }
