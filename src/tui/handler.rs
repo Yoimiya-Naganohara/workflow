@@ -473,7 +473,11 @@ impl Tui {
             let bindings = state.keymap.all_bindings();
             let mut lines = vec!["Keyboard Shortcuts:".to_string(), String::new()];
             for (key, action) in &bindings {
-                lines.push(format!("  {:20} {}", key, super::render::format_action(action)));
+                lines.push(format!(
+                    "  {:20} {}",
+                    key,
+                    crate::tui::chat_lines::format_action(action)
+                ));
             }
             state.messages.push(ChatMessage {
                 role: MessageRole::System,

@@ -1,6 +1,9 @@
+pub mod chat_lines;
+pub mod dialogs;
 pub mod handler;
 pub mod keymap;
 pub mod render;
+pub mod sidebar;
 pub mod state;
 
 use anyhow::Result;
