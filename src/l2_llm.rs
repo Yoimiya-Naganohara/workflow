@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 pub struct L2LlmAuditEngine {
     provider: Arc<LlmProvider>,
+    model_id: String,
     max_consecutive_failures: u32,
     consecutive_failures: u32,
 }
@@ -20,9 +21,10 @@ struct JudgeDecision {
 }
 
 impl L2LlmAuditEngine {
-    pub fn new(provider: Arc<LlmProvider>, max_consecutive_failures: u32) -> Self {
+    pub fn new(provider: Arc<LlmProvider>, model_id: &str, max_consecutive_failures: u32) -> Self {
         Self {
             provider,
+            model_id: model_id.to_string(),
             max_consecutive_failures,
             consecutive_failures: 0,
         }
@@ -43,7 +45,7 @@ impl L2LlmAuditEngine {
         let prompt = self.build_judge_prompt(manifest);
 
         let request = crate::llm::LlmRequest {
-            model: "gpt-4".to_string(),
+            model: self.model_id.clone(),
             messages: vec![
                 crate::llm::Message {
                     role: "system".to_string(),
@@ -235,7 +237,7 @@ mod tests {
         let provider = Arc::new(LlmProvider::OpenAi(
             rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
         ));
-        let engine = L2LlmAuditEngine::new(provider, 3);
+        let engine = L2LlmAuditEngine::new(provider, "gpt-4", 3);
         let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.8, 0.3]);
 
         let prompt = engine.build_judge_prompt(&manifest);
