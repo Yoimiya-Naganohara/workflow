@@ -29,6 +29,9 @@ pub struct AgentRuntimeConfig {
     pub l1_confidence_threshold: f32,
     pub semantic_conflict_threshold: f32,
     pub suspend_timeout_ms: u64,
+    /// Path to the bedrock experience pool mmap file.
+    /// Defaults to `~/.workflow/experience_a.bin`.
+    pub bedrock_path: Option<std::path::PathBuf>,
 }
 
 impl Default for AgentRuntimeConfig {
@@ -41,6 +44,7 @@ impl Default for AgentRuntimeConfig {
             l1_confidence_threshold: crate::core::types::DEFAULT_L1_CONFIDENCE,
             semantic_conflict_threshold: crate::core::types::DEFAULT_SEMANTIC_THRESHOLD,
             suspend_timeout_ms: crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS,
+            bedrock_path: None,
         }
     }
 }
@@ -101,12 +105,27 @@ impl AgentRuntime {
     pub fn new(config: AgentRuntimeConfig, embedding_service: Arc<dyn EmbeddingService>) -> Self {
         use crate::admission::AdmissionController;
         use crate::agent::suspend::{SuspendConfig, SuspendQueue as SuspendQueueConcrete};
+        use crate::experience::DualTrackMemory;
         use crate::l0::L0CircuitBreaker;
         use crate::l0::resource::TaskResourceState;
-        use crate::l1::L1Retriever;
         use crate::l2::L2RuleAuditEngine;
+        use std::path::PathBuf;
 
         let state = TaskResourceState::new(config.initial_budget, config.max_depth);
+
+        // Determine bedrock path (default: ~/.workflow/experience_a.bin)
+        let bedrock_path = config.bedrock_path.clone().unwrap_or_else(|| {
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .unwrap_or_else(|_| ".".to_string());
+            PathBuf::from(home).join(".workflow").join("experience_a.bin")
+        });
+
+        // Open dual-track memory with mmap persistence (creates file if needed)
+        let dual_track = Box::new(
+            DualTrackMemory::open(&bedrock_path, 512, config.l1_confidence_threshold)
+                .expect("Failed to open experience pool"),
+        );
 
         let pipeline = DecisionPipelineBuilder::new()
             .admission(Box::new(AdmissionController::new(
@@ -114,7 +133,7 @@ impl AgentRuntime {
                 config.admission_timeout_ms,
             )))
             .circuit_breaker(Box::new(L0CircuitBreaker::new(state)))
-            .experience(Box::new(L1Retriever::new(config.l1_confidence_threshold)))
+            .experience(dual_track)
             .audit_engine(Box::new(L2RuleAuditEngine::new(5)))
             .embedding(embedding_service)
             .suspend(Box::new(SuspendQueueConcrete::new(SuspendConfig {
@@ -240,6 +259,23 @@ impl AgentRuntime {
 
     pub fn pending_suspended(&self) -> usize {
         self.pipeline.pending_suspended()
+    }
+
+    // ── Experience pool ──
+
+    /// Flush the experience pool to disk.
+    pub fn flush_experience_pool(&self) -> Result<()> {
+        self.pipeline.flush_experience_pool()
+    }
+
+    /// Number of bedrock (persistent) experience entries.
+    pub fn bedrock_count(&self) -> usize {
+        self.pipeline.bedrock_count()
+    }
+
+    /// Number of fluid (volatile) experience entries.
+    pub fn fluid_count(&self) -> usize {
+        self.pipeline.fluid_count()
     }
 
     // ── Provider / Model ──

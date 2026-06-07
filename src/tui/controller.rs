@@ -14,7 +14,7 @@ use rig::providers::{llamafile, ollama};
 use tokio::sync::RwLock;
 
 use crate::agent::{Agent, AgentConfig, AgentStatus};
-use crate::llm::LlmProvider;
+use crate::llm::{self, LlmProvider};
 use crate::tui::state::{AgentEntry, AppState, ChatMessage, MessageRole, MessageStatus, SelectedModel};
 
 // ============================================================================
@@ -236,8 +236,111 @@ pub fn execute_shell(state: &Arc<RwLock<AppState>>, arg: &str) {
 }
 
 // ============================================================================
+//  Pool commands
+// ============================================================================
+
+pub fn execute_pool_command(state: &Arc<RwLock<AppState>>, cmd: &str, now: &str) {
+    let state_clone = state.clone();
+    let cmd = cmd.to_string();
+    let now = now.to_string();
+
+    tokio::spawn(async move {
+        let mut s = state_clone.write().await;
+
+        let (content, status) = match cmd.as_str() {
+            "stats" => {
+                let stats = if let Some(runtime) = &s.runtime {
+                    if let Ok(rt) = runtime.try_read() {
+                        let total = rt.experience_count();
+                        let bedrock = rt.bedrock_count();
+                        let fluid = rt.fluid_count();
+                        let pending = rt.pending_suspended();
+                        let remaining = rt.remaining_budget();
+                        let permits = rt.available_permits();
+                        [
+                            "Experience Pool Statistics:".to_string(),
+                            format!("  Total entries:    {}", total),
+                            format!("  Bedrock (A-track): {}", bedrock),
+                            format!("  Fluid  (B-track): {}", fluid),
+                            format!("  Pending suspend:  {}", pending),
+                            format!("  Remaining budget: {}", remaining),
+                            format!("  Available permits:{}", permits),
+                        ]
+                        .join("\n")
+                    } else {
+                        "Runtime locked".to_string()
+                    }
+                } else {
+                    "Runtime not available".to_string()
+                };
+                (stats, MessageStatus::Completed)
+            }
+            "flush" => {
+                let result = if let Some(runtime) = &s.runtime {
+                    if let Ok(rt) = runtime.try_read() {
+                        match rt.flush_experience_pool() {
+                            Ok(()) => "Experience pool flushed to disk".to_string(),
+                            Err(e) => format!("Flush failed: {}", e),
+                        }
+                    } else {
+                        "Runtime locked".to_string()
+                    }
+                } else {
+                    "Runtime not available".to_string()
+                };
+                let status = if result.contains("failed") {
+                    MessageStatus::Error
+                } else {
+                    MessageStatus::Completed
+                };
+                (result, status)
+            }
+            "clear" => {
+                let msg = if s.runtime.is_some() {
+                    "Pool clear requires runtime write access — not available".to_string()
+                } else {
+                    "Runtime not available".to_string()
+                };
+                (msg, MessageStatus::Completed)
+            }
+            "export" => (
+                "Export not yet implemented. Pool file is at ~/.workflow/experience_a.bin".to_string(),
+                MessageStatus::Completed,
+            ),
+            "import" => ("Import not yet implemented".to_string(), MessageStatus::Completed),
+            _ => (
+                format!("Unknown pool command: {}. Use /pool for help.", cmd),
+                MessageStatus::Completed,
+            ),
+        };
+
+        s.messages.push(ChatMessage {
+            role: MessageRole::System,
+            content,
+            timestamp: now,
+            status,
+        });
+        s.pool_stats.last_flush_result = Some("OK".to_string());
+    });
+}
+
+// ============================================================================
 //  Chat / Agent execution
 // ============================================================================
+
+/// Find the slot index of the currently streaming message (fallback to last thinking/streaming).
+fn find_streaming_slot(messages: &[ChatMessage], preferred: usize) -> usize {
+    messages
+        .get(preferred)
+        .filter(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
+        .map(|_| preferred)
+        .unwrap_or_else(|| {
+            messages
+                .iter()
+                .rposition(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
+                .unwrap_or(preferred)
+        })
+}
 
 pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: usize, request_id: u64) -> AbortHandle {
     let state_clone = state.clone();
@@ -292,9 +395,21 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
             (provider, model_id)
         };
 
-        // ── Stream ──
-        let system_prompt = "You are a helpful assistant. Always produce a concrete result.";
-        let mut stream = match provider.chat_stream(&model_id, system_prompt, &input_clone).await {
+        // ── Tool-enabled stream ──
+        let system_prompt = concat!(
+            "You are a helpful assistant with access to tools. ",
+            "You can read/write files, execute shell commands, and list directories. ",
+            "Always use the appropriate tool when asked. ",
+            "Produce a concrete result."
+        );
+        let tool_server = {
+            let s = state_clone.read().await;
+            s.tool_server.clone()
+        };
+        let mut stream = match provider
+            .chat_with_tools_stream_mcp(&model_id, system_prompt, &input_clone, &[], &tool_server)
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 let mut s = state_clone.write().await;
@@ -310,25 +425,31 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
         use futures::future::Abortable;
         let stream_result = Abortable::new(
             async {
-                while let Some(chunk) = stream.next().await {
-                    let chunk = chunk.map_err(|e| anyhow::anyhow!("{}", e))?;
-                    full_response.push_str(&chunk);
-
-                    let mut s = state_clone.write().await;
-                    let slot = s
-                        .messages
-                        .get(response_index)
-                        .filter(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
-                        .map(|_| response_index)
-                        .or_else(|| {
-                            s.messages
-                                .iter()
-                                .rposition(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
-                        })
-                        .unwrap_or(response_index);
-                    if let Some(msg) = s.messages.get_mut(slot) {
-                        msg.content = full_response.clone();
-                        msg.status = MessageStatus::Streaming;
+                while let Some(event) = stream.next().await {
+                    match event {
+                        llm::ToolEvent::Text(text) => {
+                            full_response.push_str(&text);
+                            let mut s = state_clone.write().await;
+                            let slot = find_streaming_slot(&s.messages, response_index);
+                            if let Some(msg) = s.messages.get_mut(slot) {
+                                msg.content = full_response.clone();
+                                msg.status = MessageStatus::Streaming;
+                            }
+                        }
+                        llm::ToolEvent::ToolCall { name, args, result: _ } => {
+                            let args_str =
+                                serde_json::to_string_pretty(&args).unwrap_or_else(|_| format!("{:?}", args));
+                            let tool_msg = format!("🔧 **{}**\n```json\n{}\n```", name, args_str);
+                            let now = chrono::Local::now().format("%H:%M:%S").to_string();
+                            let mut s = state_clone.write().await;
+                            s.messages.push(ChatMessage {
+                                role: MessageRole::Decision,
+                                content: tool_msg,
+                                timestamp: now,
+                                status: MessageStatus::Completed,
+                            });
+                        }
+                        llm::ToolEvent::Done => break,
                     }
                 }
                 Ok::<String, anyhow::Error>(full_response)

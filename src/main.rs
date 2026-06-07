@@ -48,7 +48,35 @@ async fn run_tui() -> Result<()> {
         state.runtime = Some(runtime);
     }
 
+    // Background task: periodic experience pool flush (every 30 seconds)
+    let flush_state = state.clone();
+    let flush_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            let s = flush_state.read().await;
+            if let Some(runtime) = &s.runtime {
+                if let Ok(rt) = runtime.try_read() {
+                    let _ = rt.flush_experience_pool();
+                }
+            }
+        }
+    });
+
     tui.run().await?;
+
+    // Stop the background flush task
+    flush_handle.abort();
+
+    // Flush experience pool on shutdown
+    {
+        let state = state.read().await;
+        if let Some(runtime) = &state.runtime {
+            if let Ok(rt) = runtime.try_read() {
+                let _ = rt.flush_experience_pool();
+            }
+        }
+    }
 
     Ok(())
 }

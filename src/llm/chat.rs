@@ -7,6 +7,7 @@ use rig::agent::{MultiTurnStreamItem, StreamingResult};
 use rig::completion::message::{AssistantContent, UserContent};
 use rig::message::Text;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
+use rig::tool::server::ToolServerHandle;
 
 /// Build a chat agent with standard temperature/max_tokens configuration.
 ///
@@ -21,6 +22,23 @@ macro_rules! build_chat_agent {
             .max_tokens(crate::core::types::DEFAULT_MAX_TOKENS)
             .build()
     };
+}
+
+/// Per-provider match arm for `chat_with_tools_stream_mcp`.
+///
+/// Uses `ToolServerHandle` so tools can be added/removed at runtime
+/// without recompiling.
+macro_rules! mcp_stream_arm {
+    ($client:expr, $model:expr, $system:expr, $handle:expr, $msg:expr, $history:expr) => {{
+        let agent = $client
+            .agent($model)
+            .preamble($system)
+            .temperature(crate::core::types::DEFAULT_TEMPERATURE)
+            .max_tokens(crate::core::types::DEFAULT_MAX_TOKENS)
+            .tool_server_handle($handle.clone())
+            .build();
+        Ok(Self::wrap_tool_stream(agent.stream_chat($msg, $history).await))
+    }};
 }
 
 impl LlmProvider {
@@ -45,6 +63,33 @@ impl LlmProvider {
         history: &[(String, String)],
     ) -> Result<ChatStream> {
         self.do_chat_stream(model, system, message, history).await
+    }
+
+    /// Stream a chat response with MCP tool-calling capability.
+    ///
+    /// Uses a [`ToolServerHandle`] so tools can be added or removed at runtime
+    /// without recompiling the agent. Tool calls are yielded as
+    /// `ToolEvent::ToolCall` events alongside text chunks.
+    pub async fn chat_with_tools_stream_mcp(
+        &self,
+        model: &str,
+        system: &str,
+        message: &str,
+        history: &[(String, String)],
+        tool_server: &ToolServerHandle,
+    ) -> Result<ToolChatStream> {
+        let history = Self::build_history(history);
+        match self {
+            Self::OpenAi(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
+            Self::Anthropic(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
+            Self::Cohere(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
+            Self::Gemini(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
+            Self::Mistral(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
+            Self::Ollama(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
+            Self::Llamafile(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
+            Self::Azure(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
+            Self::Copilot(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
+        }
     }
 
     fn build_history(history: &[(String, String)]) -> Vec<rig::completion::Message> {
@@ -121,6 +166,52 @@ impl LlmProvider {
                     Ok(_) => {}
                     Err(err) => {
                         yield Err(anyhow::anyhow!(err.to_string()));
+                        break;
+                    }
+                }
+            }
+        };
+        Box::pin(stream)
+    }
+
+    fn wrap_tool_stream<R>(stream: StreamingResult<R>) -> ToolChatStream
+    where
+        R: Clone + Unpin + rig::completion::GetTokenUsage + Send + 'static,
+    {
+        let stream = stream! {
+            let mut stream = stream;
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::Text(Text { text, .. }),
+                    )) => {
+                        yield ToolEvent::Text(text);
+                    }
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::ToolCall {
+                            tool_call,
+                            internal_call_id: _,
+                        },
+                    )) => {
+                        let tool_name = tool_call.function.name.clone();
+                        let args = tool_call.function.arguments.clone();
+                        yield ToolEvent::ToolCall {
+                            name: tool_name,
+                            args,
+                            result: String::new(),
+                        };
+                    }
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::Reasoning(_),
+                    )) => {}
+                    Ok(MultiTurnStreamItem::FinalResponse(_)) => {
+                        yield ToolEvent::Done;
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        yield ToolEvent::Text(err.to_string());
+                        yield ToolEvent::Done;
                         break;
                     }
                 }

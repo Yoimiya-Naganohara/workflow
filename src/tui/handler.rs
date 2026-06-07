@@ -11,6 +11,7 @@ use futures::future::AbortHandle;
 use super::Tui;
 use super::state::{AppMode, AppState, COMMANDS, ChatMessage, Focus, MessageRole, MessageStatus, Panel, SelectedModel};
 use crate::models::filter_providers;
+use crate::tui::chat_lines::char_idx_to_byte_idx;
 use crate::tui::controller;
 
 impl Tui {
@@ -84,7 +85,16 @@ impl Tui {
                 state.chat_scroll = 0;
             }
             KeyCode::Enter if state.focus == Focus::Input => {
-                return self.handle_input_submit(state);
+                let is_alt = key.modifiers.contains(crossterm::event::KeyModifiers::ALT);
+                if is_alt {
+                    // Alt+Enter: insert newline
+                    let byte_idx = char_idx_to_byte_idx(&state.input, state.input_cursor);
+                    state.input.insert(byte_idx, '\n');
+                    state.input_cursor += 1;
+                } else {
+                    // Enter: submit
+                    return self.handle_input_submit(state);
+                }
             }
             KeyCode::Up
                 if state.focus == Focus::Input && !state.input.starts_with('/') && !state.input_history.is_empty() =>
@@ -126,7 +136,7 @@ impl Tui {
                 if state.focus == Focus::Input
                     && (key.modifiers.is_empty() || key.modifiers == crossterm::event::KeyModifiers::SHIFT) =>
             {
-                let byte_idx = Self::char_idx_to_byte_idx(&state.input, state.input_cursor);
+                let byte_idx = char_idx_to_byte_idx(&state.input, state.input_cursor);
                 state.input.insert(byte_idx, c);
                 state.input_cursor += 1;
                 state.input_history_idx = None;
@@ -137,7 +147,7 @@ impl Tui {
             KeyCode::Backspace if state.focus == Focus::Input => {
                 if state.input_cursor > 0 {
                     state.input_cursor -= 1;
-                    let byte_idx = Self::char_idx_to_byte_idx(&state.input, state.input_cursor);
+                    let byte_idx = char_idx_to_byte_idx(&state.input, state.input_cursor);
                     state.input.remove(byte_idx);
                     state.input_history_idx = None;
                     if state.input.starts_with('/') {
@@ -168,14 +178,14 @@ impl Tui {
                 state.key_cursor = 0;
             }
             KeyCode::Char(c) => {
-                let byte_idx = Self::char_idx_to_byte_idx(&state.key_input, state.key_cursor);
+                let byte_idx = char_idx_to_byte_idx(&state.key_input, state.key_cursor);
                 state.key_input.insert(byte_idx, c);
                 state.key_cursor += 1;
             }
             KeyCode::Backspace => {
                 if state.key_cursor > 0 {
                     state.key_cursor -= 1;
-                    let byte_idx = Self::char_idx_to_byte_idx(&state.key_input, state.key_cursor);
+                    let byte_idx = char_idx_to_byte_idx(&state.key_input, state.key_cursor);
                     state.key_input.remove(byte_idx);
                 }
             }
@@ -265,7 +275,7 @@ impl Tui {
             }
             KeyCode::Char(c) => {
                 let byte_idx =
-                    Self::char_idx_to_byte_idx(&state.model_picker_search_query, state.model_picker_search_cursor);
+                    char_idx_to_byte_idx(&state.model_picker_search_query, state.model_picker_search_cursor);
                 state.model_picker_search_query.insert(byte_idx, c);
                 state.model_picker_search_cursor += 1;
                 state.selected_model_picker_idx = 0;
@@ -274,7 +284,7 @@ impl Tui {
                 if state.model_picker_search_cursor > 0 {
                     state.model_picker_search_cursor -= 1;
                     let byte_idx =
-                        Self::char_idx_to_byte_idx(&state.model_picker_search_query, state.model_picker_search_cursor);
+                        char_idx_to_byte_idx(&state.model_picker_search_query, state.model_picker_search_cursor);
                     state.model_picker_search_query.remove(byte_idx);
                     state.selected_model_picker_idx = 0;
                 }
@@ -361,7 +371,7 @@ impl Tui {
                 state.selected_provider_idx = state.selected_provider_idx.saturating_sub(1);
             }
             KeyCode::Char(c) => {
-                let byte_idx = Self::char_idx_to_byte_idx(&state.provider_search_query, state.provider_search_cursor);
+                let byte_idx = char_idx_to_byte_idx(&state.provider_search_query, state.provider_search_cursor);
                 state.provider_search_query.insert(byte_idx, c);
                 state.provider_search_cursor += 1;
                 state.selected_provider_idx = 0;
@@ -370,7 +380,7 @@ impl Tui {
                 if state.provider_search_cursor > 0 {
                     state.provider_search_cursor -= 1;
                     let byte_idx =
-                        Self::char_idx_to_byte_idx(&state.provider_search_query, state.provider_search_cursor);
+                        char_idx_to_byte_idx(&state.provider_search_query, state.provider_search_cursor);
                     state.provider_search_query.remove(byte_idx);
                     state.selected_provider_idx = 0;
                 }
@@ -551,6 +561,37 @@ impl Tui {
             return true;
         }
 
+        // ── Pool commands ──
+
+        if trimmed == "/pool" {
+            let help = [
+                "Pool commands:",
+                "  /pool stats    - Show experience pool statistics",
+                "  /pool flush    - Flush bedrock to disk",
+                "  /pool clear    - Clear both tracks",
+                "  /pool export   - Export experiences as JSON",
+                "  /pool import   - Import experiences from JSON",
+            ]
+            .join("\n");
+            state.messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: help,
+                timestamp: now.clone(),
+                status: MessageStatus::Completed,
+            });
+            state.input.clear();
+            state.input_cursor = 0;
+            return true;
+        }
+
+        if let Some(arg) = trimmed.strip_prefix("/pool ") {
+            let arg = arg.trim();
+            controller::execute_pool_command(&self.state, arg, &now);
+            state.input.clear();
+            state.input_cursor = 0;
+            return true;
+        }
+
         if trimmed == "/apply" {
             if let Some(plan) = &mut state.current_plan {
                 if plan.status == crate::agent::plan::PlanStatus::Draft {
@@ -637,13 +678,6 @@ impl Tui {
     }
 
     // ── Utility — kept here because they're purely string-manipulation ──
-
-    fn char_idx_to_byte_idx(s: &str, char_idx: usize) -> usize {
-        s.char_indices()
-            .nth(char_idx)
-            .map(|(byte_idx, _)| byte_idx)
-            .unwrap_or(s.len())
-    }
 
     fn char_count(s: &str) -> usize {
         s.chars().count()

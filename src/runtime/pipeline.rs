@@ -196,6 +196,21 @@ impl DecisionPipeline {
             .experience_count()
     }
 
+    pub fn flush_experience_pool(&self) -> Result<()> {
+        self.experience.lock().expect("experience mutex poisoned").flush()
+    }
+
+    pub fn bedrock_count(&self) -> usize {
+        self.experience
+            .lock()
+            .expect("experience mutex poisoned")
+            .bedrock_count()
+    }
+
+    pub fn fluid_count(&self) -> usize {
+        self.experience.lock().expect("experience mutex poisoned").fluid_count()
+    }
+
     pub fn pending_suspended(&self) -> usize {
         self.suspend.lock().expect("suspend mutex poisoned").len()
     }
@@ -231,15 +246,11 @@ pub(crate) use builder_method;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::LlmProvider;
     use crate::llm::embedding::EmbeddingService as EmbeddingServiceImpl;
     use std::sync::Arc;
 
     fn dummy_embedding() -> Arc<dyn EmbeddingService> {
-        let provider = Arc::new(LlmProvider::OpenAi(
-            rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
-        ));
-        Arc::new(EmbeddingServiceImpl::new(provider))
+        Arc::new(EmbeddingServiceImpl::new())
     }
 
     #[tokio::test]

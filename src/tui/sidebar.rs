@@ -214,12 +214,28 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
     if let Some(runtime) = &state.runtime {
         if let Ok(rt) = runtime.try_read() {
             let exp_count = rt.experience_count();
+            let bedrock = rt.bedrock_count();
+            let fluid = rt.fluid_count();
             let pending = rt.pending_suspended();
             lines.push(Line::from(vec![
-                Span::styled("  pool    ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  total   ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("{} entries", exp_count),
                     Style::default().fg(if exp_count > 0 { Color::Green } else { Color::DarkGray }),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  bedrock ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{} entries", bedrock),
+                    Style::default().fg(if bedrock > 0 { Color::Green } else { Color::DarkGray }),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  fluid   ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{} entries", fluid),
+                    Style::default().fg(if fluid > 0 { Color::Yellow } else { Color::DarkGray }),
                 ),
             ]));
             lines.push(Line::from(vec![

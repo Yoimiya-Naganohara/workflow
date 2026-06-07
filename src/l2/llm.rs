@@ -255,7 +255,7 @@ mod tests {
             conflict_type: ConflictType::ActionContradiction,
             contending_agents: SmallVec::from_vec(agents),
             trace_id: [0u8; 16],
-            context_embeddings: SmallVec::from_vec(vec![[0.0f32; EMBEDDING_DIM]; 2]),
+            context_embeddings: SmallVec::from_vec(vec![[0.0f32; crate::core::types::EMBEDDING_DIM]; 2]),
             dynamic_priority_scores: SmallVec::from_vec(priorities),
         }
     }

@@ -125,6 +125,17 @@ impl Tui {
             }
 
             if last_tick.elapsed() >= tick_rate {
+                // Auto-scroll to bottom when streaming
+                {
+                    let mut s = self.state.write().await;
+                    if s.active_chat_requests > 0 && s.auto_scroll {
+                        let cache_len = self.chat_lines_cache.len();
+                        let max_scroll = cache_len.saturating_sub(8);
+                        if s.chat_scroll < max_scroll {
+                            s.chat_scroll = max_scroll;
+                        }
+                    }
+                }
                 last_tick = Instant::now();
             }
         }

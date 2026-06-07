@@ -24,3 +24,21 @@ pub struct LlmResponse {
 }
 
 pub type ChatStream = Pin<Box<dyn Stream<Item = Result<String>> + Send>>;
+
+/// Event emitted during a tool-enabled chat stream.
+#[derive(Debug, Clone)]
+pub enum ToolEvent {
+    /// A text chunk from the assistant.
+    Text(String),
+    /// A tool call that was executed, with its result.
+    ToolCall {
+        name: String,
+        args: serde_json::Value,
+        result: String,
+    },
+    /// The stream has completed.
+    Done,
+}
+
+/// Streaming type for tool-enabled chat, yielding tool events.
+pub type ToolChatStream = Pin<Box<dyn Stream<Item = ToolEvent> + Send>>;

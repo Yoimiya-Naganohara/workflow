@@ -1,8 +1,8 @@
 pub mod arbitration;
 pub mod classifier;
 
-use crate::core::types::EMBEDDING_DIM;
 use crate::core::simd::cosine_similarity_768;
+use crate::core::types::EMBEDDING_DIM;
 use crate::core::types::{ExperienceEntry, SpawnRejection};
 pub use arbitration::L1ArbitrationResult;
 pub use classifier::{L1ValueClassifier, ValueAssessment};
@@ -176,6 +176,19 @@ pub trait ExperienceRetrieval: Send + Sync {
     ) -> Result<L1Assessment, SpawnRejection>;
     fn add_experience(&mut self, entry: ExperienceEntry);
     fn experience_count(&self) -> usize;
+
+    /// Flush persistent storage to disk (no-op for in-memory retrievers).
+    fn flush(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+    /// Number of bedrock (persistent) entries.
+    fn bedrock_count(&self) -> usize {
+        0
+    }
+    /// Number of fluid (volatile) entries.
+    fn fluid_count(&self) -> usize {
+        0
+    }
 }
 
 impl ExperienceRetrieval for L1Retriever {

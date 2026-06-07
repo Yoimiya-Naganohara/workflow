@@ -1,4 +1,7 @@
 //! Main UI rendering — layout, status bar.
+//!
+//! Auto-scrolls to bottom during streaming, drives thinking frame
+//! animation, and renders chat with word-wrap enabled.
 
 use anyhow::Result;
 use ratatui::{
@@ -6,39 +9,49 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
 
 use super::Tui;
 use super::state::{AppMode, AppState, Focus};
-use crate::tui::chat_lines::build_chat_lines;
+use crate::tui::chat_lines::{build_chat_lines, char_idx_to_byte_idx};
 use crate::tui::dialogs;
 use crate::tui::sidebar::render_sidebar;
 
 impl Tui {
     pub(crate) async fn draw(&mut self) -> Result<()> {
-        let state = self.state.read().await;
+        // Quick write-lock to bump the animation frame.
+        {
+            let mut s = self.state.write().await;
+            s.think_frame = s.think_frame.wrapping_add(1);
+        }
 
+        let state = self.state.read().await;
         let term_size = self.terminal.size()?;
         let chat_width = (term_size.width.saturating_sub(4)).max(1) as usize;
         let msg_count = state.messages.len();
         let is_streaming = state.active_chat_requests > 0;
 
+        // Rebuild cache when messages or streaming state change.
         if is_streaming || msg_count != self.chat_cache_msg_count || chat_width != self.chat_cache_width {
             self.chat_lines_cache = build_chat_lines(&state, chat_width);
             self.chat_cache_msg_count = msg_count;
             self.chat_cache_width = chat_width;
         }
 
-        // Pre-compute chat scroll to avoid borrow conflict inside closure
+        let visible_height = (term_size.height.saturating_sub(7)).max(1) as usize;
         let chat_scroll = state.chat_scroll.min(self.chat_lines_cache.len().saturating_sub(1));
         let visible_lines: Vec<_> = self
             .chat_lines_cache
             .iter()
             .skip(chat_scroll)
-            .take((term_size.height.saturating_sub(4)).max(1) as usize)
+            .take(visible_height)
             .cloned()
             .collect();
+
+        let show_provider = state.show_provider_dialog;
+        let show_key = state.show_key_dialog;
+        let show_picker = state.show_model_picker;
 
         self.terminal.draw(|f| {
             let vert_chunks = Layout::default()
@@ -60,11 +73,11 @@ impl Tui {
             Self::render_chat(f, chat_area, &state, &visible_lines);
             Self::render_status_bar(f, vert_chunks[1], &state);
 
-            if state.show_provider_dialog {
+            if show_provider {
                 dialogs::render_provider_dialog(f, vert_chunks[0], &state);
-            } else if state.show_key_dialog {
+            } else if show_key {
                 dialogs::render_key_dialog(f, vert_chunks[0], &state);
-            } else if state.show_model_picker {
+            } else if show_picker {
                 dialogs::render_model_picker(f, vert_chunks[0], &state);
             } else {
                 dialogs::render_command_popup(f, chat_area, &state);
@@ -74,16 +87,17 @@ impl Tui {
         Ok(())
     }
 
-    fn render_chat(f: &mut Frame, area: Rect, state: &AppState, visible_lines: &[ratatui::text::Line<'static>]) {
-        let chunks = ratatui::layout::Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([
-                ratatui::layout::Constraint::Min(0),
-                ratatui::layout::Constraint::Length(3),
-            ])
+    fn render_chat(f: &mut Frame, area: Rect, state: &AppState, visible_lines: &[Line<'static>]) {
+        // Dynamic input height: grows for multi-line input (max 5 lines).
+        let input_lines = state.input.lines().count().clamp(1, 5) as u16;
+        let input_height = input_lines + 2; // borders
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(input_height)])
             .split(area);
 
-        // Chat message area
+        // ── Chat messages with word wrap ──
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Chat ")
@@ -91,39 +105,46 @@ impl Tui {
         let inner = block.inner(chunks[0]);
         f.render_widget(block, chunks[0]);
         f.render_widget(
-            ratatui::widgets::Paragraph::new(ratatui::text::Text::from(visible_lines.to_vec())),
+            Paragraph::new(ratatui::text::Text::from(visible_lines.to_vec())).wrap(Wrap { trim: false }),
             inner,
         );
 
-        // Input box
-        let input_style = if state.focus == crate::tui::state::Focus::Input {
+        // ── Input box ──
+        let input_style = if state.focus == Focus::Input {
             Style::default().fg(Color::Cyan)
         } else {
             Style::default()
         };
-        let input_text = if state.input.is_empty() {
-            "Type a message or /command..."
+        let placeholder = "Type a message or /command… (Alt+Enter newline)";
+        let input_display = if state.input.is_empty() {
+            Paragraph::new(placeholder).style(input_style.fg(Color::DarkGray))
         } else {
-            state.input.as_str()
+            Paragraph::new(state.input.as_str()).style(input_style)
         };
-        let input_display_style = if state.input.is_empty() {
-            input_style.fg(Color::DarkGray)
-        } else {
-            input_style
-        };
+
         f.render_widget(
-            ratatui::widgets::Paragraph::new(input_text)
-                .style(input_display_style)
-                .block(Block::default().borders(Borders::ALL)),
+            input_display
+                .block(Block::default().borders(Borders::ALL))
+                .wrap(Wrap { trim: false }),
             chunks[1],
         );
 
-        // Cursor
-        if state.focus == crate::tui::state::Focus::Input {
+        // ── Cursor ──
+        if state.focus == Focus::Input && !state.input.is_empty() {
             let prefix_width = crate::tui::chat_lines::display_width_up_to(&state.input, state.input_cursor);
             let cursor_x = chunks[1].x + prefix_width as u16 + 1;
-            let cursor_y = chunks[1].y + 1;
-            f.set_cursor_position((cursor_x.min(chunks[1].right().saturating_sub(1)), cursor_y));
+            // Place cursor on the correct visual line.
+            let line_no = state.input[..char_idx_to_byte_idx(&state.input, state.input_cursor)]
+                .lines()
+                .count()
+                .saturating_sub(1);
+            let cursor_y = chunks[1].y + 1 + line_no as u16;
+            f.set_cursor_position((
+                cursor_x.min(chunks[1].right().saturating_sub(1)),
+                cursor_y.min(chunks[1].bottom().saturating_sub(1)),
+            ));
+        } else if state.focus == Focus::Input {
+            f.set_cursor_position((chunks[1].x + 1, chunks[1].y + 1));
         }
     }
 
@@ -144,7 +165,7 @@ impl Tui {
         } else if state.show_model_picker {
             "Esc close · Enter toggle · Ctrl+A providers".to_string()
         } else if state.focus == Focus::Chat {
-            "Up/Down scroll · Ctrl+P models · Ctrl+C quit".to_string()
+            "↑↓ scroll · g top · G bottom · Ctrl+P models · Ctrl+C quit".to_string()
         } else {
             let panel_hint = if state.show_status_panel {
                 "Tab hide panel"
@@ -152,7 +173,7 @@ impl Tui {
                 "Tab show panel"
             };
             let mode_hint = match state.mode {
-                AppMode::Plan => "Type a goal · /apply build · /connect provider · /models pick",
+                AppMode::Plan => "Enter send · Alt+Enter newline · ↑↓ history · /cmd · Ctrl+P/Ctrl+C",
                 AppMode::Build => "/apply execute · /connect provider · Ctrl+P models",
             };
             format!("{} · {} · Ctrl+C quit", mode_hint, panel_hint)

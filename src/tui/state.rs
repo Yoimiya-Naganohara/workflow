@@ -6,6 +6,16 @@ use tokio::sync::RwLock;
 
 use crate::models::ModelRegistry;
 use crate::runtime::AgentRuntime;
+use crate::tools::ToolServerHandle;
+
+/// Statistics about the dual-track experience pool.
+#[derive(Debug, Clone, Default)]
+pub struct ExperiencePoolStats {
+    pub total: usize,
+    pub bedrock: usize,
+    pub fluid: usize,
+    pub last_flush_result: Option<String>,
+}
 
 #[derive(Clone, PartialEq)]
 pub enum Focus {
@@ -68,6 +78,13 @@ pub struct AppState {
     pub show_status_panel: bool,
     pub runtime: Option<Arc<RwLock<AgentRuntime>>>,
     pub keymap: super::keymap::Keymap,
+    pub pool_stats: ExperiencePoolStats,
+    /// Thinking animation counter (0..3) — cycles every render tick.
+    pub think_frame: u8,
+    /// Whether chat is auto-scrolled to bottom.
+    pub auto_scroll: bool,
+    /// MCP tool server handle with built-in tools.
+    pub tool_server: ToolServerHandle,
 }
 
 #[derive(Clone)]
@@ -181,6 +198,10 @@ impl Default for AppState {
             show_status_panel: true,
             runtime: None,
             keymap: super::keymap::Keymap::default(),
+            pool_stats: ExperiencePoolStats::default(),
+            think_frame: 0,
+            auto_scroll: true,
+            tool_server: crate::tools::create_tool_server(),
         }
     }
 }
@@ -191,6 +212,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/apply", "Approve and execute plan"),
     ("/clear", "Clear conversation"),
     ("/sh", "Run a shell command"),
+    ("/pool", "Manage experience pool (flush/clear/stats/export/import)"),
     ("/keymap", "Show keyboard shortcuts"),
     ("/help", "Show help"),
 ];

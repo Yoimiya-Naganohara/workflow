@@ -145,7 +145,7 @@ Build a holographic self-evolving multi-agent system in Rust with layered decisi
 - L-1 admission control (tokio semaphore, 100ms timeout)
 - L0 circuit breaker (CAS budget deduction, depth check, tool lock arbitration)
 - SuspendQueue with priority ordering and timeout pruning
-- SIMD cosine similarity for 768-dim vectors
+- SIMD cosine similarity for 384-dim vectors
 - L1 experience retrieval with confidence threshold
 - L1 value classifier (keyword-based)
 - L1 cognitive arbitration (semantic conflict detection)
@@ -169,7 +169,29 @@ Build a holographic self-evolving multi-agent system in Rust with layered decisi
 - Lazy models.dev fetch (only on `/connect`, not on startup)
 - Module split: tui/, llm/, l1/ directories
 - Dependency bumps: ratatui 0.30, crossterm 0.29, reqwest 0.13, rig 0.38
-- 62 passing tests, zero clippy warnings, clean compile
+- **Experience pool with mmap persistence** (A-track bedrock, memmap2-backed, file format with header + entries, auto-grow, flush-on-mutation)
+- **Dual-track memory** (A-track bedrock via mmap + B-track fluid via in-memory Vec, merged search with credibility weighting)
+- **Leader clustering with Welford update** (online centroid/variance, configurable threshold, consolidate fluid→bedrock with min-cluster-size filter)
+- **Auto-consolidation** (fluid auto-drains to bedrock via clustering when exceeding threshold)
+- 92 passing tests, zero clippy warnings, clean compile
+- **DualTrackMemory wired as default ExperienceRetrieval** in AgentRuntime::new() — new runtimes use persistent pool
+- **Background pool flush** every 30s via tokio background task; final flush on shutdown
+- **Pool stats in sidebar** (bedrock/fluid counts, pending suspend, budget, permits)
+- **`/pool` command** with subcommands: stats, flush, clear, export, import
+- **Thinking animation** — cycling dots (●●●) replacing static blinking indicator
+- **Auto-scroll to bottom** during streaming responses
+- **Word wrap** — long lines wrap at chat boundary instead of overflowing
+- **Multi-line input** — `Alt+Enter` inserts newline, `Enter` sends, input box grows dynamically up to 5 lines
+- **Improved code blocks** — bordered style (`┌─ lang` / `│` / `└───`) with better visual separation
+- **Inline backtick highlighting** with italic cyan styling
+- **Better status bar hints** — shows keyboard shortcuts contextually
+- **MCP tool calling via `rmcp` crate** — integrated with rig's `ToolServer` + `ToolServerHandle` infrastructure
+- **Built-in tools** — `read_file`, `write_file`, `sh`, `list_dir` implementing `rig::tool::Tool` trait with typed Args
+- **Dynamic tool registration** — tools registered on `ToolServer` at runtime, agent uses `.tool_server_handle()`
+- **Tool-enabled streaming** — `chat_with_tools_stream_mcp()` yields `ToolEvent::Text` / `ToolEvent::ToolCall` / `ToolEvent::Done`
+- **Multi-provider support** — all 9 provider variants via `mcp_stream_arm!` macro
+- **Tools wired into TUI chat** — `ToolServerHandle` in `AppState`, initialized with `create_tool_server()`
+- **Tool call display** — tool invocations shown as `Decision` messages in chat with formatted args
 
 #### In Progress
 - (none currently)
@@ -189,11 +211,19 @@ Build a holographic self-evolving multi-agent system in Rust with layered decisi
 - Always use model ID (not name) for agent creation
 - Chat uses `LlmProvider::chat()` with system preamble and selected model
 - Async LLM calls via `tokio::spawn` to avoid blocking TUI
+- DualTrackMemory is the default ExperienceRetrieval; DecisionPipelineBuilder keeps L1Retriever for backward compat
+- Added `flush()`, `bedrock_count()`, `fluid_count()` to ExperienceRetrieval trait with no-op defaults
+- Background flush every 30s via tokio::spawn; final flush on TUI Drop
+- `/pool` command parsed in handler, delegated to controller::execute_pool_command
+- Pool stats shown in sidebar as: total, bedrock, fluid, pending suspend
 
 ### Next Steps
 - Test with real API keys in interactive terminal
-- Add experience pool with mmap persistence
-- Implement dual-track memory (A-track bedrock, B-track fluid)
+- Add `/pool export <path>` and `/pool import <path>` with JSON serialization
+- Add `/pool clear` with confirmation (requires runtime write access)
+- Add pool stats auto-refresh in TUI sidebar (currently reads on render tick)
+- Implement pool compaction (remove stale/low-weight entries from bedrock)
+- Add memmap2 rescue/repair on file corruption
 
 ### Relevant Files
 - /home/user/Code/workflow/AGENTS.md: instruction file
@@ -208,4 +238,7 @@ Build a holographic self-evolving multi-agent system in Rust with layered decisi
 - /home/user/Code/workflow/src/l2_llm.rs: LLM-powered L2 audit
 - /home/user/Code/workflow/src/resource.rs: TaskResourceState + BudgetGuard
 - /home/user/Code/workflow/src/suspend.rs: SuspendQueue with priority ordering
-- /home/user/Code/workflow/src/simd.rs: cosine similarity for 768-dim vectors
+- /home/user/Code/workflow/src/core/simd.rs: cosine similarity for 384-dim vectors
+- /home/user/Code/workflow/src/experience/pool.rs: mmap-backed experience pool (A-track)
+- /home/user/Code/workflow/src/experience/dual_track.rs: dual-track memory (A-track + B-track)
+- /home/user/Code/workflow/src/experience/clustering.rs: leader clustering with Welford update
