@@ -717,7 +717,7 @@ mod tests {
         }
 
         fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
-            crate::simd::cosine_similarity_768(a, b)
+            crate::core::simd::cosine_similarity_768(a, b)
         }
 
         fn cache_size(&self) -> usize {
