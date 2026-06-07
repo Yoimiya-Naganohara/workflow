@@ -279,9 +279,24 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
 
         let mut s = state_clone.write().await;
         let now = chrono::Local::now().format("%H:%M:%S").to_string();
+
+        // Locate the pending message slot: prefer response_index if it still
+        // points to a Thinking/Streaming message; otherwise search backwards.
+        let slot = s
+            .messages
+            .get(response_index)
+            .filter(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
+            .map(|_| response_index)
+            .or_else(|| {
+                s.messages
+                    .iter()
+                    .rposition(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
+            })
+            .unwrap_or(response_index);
+
         match result {
             Ok(Ok(response)) => {
-                if let Some(message) = s.messages.get_mut(response_index) {
+                if let Some(message) = s.messages.get_mut(slot) {
                     message.content = if response.is_empty() {
                         "(no text response)".to_string()
                     } else {
@@ -301,7 +316,7 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
                 }
             }
             Ok(Err(e)) => {
-                if let Some(message) = s.messages.get_mut(response_index) {
+                if let Some(message) = s.messages.get_mut(slot) {
                     message.content = format!("Error: {}", e);
                     message.status = MessageStatus::Error;
                 } else {
@@ -314,7 +329,7 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
                 }
             }
             Err(_) => {
-                if let Some(message) = s.messages.get_mut(response_index) {
+                if let Some(message) = s.messages.get_mut(slot) {
                     message.content += " (cancelled)";
                     message.status = MessageStatus::Completed;
                 }
