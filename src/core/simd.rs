@@ -38,16 +38,16 @@ mod tests {
 
     #[test]
     fn test_cosine_similarity_identical() {
-        let a = [1.0f32; 768];
-        let b = [1.0f32; 768];
+        let a = [1.0f32; EMBEDDING_DIM];
+        let b = [1.0f32; EMBEDDING_DIM];
         let sim = cosine_similarity_768(&a, &b);
         assert!((sim - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_cosine_similarity_orthogonal() {
-        let mut a = [0.0f32; 768];
-        let mut b = [0.0f32; 768];
+        let mut a = [0.0f32; EMBEDDING_DIM];
+        let mut b = [0.0f32; EMBEDDING_DIM];
         a[0] = 1.0;
         b[1] = 1.0;
         let sim = cosine_similarity_768(&a, &b);
@@ -56,22 +56,22 @@ mod tests {
 
     #[test]
     fn test_cosine_similarity_opposite() {
-        let a = [1.0f32; 768];
-        let b = [-1.0f32; 768];
+        let a = [1.0f32; EMBEDDING_DIM];
+        let b = [-1.0f32; EMBEDDING_DIM];
         let sim = cosine_similarity_768(&a, &b);
         assert!((sim - (-1.0)).abs() < 1e-6);
     }
 
     #[test]
     fn test_find_top_k() {
-        let mut entries = vec![[0.0f32; 768]; 5];
+        let mut entries = vec![[0.0f32; EMBEDDING_DIM]; 5];
         entries[0][0] = 1.0;
         entries[1][0] = 0.8;
         entries[2][0] = 0.6;
         entries[3][0] = 0.4;
         entries[4][0] = 0.2;
 
-        let mut query = [0.0f32; 768];
+        let mut query = [0.0f32; EMBEDDING_DIM];
         query[0] = 1.0;
         let results = find_top_k(&query, &entries, 3);
 

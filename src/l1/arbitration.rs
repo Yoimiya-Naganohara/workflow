@@ -78,9 +78,9 @@ mod tests {
     fn test_detect_semantic_conflict() {
         let arbitrator = L1Arbitrator::new(-0.6);
 
-        let mut a = [0.0f32; 768];
+        let mut a = [0.0f32; EMBEDDING_DIM];
         a[0] = 1.0;
-        let mut b = [0.0f32; 768];
+        let mut b = [0.0f32; EMBEDDING_DIM];
         b[0] = -1.0;
 
         assert!(arbitrator.detect_semantic_conflict(&a, &b));
@@ -90,9 +90,9 @@ mod tests {
     fn test_no_semantic_conflict() {
         let arbitrator = L1Arbitrator::new(-0.6);
 
-        let mut a = [0.0f32; 768];
+        let mut a = [0.0f32; EMBEDDING_DIM];
         a[0] = 1.0;
-        let mut b = [0.0f32; 768];
+        let mut b = [0.0f32; EMBEDDING_DIM];
         b[0] = 1.0;
 
         assert!(!arbitrator.detect_semantic_conflict(&a, &b));
@@ -107,7 +107,7 @@ mod tests {
             conflict_type: ConflictType::ActionContradiction,
             contending_agents: SmallVec::from_slice(&[[1u8; 16], [2u8; 16]]),
             trace_id: [0u8; 16],
-            context_embeddings: SmallVec::from_slice(&[[0.0f32; 768], [0.0f32; 768]]),
+            context_embeddings: SmallVec::from_slice(&[[0.0f32; EMBEDDING_DIM], [0.0f32; EMBEDDING_DIM]]),
             dynamic_priority_scores: SmallVec::from_slice(&[0.8, 0.3]),
         };
 

@@ -183,7 +183,7 @@ Please respond with JSON:
     }
 
     fn generate_override_patch(&self, manifest: &ConflictManifest) -> crate::core::conflict::OverridePatch {
-        let mut embedding = [0.0f32; 768];
+        let mut embedding = [0.0f32; crate::core::types::EMBEDDING_DIM];
         if !manifest.context_embeddings.is_empty() {
             embedding.copy_from_slice(&manifest.context_embeddings[0]);
         }
@@ -255,7 +255,7 @@ mod tests {
             conflict_type: ConflictType::ActionContradiction,
             contending_agents: SmallVec::from_vec(agents),
             trace_id: [0u8; 16],
-            context_embeddings: SmallVec::from_vec(vec![[0.0f32; 768]; 2]),
+            context_embeddings: SmallVec::from_vec(vec![[0.0f32; EMBEDDING_DIM]; 2]),
             dynamic_priority_scores: SmallVec::from_vec(priorities),
         }
     }

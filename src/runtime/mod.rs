@@ -701,7 +701,7 @@ mod tests {
     #[async_trait::async_trait]
     impl EmbeddingService for MockEmbedding {
         async fn embed(&self, _text: &str) -> anyhow::Result<[f32; EMBEDDING_DIM]> {
-            let mut emb = [0.0f32; 768];
+            let mut emb = [0.0f32; EMBEDDING_DIM];
             emb[0] = 1.0;
             Ok(emb)
         }
@@ -709,7 +709,7 @@ mod tests {
         async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; EMBEDDING_DIM]>> {
             let mut results = Vec::with_capacity(texts.len());
             for _ in texts {
-                let mut emb = [0.0f32; 768];
+                let mut emb = [0.0f32; EMBEDDING_DIM];
                 emb[0] = 1.0;
                 results.push(emb);
             }

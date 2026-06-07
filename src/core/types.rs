@@ -1,5 +1,5 @@
-/// Embedding vector dimension (OpenAI text-embedding-ada-002).
-pub const EMBEDDING_DIM: usize = 768;
+/// Embedding vector dimension (all-MiniLM-L6-v2).
+pub const EMBEDDING_DIM: usize = 384;
 
 /// Default LLM temperature for chat agents.
 pub const DEFAULT_TEMPERATURE: f64 = 0.7;

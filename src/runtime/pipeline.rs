@@ -246,9 +246,9 @@ mod tests {
     async fn test_pipeline_approves_valid_request() {
         let pipeline = DecisionPipelineBuilder::new().embedding(dummy_embedding()).build();
 
-        let mut task_emb = [0.0f32; 768];
+        let mut task_emb = [0.0f32; EMBEDDING_DIM];
         task_emb[0] = 1.0;
-        let mut role_emb = [0.0f32; 768];
+        let mut role_emb = [0.0f32; EMBEDDING_DIM];
         role_emb[0] = 1.0;
 
         let request = SpawnRequest {
@@ -257,7 +257,7 @@ mod tests {
             parent_span_id: 0,
             task_description_embedding: task_emb,
             role_description_embedding: role_emb,
-            value_statement_embedding: [0.0f32; 768],
+            value_statement_embedding: [0.0f32; EMBEDDING_DIM],
             requested_budget: 100,
             current_depth: 0,
             responsibility_chain: vec![],
@@ -282,9 +282,9 @@ mod tests {
             trace_id: rand::random(),
             span_id: 1,
             parent_span_id: 0,
-            task_description_embedding: [0.0f32; 768],
-            role_description_embedding: [0.0f32; 768],
-            value_statement_embedding: [0.0f32; 768],
+            task_description_embedding: [0.0f32; EMBEDDING_DIM],
+            role_description_embedding: [0.0f32; EMBEDDING_DIM],
+            value_statement_embedding: [0.0f32; EMBEDDING_DIM],
             requested_budget: 100,
             current_depth: 0,
             responsibility_chain: vec![],

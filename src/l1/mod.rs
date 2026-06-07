@@ -135,15 +135,15 @@ mod tests {
     #[test]
     fn test_retrieve_basic() {
         let mut retriever = L1Retriever::new(0.5);
-        let mut e1 = [0.0f32; 768];
+        let mut e1 = [0.0f32; EMBEDDING_DIM];
         e1[0] = 1.0;
-        let mut e2 = [0.0f32; 768];
+        let mut e2 = [0.0f32; EMBEDDING_DIM];
         e2[0] = 0.8;
 
         retriever.add_experience(make_experience(e1, 1.0, 0b101));
         retriever.add_experience(make_experience(e2, 0.9, 0b010));
 
-        let mut query = [0.0f32; 768];
+        let mut query = [0.0f32; EMBEDDING_DIM];
         query[0] = 1.0;
         let results = retriever.retrieve(&query, 2);
 
@@ -154,11 +154,11 @@ mod tests {
     #[test]
     fn test_confidence_threshold() {
         let mut retriever = L1Retriever::new(0.8);
-        let mut e = [0.0f32; 768];
+        let mut e = [0.0f32; EMBEDDING_DIM];
         e[0] = 1.0;
         retriever.add_experience(make_experience(e, 1.0, 0));
 
-        let mut query = [0.0f32; 768];
+        let mut query = [0.0f32; EMBEDDING_DIM];
         query[0] = 1.0;
 
         let result = retriever.check_confidence(&query, &query);

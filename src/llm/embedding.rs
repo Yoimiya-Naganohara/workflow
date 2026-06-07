@@ -23,13 +23,10 @@ pub struct EmbeddingService {
 impl EmbeddingService {
     /// Initialize the embedding model (downloaded on first use).
     ///
-    /// Uses BGE-Base-EN-v1.5 (768-dim, English-optimized).
-    /// The model file (~130 MB) is cached in `~/.cache/huggingface/`.
+    /// Uses all-MiniLM-L6-v2 (384-dim, ~23 MB).
     pub fn new() -> Self {
-        let model = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::BGEBaseENV15)).expect(
-            "Failed to initialize fastembed (BGE-Base-EN-v1.5). \
-             Model (~130 MB) auto-downloads on first run via ~/.cache/huggingface/.",
-        );
+        let model = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::AllMiniLML6V2))
+            .expect("Failed to initialize fastembed (all-MiniLM-L6-v2).");
         Self {
             model: Mutex::new(model),
             cache: DashMap::new(),
