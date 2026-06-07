@@ -263,11 +263,6 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
                 }
                 if let Ok(client) = get_or_create_provider_client(&mut s, &provider_id) {
                     let mut rt = runtime.write().await;
-                    // Only replace embedding provider if it supports embeddings
-                    // (Anthropic, Ollama etc. don't have embedding endpoints).
-                    if client.supports_embeddings() {
-                        rt.set_embedding_provider(client.clone());
-                    }
                     rt.set_provider_from_state(client);
                     rt.set_default_model(&sel.model_id);
                 }

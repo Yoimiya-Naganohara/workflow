@@ -33,10 +33,8 @@ async fn run_tui() -> Result<()> {
         }
     };
 
-    // Create embedding service with a fallback provider.
-    // The real LLM provider is configured by the user via /connect in TUI.
-    let embedding_provider = create_embedding_provider();
-    let svc = EmbeddingService::new(embedding_provider);
+    // Local embedding via fastembed (no API key needed, runs on CPU).
+    let svc = EmbeddingService::new();
     let embedding_service: Arc<dyn workflow::llm::EmbeddingService> = Arc::new(svc);
     let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
     let runtime = Arc::new(RwLock::new(runtime));
@@ -55,22 +53,9 @@ async fn run_tui() -> Result<()> {
     Ok(())
 }
 
-/// Create a provider suitable only for embeddings (no real API key needed).
-/// The LLM provider for chat is configured interactively via TUI.
-fn create_embedding_provider() -> Arc<LlmProvider> {
-    if let Ok(provider) = LlmProvider::from_env() {
-        return Arc::new(provider);
-    }
-    // Fallback: OpenAI-compatible client with dummy key — enough for
-    // initializing the embedding service before the user configures one.
-    Arc::new(LlmProvider::OpenAi(
-        rig::providers::openai::CompletionsClient::new("placeholder").expect("create placeholder OpenAI client"),
-    ))
-}
-
 async fn run_cli() -> Result<()> {
     let provider = select_provider()?;
-    let svc = EmbeddingService::new(provider.clone());
+    let svc = EmbeddingService::new();
     let embedding_service: Arc<dyn workflow::llm::EmbeddingService> = Arc::new(svc);
     let mut runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
     runtime.set_provider((*provider).clone());

@@ -1,75 +1,133 @@
-use crate::core::types::EMBEDDING_DIM;
-use super::EmbeddingService as EmbeddingServiceTrait;
-use crate::core::simd::cosine_similarity_768;
-use crate::llm::LlmProvider;
+//! Local embedding service using fastembed (ONNX runtime).
+//!
+//! No external API calls — the model runs locally on CPU.
+//! This decouples embedding from the LLM provider entirely.
+
 use anyhow::Result;
 use dashmap::DashMap;
-use std::sync::Arc;
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use tokio::sync::Mutex;
 
+use crate::core::simd::cosine_similarity_768;
+use crate::core::types::EMBEDDING_DIM;
+
+/// Local embedding service using fastembed (ONNX runtime).
+///
+/// All embedding is done locally on CPU — no API keys needed,
+/// no external dependencies on any LLM provider.
 pub struct EmbeddingService {
-    provider: Arc<LlmProvider>,
+    model: Mutex<TextEmbedding>,
     cache: DashMap<String, [f32; EMBEDDING_DIM]>,
 }
 
 impl EmbeddingService {
-    pub fn new(provider: Arc<LlmProvider>) -> Self {
+    /// Initialize the embedding model (downloaded on first use).
+    ///
+    /// Uses BGE-Base-EN-v1.5 (768-dim, English-optimized).
+    /// The model file (~130 MB) is cached in `~/.cache/huggingface/`.
+    pub fn new() -> Self {
+        let model = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::BGEBaseENV15)).expect(
+            "Failed to initialize fastembed (BGE-Base-EN-v1.5). \
+             Model (~130 MB) auto-downloads on first run via ~/.cache/huggingface/.",
+        );
         Self {
-            provider,
+            model: Mutex::new(model),
             cache: DashMap::new(),
         }
     }
 
+    /// Embed a single text string into a 768-d vector.
+    ///
+    /// Results are cached by exact text match to avoid recomputation.
     pub async fn embed(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
         if let Some(cached) = self.cache.get(text) {
             return Ok(*cached);
         }
 
-        let embedding = self.provider.embed_768(text).await?;
-        let normalized = normalize_embedding(embedding);
+        let model = self.model.lock().await;
+        let embeddings = model.embed(vec![text], Some(1))?;
+        let raw = &embeddings[0];
+        let mut result = [0.0f32; EMBEDDING_DIM];
+        let len = raw.len().min(EMBEDDING_DIM);
+        for i in 0..len {
+            result[i] = raw[i];
+        }
+        let normalized = normalize_embedding(result);
 
         self.cache.insert(text.to_string(), normalized);
         Ok(normalized)
     }
 
+    /// Embed multiple texts.
     pub async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; EMBEDDING_DIM]>> {
-        use std::collections::HashMap;
+        let mut results = vec![[0.0f32; EMBEDDING_DIM]; texts.len()];
+        let mut uncached: Vec<(usize, String)> = Vec::new();
 
-        let mut results = vec![[0.0f32; 768]; texts.len()];
-        let mut pending: HashMap<&str, Vec<usize>> = HashMap::new();
-
-        for (index, text) in texts.iter().enumerate() {
+        for (i, text) in texts.iter().enumerate() {
             if let Some(cached) = self.cache.get(*text) {
-                results[index] = *cached;
+                results[i] = *cached;
             } else {
-                pending.entry(*text).or_default().push(index);
+                uncached.push((i, text.to_string()));
             }
         }
 
-        for (text, indexes) in pending {
-            let embedding = self.embed(text).await?;
-            for index in indexes {
-                results[index] = embedding;
+        if uncached.is_empty() {
+            return Ok(results);
+        }
+
+        let texts_to_embed: Vec<&str> = uncached.iter().map(|(_, t)| t.as_str()).collect();
+        let model = self.model.lock().await;
+        let embeddings = model.embed(texts_to_embed, Some(texts.len()))?;
+
+        for ((idx, text), embedding) in uncached.iter().zip(embeddings.iter()) {
+            let mut result = [0.0f32; EMBEDDING_DIM];
+            let len = embedding.len().min(EMBEDDING_DIM);
+            for i in 0..len {
+                result[i] = embedding[i];
             }
+            let normalized = normalize_embedding(result);
+            self.cache.insert(text.clone(), normalized);
+            results[*idx] = normalized;
         }
 
         Ok(results)
     }
 
+    /// Cosine similarity between two embeddings.
     pub fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
         cosine_similarity_768(a, b)
     }
 
+    /// Number of cached embeddings.
     pub fn cache_size(&self) -> usize {
         self.cache.len()
     }
 
+    /// Clear the embedding cache.
     pub fn clear_cache(&self) {
         self.cache.clear();
     }
 }
 
+impl Default for EmbeddingService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn normalize_embedding(mut embedding: [f32; EMBEDDING_DIM]) -> [f32; EMBEDDING_DIM] {
+    let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for value in &mut embedding {
+            *value /= norm;
+        }
+    }
+    embedding
+}
+
+/// Async trait implementation for `crate::llm::EmbeddingService`.
 #[async_trait::async_trait]
-impl EmbeddingServiceTrait for EmbeddingService {
+impl crate::llm::EmbeddingService for EmbeddingService {
     async fn embed(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
         self.embed(text).await
     }
@@ -91,23 +149,13 @@ impl EmbeddingServiceTrait for EmbeddingService {
     }
 }
 
-fn normalize_embedding(mut embedding: [f32; EMBEDDING_DIM]) -> [f32; EMBEDDING_DIM] {
-    let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm > 0.0 {
-        for value in &mut embedding {
-            *value /= norm;
-        }
-    }
-    embedding
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_normalize_embedding() {
-        let mut embedding = [0.0f32; 768];
+        let mut embedding = [0.0f32; EMBEDDING_DIM];
         embedding[0] = 3.0;
         embedding[1] = 4.0;
 
@@ -118,15 +166,15 @@ mod tests {
 
     #[test]
     fn test_normalize_zero_embedding() {
-        let embedding = [0.0f32; 768];
+        let embedding = [0.0f32; EMBEDDING_DIM];
         let normalized = normalize_embedding(embedding);
         assert_eq!(normalized, embedding);
     }
 
     #[test]
     fn test_cosine_similarity() {
-        let a = [1.0f32; 768];
-        let b = [1.0f32; 768];
+        let a = [1.0f32; EMBEDDING_DIM];
+        let b = [1.0f32; EMBEDDING_DIM];
         let sim = cosine_similarity_768(&a, &b);
         assert!((sim - 1.0).abs() < 1e-6);
     }

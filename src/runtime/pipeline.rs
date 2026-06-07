@@ -211,11 +211,6 @@ impl DecisionPipeline {
     pub fn audit_engine(&self) -> &Mutex<Box<dyn AuditEngine>> {
         &self.audit_engine
     }
-
-    /// Rebuild the embedding service with a new provider.
-    pub fn set_embedding_provider(&mut self, provider: Arc<crate::llm::LlmProvider>) {
-        self.embedding = Arc::new(crate::llm::embedding::EmbeddingService::new(provider));
-    }
 }
 
 // ============================================================================

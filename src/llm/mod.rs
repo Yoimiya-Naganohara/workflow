@@ -128,14 +128,6 @@ impl LlmProvider {
         })
     }
 
-    /// Whether this provider supports embedding endpoints.
-    pub fn supports_embeddings(&self) -> bool {
-        matches!(
-            self,
-            Self::OpenAi(_) | Self::Cohere(_) | Self::Gemini(_) | Self::Mistral(_)
-        )
-    }
-
     pub async fn complete(&self, request: LlmRequest) -> Result<LlmResponse> {
         self.do_complete(request).await
     }
