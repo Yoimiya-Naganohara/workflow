@@ -33,19 +33,20 @@ async fn run_tui() -> Result<()> {
         }
     };
 
-    let provider = select_provider()?;
-    let svc = EmbeddingService::new(provider.clone());
+    // Create embedding service with a fallback provider.
+    // The real LLM provider is configured by the user via /connect in TUI.
+    let embedding_provider = create_embedding_provider();
+    let svc = EmbeddingService::new(embedding_provider);
     let embedding_service: Arc<dyn workflow::llm::EmbeddingService> = Arc::new(svc);
-    let mut runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
-    runtime.set_provider((*provider).clone());
+    let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
     let runtime = Arc::new(RwLock::new(runtime));
 
     {
         let mut state = state.write().await;
-        state.budget_total = 10000;
+        state.budget_total = DEFAULT_RUNTIME_BUDGET;
         state.budget_used = 0;
-        state.permits_total = 10;
-        state.permits_available = 10;
+        state.permits_total = DEFAULT_MAX_AGENTS;
+        state.permits_available = DEFAULT_MAX_AGENTS;
         state.runtime = Some(runtime);
     }
 
@@ -54,11 +55,25 @@ async fn run_tui() -> Result<()> {
     Ok(())
 }
 
+/// Create a provider suitable only for embeddings (no real API key needed).
+/// The LLM provider for chat is configured interactively via TUI.
+fn create_embedding_provider() -> Arc<LlmProvider> {
+    if let Ok(provider) = LlmProvider::from_env() {
+        return Arc::new(provider);
+    }
+    // Fallback: OpenAI-compatible client with dummy key — enough for
+    // initializing the embedding service before the user configures one.
+    Arc::new(LlmProvider::OpenAi(
+        rig::providers::openai::CompletionsClient::new("placeholder").expect("create placeholder OpenAI client"),
+    ))
+}
+
 async fn run_cli() -> Result<()> {
     let provider = select_provider()?;
-    let svc = EmbeddingService::new(provider);
+    let svc = EmbeddingService::new(provider.clone());
     let embedding_service: Arc<dyn workflow::llm::EmbeddingService> = Arc::new(svc);
-    let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
+    let mut runtime = AgentRuntime::new(AgentRuntimeConfig::default(), embedding_service);
+    runtime.set_provider((*provider).clone());
 
     info!("Holographic Self-Evolving Multi-Agent System v0.1.0");
     info!("Architecture: L-1/L0/L1/L2 Decision Pipeline");
