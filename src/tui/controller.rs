@@ -13,7 +13,7 @@ use rig::client::Nothing;
 use rig::providers::{llamafile, ollama};
 use tokio::sync::RwLock;
 
-use crate::agent::{Agent, AgentConfig, AgentStatus};
+use crate::agent::Agent;
 use crate::llm::{self, LlmProvider};
 use crate::tui::state::{AgentEntry, AppState, ChatMessage, MessageRole, MessageStatus, SelectedModel};
 
@@ -521,9 +521,12 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
 pub fn execute_plan(state: &Arc<RwLock<AppState>>) {
     let state_clone = state.clone();
     tokio::spawn(async move {
-        let tasks: Vec<(usize, String)> = {
-            let s = state_clone.read().await;
-            s.current_plan
+        // ── Gather tasks and prepare runtime ──
+        let (tasks, runtime, agent_pool) = {
+            let mut s = state_clone.write().await;
+
+            let tasks: Vec<(usize, String)> = s
+                .current_plan
                 .as_ref()
                 .map(|p| {
                     p.tasks
@@ -532,75 +535,115 @@ pub fn execute_plan(state: &Arc<RwLock<AppState>>) {
                         .map(|t| (t.id, t.description.clone()))
                         .collect()
                 })
-                .unwrap_or_default()
+                .unwrap_or_default();
+
+            let runtime = match &s.runtime {
+                Some(r) => r.clone(),
+                None => {
+                    s.messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: "Runtime not initialized".to_string(),
+                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                        status: MessageStatus::Error,
+                    });
+                    return;
+                }
+            };
+
+            let agent_pool = s.agent_pool.clone();
+
+            // Configure provider/model on runtime
+            if let Some(ref sel) = s.selected_models.first().cloned() {
+                let provider_id = sel.provider_id.clone();
+                if s.configured_providers.iter().any(|id| id == &provider_id) {
+                    if let Ok(client) = get_or_create_provider_client(&mut s, &provider_id) {
+                        let mut rt = runtime.write().await;
+                        rt.set_provider_from_state(client);
+                        rt.set_default_model(&sel.model_id);
+                    }
+                }
+            }
+
+            (tasks, runtime, agent_pool)
         };
 
-        for (task_id, task_desc) in tasks {
-            // Mark task as running
+        let mut task_results: Vec<(usize, String)> = Vec::new();
+
+        // ── Execute each task through the experience pipeline ──
+        for (task_id, task_desc) in &tasks {
+            // Mark running in UI
             {
                 let mut s = state_clone.write().await;
                 if let Some(p) = &mut s.current_plan {
-                    p.mark_task_running(task_id);
+                    p.mark_task_running(*task_id);
                 }
                 s.agents.push(AgentEntry {
-                    id: format!("worker-{:03}", task_id),
-                    name: format!("Task {}: {}", task_id, task_desc.chars().take(20).collect::<String>()),
+                    id: format!("task-{:03}", task_id),
+                    name: format!("Task {}: {}", task_id, task_desc.chars().take(24).collect::<String>()),
                     status: crate::tui::state::AgentStatus::Running,
                     budget: 0,
                 });
             }
 
-            // Spawn worker agent
-            let agent_pool = {
-                let s = state_clone.read().await;
-                s.agent_pool.clone()
-            };
+            // Step 1: spawn_root_agent through decision pipeline
+            // Uses role="planner" template which has system prompt for decomposition
+            let agent_id = match runtime
+                .read()
+                .await
+                .spawn_root_agent(task_desc, "planner", &mut *agent_pool.write().await)
+                .await
             {
-                let mut pool = agent_pool.write().await;
-                let agent = Agent {
-                    id: rand::random(),
-                    name: format!("worker-{}", task_id),
-                    role: "worker".to_string(),
-                    parent_id: None,
-                    children: Vec::new(),
-                    depth: 0,
-                    goal: task_desc.clone(),
-                    config: AgentConfig::default(),
-                    status: AgentStatus::Planning,
-                    result: None,
-                    child_results: Vec::new(),
-                };
-                pool.add_agent(agent);
-            }
+                Ok(id) => id,
+                Err(e) => {
+                    let mut s = state_clone.write().await;
+                    if let Some(p) = &mut s.current_plan {
+                        p.mark_task_failed(*task_id, e.to_string());
+                    }
+                    s.messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: format!("Task {} rejected: {}", task_id, e),
+                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                        status: MessageStatus::Error,
+                    });
+                    continue;
+                }
+            };
 
-            // Simulate execution
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            // Step 2: execute agent tree (recursive @role → spawn_child → aggregate)
+            runtime.read().await.execute_agent(agent_id, &agent_pool).await;
 
-            // Mark task completed
+            // Step 3: collect result
+            let result = runtime.read().await.await_agent(agent_id, &agent_pool).await;
+
+            let result_snippet = result.chars().take(200).collect::<String>();
+            task_results.push((*task_id, result.clone()));
+
+            // Mark completed in UI
             {
                 let mut s = state_clone.write().await;
                 if let Some(p) = &mut s.current_plan {
-                    p.mark_task_completed(task_id, "Completed".to_string());
+                    p.mark_task_completed(*task_id, result_snippet.clone());
                 }
-                if let Some(agent) = s.agents.iter_mut().find(|a| a.id == format!("worker-{:03}", task_id)) {
+                if let Some(agent) = s.agents.iter_mut().find(|a| a.id == format!("task-{:03}", task_id)) {
                     agent.status = crate::tui::state::AgentStatus::Completed;
                 }
                 s.messages.push(ChatMessage {
                     role: MessageRole::Agent,
-                    content: format!("Task {} completed: {}", task_id, task_desc),
+                    content: format!("✅ Task {} complete: {}", task_id, result_snippet),
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     status: MessageStatus::Completed,
                 });
             }
         }
 
-        let mut s = state_clone.write().await;
-        if let Some(p) = &s.current_plan
-            && p.status == crate::agent::plan::PlanStatus::Completed
+        // ── Final summary ──
         {
+            let mut s = state_clone.write().await;
+            let completed = task_results.len();
+            let total = tasks.len();
             s.messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: "Plan execution completed!".to_string(),
+                content: format!("Plan execution finished: {}/{} tasks completed.", completed, total),
                 timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                 status: MessageStatus::Completed,
             });

@@ -159,12 +159,34 @@ impl Plan {
         }
     }
 
+    /// Known roles that can appear in @role syntax.
+    const ROLES: &[&str] = &["planner", "developer", "tester", "reviewer", "worker"];
+
+    /// Parse a plan from an LLM response.
+    ///
+    /// Supports three formats:
+    /// - `- task description`
+    /// - `1. task description`
+    /// - `@role "goal description"`
     pub fn parse_from_response(response: &str) -> Option<Self> {
         let mut tasks = Vec::new();
         let mut task_id = 0;
 
         for line in response.lines() {
             let trimmed = line.trim();
+
+            // Try @role "goal" format first
+            if let Some((role, goal)) = Self::parse_role_assignment(trimmed) {
+                task_id += 1;
+                tasks.push(Task {
+                    id: task_id,
+                    description: format!("@{} {}", role, goal),
+                    status: TaskStatus::Pending,
+                    result: None,
+                });
+                continue;
+            }
+
             // Match lines like "1. Task description" or "- Task description"
             if let Some(task_desc) = trimmed
                 .strip_prefix("- ")
@@ -194,6 +216,26 @@ impl Plan {
                 status: PlanStatus::Draft,
             })
         }
+    }
+
+    /// Parse a single `@role "goal"` assignment from a line.
+    fn parse_role_assignment(line: &str) -> Option<(String, String)> {
+        for role in Self::ROLES {
+            let pattern = format!("@{}", role);
+            if let Some(pos) = line.find(&pattern) {
+                let after_role = line[pos + pattern.len()..].trim();
+                let goal_start = after_role.find('"').or_else(|| after_role.find('\u{201c}'))?;
+                let quote_char = after_role.as_bytes()[goal_start];
+                let closing = if quote_char == b'"' { '"' } else { '\u{201d}' };
+                let after_open = &after_role[goal_start + 1..];
+                let goal_end = after_open.find(closing)?;
+                let goal = after_open[..goal_end].to_string();
+                if !goal.is_empty() {
+                    return Some((role.to_string(), goal));
+                }
+            }
+        }
+        None
     }
 
     pub fn approve(&mut self) {
