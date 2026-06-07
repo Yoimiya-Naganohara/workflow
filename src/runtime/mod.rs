@@ -256,6 +256,11 @@ impl AgentRuntime {
         self.model_id = model_id.to_string();
     }
 
+    /// Replace the embedding service when the provider changes.
+    pub fn set_embedding_provider(&mut self, provider: Arc<LlmProvider>) {
+        self.pipeline.set_embedding_provider(provider);
+    }
+
     // ── Role templates ──
 
     pub fn get_role_template(&self, role: &str) -> Option<&RoleTemplate> {

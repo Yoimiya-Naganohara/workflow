@@ -4,8 +4,8 @@ pub mod embedding;
 pub mod factory;
 pub mod types;
 
-pub use types::*;
 use crate::core::types::EMBEDDING_DIM;
+pub use types::*;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -126,6 +126,14 @@ impl LlmProvider {
             content: response,
             tokens_used: 0,
         })
+    }
+
+    /// Whether this provider supports embedding endpoints.
+    pub fn supports_embeddings(&self) -> bool {
+        matches!(
+            self,
+            Self::OpenAi(_) | Self::Cohere(_) | Self::Gemini(_) | Self::Mistral(_)
+        )
     }
 
     pub async fn complete(&self, request: LlmRequest) -> Result<LlmResponse> {
