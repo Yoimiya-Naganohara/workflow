@@ -1,20 +1,20 @@
-//! Local embedding service using fastembed (ONNX runtime).
+//! Local embedding service using fastembed (ONNX runtime, GPU-accelerated).
 //!
-//! No external API calls — the model runs locally on CPU.
-//! This decouples embedding from the LLM provider entirely.
+//! Uses CUDA (NVIDIA GPU) when available, falls back to CPU automatically.
+//! The model runs entirely locally — no external API calls.
 
 use anyhow::Result;
 use dashmap::DashMap;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use ort::execution_providers::{CPUExecutionProvider, CUDAExecutionProvider, CoreMLExecutionProvider};
 use tokio::sync::Mutex;
 
 use crate::core::simd::cosine_similarity_768;
 use crate::core::types::EMBEDDING_DIM;
 
-/// Local embedding service using fastembed (ONNX runtime).
+/// Local embedding service using fastembed (ONNX runtime, GPU-accelerated).
 ///
-/// All embedding is done locally on CPU — no API keys needed,
-/// no external dependencies on any LLM provider.
+/// Tries CUDA first; falls back to CPU if no NVIDIA GPU / CUDA toolkit is available.
 pub struct EmbeddingService {
     model: Mutex<TextEmbedding>,
     cache: DashMap<String, [f32; EMBEDDING_DIM]>,
@@ -23,10 +23,19 @@ pub struct EmbeddingService {
 impl EmbeddingService {
     /// Initialize the embedding model (downloaded on first use).
     ///
-    /// Uses all-MiniLM-L6-v2 (384-dim, ~23 MB).
+    /// Uses all-MiniLM-L6-v2 (384-dim, ~23 MB) with GPU acceleration.
+    /// Falls back to CPU if CUDA is unavailable.
     pub fn new() -> Self {
-        let model = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::AllMiniLML6V2))
-            .expect("Failed to initialize fastembed (all-MiniLM-L6-v2).");
+        let model = TextEmbedding::try_new(
+            InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_execution_providers(vec![
+                // GPU providers (tried in order; ONNX Runtime skips unavailable ones):
+                CUDAExecutionProvider::default().into(),
+                CoreMLExecutionProvider::default().into(),
+                // CPU fallback:
+                CPUExecutionProvider::default().into(),
+            ]),
+        )
+        .expect("Failed to initialize fastembed (all-MiniLM-L6-v2).");
         Self {
             model: Mutex::new(model),
             cache: DashMap::new(),
