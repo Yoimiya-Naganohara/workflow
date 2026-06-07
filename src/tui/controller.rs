@@ -8,12 +8,12 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use futures::future::AbortHandle;
+use futures::{StreamExt, future::AbortHandle};
 use rig::client::Nothing;
 use rig::providers::{llamafile, ollama};
 use tokio::sync::RwLock;
 
-use crate::agent::{Agent, AgentConfig, AgentPool, AgentStatus};
+use crate::agent::{Agent, AgentConfig, AgentStatus};
 use crate::llm::LlmProvider;
 use crate::tui::state::{AgentEntry, AppState, ChatMessage, MessageRole, MessageStatus, SelectedModel};
 
@@ -245,43 +245,100 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
     let (abort_handle, abort_registration) = AbortHandle::new_pair();
 
     tokio::spawn(async move {
-        use futures::future::Abortable;
+        let mut full_response = String::new();
 
-        let task = async {
+        // ── Setup: get runtime, provider, model ──
+        let (provider, model_id) = {
             let mut s = state_clone.write().await;
-
             let runtime = match &s.runtime {
                 Some(r) => r.clone(),
-                None => return Err::<String, anyhow::Error>(anyhow::anyhow!("Runtime not initialized")),
+                None => {
+                    if let Some(msg) = s.messages.get_mut(response_index) {
+                        msg.content = "Runtime not initialized".to_string();
+                        msg.status = MessageStatus::Error;
+                    }
+                    s.active_chat_requests = 0;
+                    return;
+                }
             };
 
             let selected = s.selected_models.first().cloned();
             if let Some(ref sel) = selected {
                 let provider_id = sel.provider_id.clone();
-                if !s.configured_providers.iter().any(|id| id == &provider_id) {
-                    return Err(anyhow::anyhow!("Provider {} is not configured", provider_id));
-                }
-                if let Ok(client) = get_or_create_provider_client(&mut s, &provider_id) {
-                    let mut rt = runtime.write().await;
-                    rt.set_provider_from_state(client);
-                    rt.set_default_model(&sel.model_id);
+                if s.configured_providers.iter().any(|id| id == &provider_id) {
+                    if let Ok(client) = get_or_create_provider_client(&mut s, &provider_id) {
+                        let mut rt = runtime.write().await;
+                        rt.set_provider_from_state(client);
+                        rt.set_default_model(&sel.model_id);
+                    }
                 }
             }
             drop(s);
 
             let rt = runtime.read().await;
-            let pool = Arc::new(RwLock::new(AgentPool::new()));
-            let result = rt.chat_with_goal(&input_clone, &pool).await?;
-            Ok::<String, anyhow::Error>(result)
+            let provider = match &rt.provider {
+                Some(p) => p.clone(),
+                None => {
+                    let mut s = state_clone.write().await;
+                    if let Some(msg) = s.messages.get_mut(response_index) {
+                        msg.content = "No LLM provider configured".to_string();
+                        msg.status = MessageStatus::Error;
+                    }
+                    s.active_chat_requests = 0;
+                    return;
+                }
+            };
+            let model_id = rt.model_id.clone();
+            (provider, model_id)
         };
 
-        let result = Abortable::new(task, abort_registration).await;
+        // ── Stream ──
+        let system_prompt = "You are a helpful assistant. Always produce a concrete result.";
+        let mut stream = match provider.chat_stream(&model_id, system_prompt, &input_clone).await {
+            Ok(s) => s,
+            Err(e) => {
+                let mut s = state_clone.write().await;
+                if let Some(msg) = s.messages.get_mut(response_index) {
+                    msg.content = format!("Error: {}", e);
+                    msg.status = MessageStatus::Error;
+                }
+                s.active_chat_requests = 0;
+                return;
+            }
+        };
 
+        use futures::future::Abortable;
+        let stream_result = Abortable::new(
+            async {
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk.map_err(|e| anyhow::anyhow!("{}", e))?;
+                    full_response.push_str(&chunk);
+
+                    let mut s = state_clone.write().await;
+                    let slot = s
+                        .messages
+                        .get(response_index)
+                        .filter(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
+                        .map(|_| response_index)
+                        .or_else(|| {
+                            s.messages
+                                .iter()
+                                .rposition(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
+                        })
+                        .unwrap_or(response_index);
+                    if let Some(msg) = s.messages.get_mut(slot) {
+                        msg.content = full_response.clone();
+                        msg.status = MessageStatus::Streaming;
+                    }
+                }
+                Ok::<String, anyhow::Error>(full_response)
+            },
+            abort_registration,
+        )
+        .await;
+
+        // ── Finalize ──
         let mut s = state_clone.write().await;
-        let now = chrono::Local::now().format("%H:%M:%S").to_string();
-
-        // Locate the pending message slot: prefer response_index if it still
-        // points to a Thinking/Streaming message; otherwise search backwards.
         let slot = s
             .messages
             .get(response_index)
@@ -294,44 +351,36 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
             })
             .unwrap_or(response_index);
 
-        match result {
-            Ok(Ok(response)) => {
-                if let Some(message) = s.messages.get_mut(slot) {
-                    message.content = if response.is_empty() {
-                        "(no text response)".to_string()
-                    } else {
-                        response.clone()
-                    };
-                    message.status = MessageStatus::Completed;
+        match stream_result {
+            Ok(Ok(full)) => {
+                if let Some(msg) = s.messages.get_mut(slot) {
+                    if !full.is_empty() {
+                        msg.content = full.clone();
+                    }
+                    msg.status = MessageStatus::Completed;
                 }
-                if let Some(mut plan) = crate::agent::plan::Plan::parse_from_response(&response) {
-                    plan.goal = input_clone.clone();
+                if let Some(mut plan) = crate::agent::plan::Plan::parse_from_response(&full) {
+                    plan.goal = input_clone;
                     s.current_plan = Some(plan);
                     s.messages.push(ChatMessage {
                         role: MessageRole::System,
                         content: "Plan detected. Type /apply to approve and execute.".to_string(),
-                        timestamp: now.clone(),
+                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                         status: MessageStatus::Completed,
                     });
                 }
             }
             Ok(Err(e)) => {
-                if let Some(message) = s.messages.get_mut(slot) {
-                    message.content = format!("Error: {}", e);
-                    message.status = MessageStatus::Error;
-                } else {
-                    s.messages.push(ChatMessage {
-                        role: MessageRole::Agent,
-                        content: format!("Error: {}", e),
-                        timestamp: now,
-                        status: MessageStatus::Error,
-                    });
+                if let Some(msg) = s.messages.get_mut(slot) {
+                    msg.content = format!("Error: {}", e);
+                    msg.status = MessageStatus::Error;
                 }
             }
             Err(_) => {
-                if let Some(message) = s.messages.get_mut(slot) {
-                    message.content += " (cancelled)";
-                    message.status = MessageStatus::Completed;
+                // Aborted (Ctrl+X)
+                if let Some(msg) = s.messages.get_mut(slot) {
+                    msg.content += " (cancelled)";
+                    msg.status = MessageStatus::Completed;
                 }
             }
         }
