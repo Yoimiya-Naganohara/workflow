@@ -77,12 +77,14 @@ impl Tui {
             }
             KeyCode::Up if state.focus == Focus::Chat => {
                 state.chat_scroll = state.chat_scroll.saturating_sub(1);
+                state.auto_scroll = false; // manual scroll up = stop auto
             }
             KeyCode::Char('g') if state.focus == Focus::Chat => {
-                state.chat_scroll = usize::MAX / 2;
+                state.chat_scroll = 0; // gg → top
             }
             KeyCode::Char('G') if state.focus == Focus::Chat => {
-                state.chat_scroll = 0;
+                state.chat_scroll = usize::MAX / 2; // G → bottom
+                state.auto_scroll = true;
             }
             KeyCode::Enter if state.focus == Focus::Input => {
                 let is_alt = key.modifiers.contains(crossterm::event::KeyModifiers::ALT);
@@ -274,8 +276,7 @@ impl Tui {
                 state.selected_model_picker_idx = state.selected_model_picker_idx.saturating_sub(1);
             }
             KeyCode::Char(c) => {
-                let byte_idx =
-                    char_idx_to_byte_idx(&state.model_picker_search_query, state.model_picker_search_cursor);
+                let byte_idx = char_idx_to_byte_idx(&state.model_picker_search_query, state.model_picker_search_cursor);
                 state.model_picker_search_query.insert(byte_idx, c);
                 state.model_picker_search_cursor += 1;
                 state.selected_model_picker_idx = 0;
@@ -379,8 +380,7 @@ impl Tui {
             KeyCode::Backspace => {
                 if state.provider_search_cursor > 0 {
                     state.provider_search_cursor -= 1;
-                    let byte_idx =
-                        char_idx_to_byte_idx(&state.provider_search_query, state.provider_search_cursor);
+                    let byte_idx = char_idx_to_byte_idx(&state.provider_search_query, state.provider_search_cursor);
                     state.provider_search_query.remove(byte_idx);
                     state.selected_provider_idx = 0;
                 }
@@ -647,6 +647,7 @@ impl Tui {
             return true;
         }
 
+        state.auto_scroll = true;
         state.input_history.push(input.clone());
         state.input_history_idx = None;
 

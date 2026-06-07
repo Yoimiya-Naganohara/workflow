@@ -20,10 +20,20 @@ use crate::tui::sidebar::render_sidebar;
 
 impl Tui {
     pub(crate) async fn draw(&mut self) -> Result<()> {
-        // Quick write-lock to bump the animation frame.
+        // Advance animation frame & auto-scroll (write lock).
         {
             let mut s = self.state.write().await;
             s.think_frame = s.think_frame.wrapping_add(1);
+
+            // Auto-scroll to bottom when streaming and user hasn't scrolled up.
+            if s.active_chat_requests > 0 && s.auto_scroll {
+                let visible_height = (self.terminal.size().ok().map_or(20, |ts| ts.height.saturating_sub(7))) as usize;
+                let cache_len = self.chat_lines_cache.len();
+                let max_scroll = cache_len.saturating_sub(visible_height);
+                if s.chat_scroll < max_scroll {
+                    s.chat_scroll = max_scroll;
+                }
+            }
         }
 
         let state = self.state.read().await;

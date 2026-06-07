@@ -13,7 +13,6 @@ use rig::client::Nothing;
 use rig::providers::{llamafile, ollama};
 use tokio::sync::RwLock;
 
-use crate::agent::Agent;
 use crate::llm::{self, LlmProvider};
 use crate::tui::state::{AgentEntry, AppState, ChatMessage, MessageRole, MessageStatus, SelectedModel};
 
