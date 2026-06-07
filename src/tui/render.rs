@@ -41,26 +41,31 @@ impl Tui {
             .collect();
 
         self.terminal.draw(|f| {
+            let vert_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(1)])
+                .split(f.area());
+
             let main_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([
                     Constraint::Length(crate::core::types::SIDEBAR_WIDTH),
                     Constraint::Min(0),
                 ])
-                .split(f.area());
+                .split(vert_chunks[0]);
 
             render_sidebar(f, main_chunks[0], &state);
 
             let chat_area = main_chunks[1];
             Self::render_chat(f, chat_area, &state, &visible_lines);
-            Self::render_status_bar(f, chat_area, &state);
+            Self::render_status_bar(f, vert_chunks[1], &state);
 
             if state.show_provider_dialog {
-                dialogs::render_provider_dialog(f, chat_area, &state);
+                dialogs::render_provider_dialog(f, vert_chunks[0], &state);
             } else if state.show_key_dialog {
-                dialogs::render_key_dialog(f, chat_area, &state);
+                dialogs::render_key_dialog(f, vert_chunks[0], &state);
             } else if state.show_model_picker {
-                dialogs::render_model_picker(f, chat_area, &state);
+                dialogs::render_model_picker(f, vert_chunks[0], &state);
             } else {
                 dialogs::render_command_popup(f, chat_area, &state);
             }
@@ -123,8 +128,6 @@ impl Tui {
     }
 
     fn render_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
-        let status_area = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
-
         let mode_indicator = match state.mode {
             AppMode::Plan => Span::styled(
                 " PLAN ",
@@ -161,7 +164,7 @@ impl Tui {
                 Span::raw("  "),
                 Span::styled(hint, Style::default().fg(Color::DarkGray)),
             ])),
-            status_area,
+            area,
         );
     }
 }
