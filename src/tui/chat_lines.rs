@@ -598,7 +598,7 @@ fn render_table<'a, I>(
                     headers.push(vec![joined]);
                 } else if in_row {
                     let idx = if rows.is_empty() { 0 } else { rows.len() - 1 };
-                    if rows.is_empty() || rows[idx].len() > 0 {
+                    if rows.is_empty() || !rows[idx].is_empty() {
                         let cell_text = current_cell_parts.join("");
                         if rows.is_empty() {
                             rows.push(vec![cell_text]);
@@ -692,7 +692,7 @@ fn render_table_output(
     if !headers.is_empty() && headers.iter().any(|h| !h.is_empty()) {
         let mut cells = vec![Span::styled("  \u{2502} ", Style::default().fg(Color::DarkGray))];
         for ci in 0..effective_cols {
-            let cell_text = headers.get(0).and_then(|h| h.get(ci)).map(|s| s.as_str()).unwrap_or("");
+            let cell_text = headers.first().and_then(|h| h.get(ci)).map(|s| s.as_str()).unwrap_or("");
             let w = col_widths.get(ci).copied().unwrap_or(0);
             let padded = if ci + 1 < effective_cols {
                 format!("{:<width$} \u{2502} ", cell_text, width = w)
@@ -796,7 +796,7 @@ fn make_spans_for_range(all: &[Span<'static>], start: usize, end: usize) -> Vec<
             break;
         }
 
-        let seg_start = if start > span_start { start - span_start } else { 0 };
+        let seg_start = start.saturating_sub(span_start);
         let seg_end = if end < span_end { end - span_start } else { span_len };
 
         if seg_start < seg_end {

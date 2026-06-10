@@ -352,6 +352,7 @@ impl Plan {
     }
 
     /// Collect continuation lines (indented content) under the last task.
+    #[allow(clippy::ptr_arg)]
     fn collect_continuation(lines: &[&str], start: usize, tasks: &mut Vec<Task>) -> usize {
         let mut i = start;
         while i < lines.len() {

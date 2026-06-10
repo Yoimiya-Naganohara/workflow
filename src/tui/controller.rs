@@ -327,7 +327,7 @@ pub fn execute_pool_command(state: &Arc<RwLock<AppState>>, cmd: &str, now: &str)
             ),
             "import" => ("Import not yet implemented".to_string(), MessageStatus::Completed),
             _ if cmd.starts_with("query ") || cmd.starts_with("q ") => {
-                let query_text = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim().to_string();
+                let query_text = cmd.split_once(' ').map(|x| x.1).unwrap_or("").trim().to_string();
                 if query_text.is_empty() {
                     ("Usage: /pool query <text>".to_string(), MessageStatus::Completed)
                 } else if let Some(runtime) = &s.runtime {
