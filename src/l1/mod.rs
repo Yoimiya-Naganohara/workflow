@@ -49,10 +49,10 @@ impl L1Retriever {
         role_embedding: &[f32; EMBEDDING_DIM],
     ) -> Result<L1Assessment, SpawnRejection> {
         if self.experiences.is_empty() {
-            return Ok(L1Assessment {
-                confidence: 1.0,
-                recommended_tools: 0,
-                matched_experiences: 0,
+            // Presumed guilty: no experience = insufficient evidence.
+            return Err(SpawnRejection::L1Rejected {
+                reason: "No experience available — presumed guilty".to_string(),
+                confidence: 0.0,
             });
         }
 

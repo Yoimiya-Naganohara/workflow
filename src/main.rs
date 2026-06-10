@@ -40,12 +40,14 @@ async fn run_tui() -> Result<()> {
     let runtime = Arc::new(RwLock::new(runtime));
 
     {
+        let state_handle = state.clone();
         let mut state = state.write().await;
         state.budget_total = DEFAULT_RUNTIME_BUDGET;
         state.budget_used = 0;
         state.permits_total = DEFAULT_MAX_AGENTS;
         state.permits_available = DEFAULT_MAX_AGENTS;
         state.runtime = Some(runtime);
+        state.tool_server = workflow::tools::create_agent_tool_server(state_handle);
     }
 
     // Background task: periodic experience pool flush (every 30 seconds)

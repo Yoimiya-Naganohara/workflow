@@ -218,6 +218,88 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
     );
 }
 
+pub(crate) fn render_custom_provider_dialog(f: &mut Frame, area: Rect, state: &AppState) {
+    let steps = ["Provider Name", "API Base URL", "API Key", "Model IDs"];
+    let prompts = [
+        "Enter a name for your custom provider:",
+        "Enter the API base URL (e.g. https://api.example.com/v1):",
+        "Enter the API key (leave empty for no auth):",
+        "Enter model ID(s) (comma-separated, e.g. gpt-4,claude-3):",
+    ];
+    let step = state.custom_step.min(steps.len() - 1);
+
+    let dialog_w = 64.min(area.width.saturating_sub(4));
+    let dialog_h = 12;
+    let x = area.x + (area.width.saturating_sub(dialog_w)) / 2;
+    let y = area.y + (area.height.saturating_sub(dialog_h)) / 2;
+    let dialog_area = Rect::new(x, y, dialog_w, dialog_h);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Custom Provider — Step {}/{} ", step + 1, steps.len()))
+        .style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(dialog_area);
+    f.render_widget(block, dialog_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Length(1), Constraint::Min(0)])
+        .split(inner);
+
+    // Summary of previous steps
+    let mut summary = Vec::new();
+    if !state.custom_name.is_empty() {
+        summary.push(format!("Name: {}", state.custom_name));
+    }
+    if !state.custom_url.is_empty() {
+        summary.push(format!("URL: {}", state.custom_url));
+    }
+    if !state.custom_key.is_empty() {
+        summary.push("Key: ••••••••".to_string());
+    }
+    if !summary.is_empty() {
+        f.render_widget(
+            Paragraph::new(summary.join("  |  ")).style(Style::default().fg(Color::DarkGray)),
+            chunks[0],
+        );
+    }
+
+    // Current step prompt + input
+    let input_style = Style::default().fg(Color::Cyan);
+    let display = if state.custom_input.is_empty() {
+        prompts[step]
+    } else {
+        &state.custom_input
+    };
+    f.render_widget(
+        Paragraph::new(display)
+            .style(if state.custom_input.is_empty() {
+                input_style.fg(Color::DarkGray)
+            } else {
+                input_style
+            })
+            .block(Block::default().borders(Borders::ALL).title(steps[step])),
+        chunks[1],
+    );
+
+    // Cursor
+    let prefix_width = crate::tui::chat_lines::display_width_up_to(&state.custom_input, state.custom_cursor);
+    let cursor_x = chunks[1].x + prefix_width as u16 + 1;
+    let cursor_y = chunks[1].y + 1;
+    f.set_cursor_position((cursor_x.min(inner.right().saturating_sub(1)), cursor_y));
+
+    // Hints
+    let hint = if step <= 1 {
+        "Enter to continue · Esc to cancel"
+    } else {
+        "Enter to confirm · Esc to cancel"
+    };
+    f.render_widget(
+        Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
+        chunks[2],
+    );
+}
+
 pub(crate) fn render_command_popup(f: &mut Frame, chat_area: Rect, state: &AppState) {
     if state.focus != super::state::Focus::Input || !state.input.starts_with('/') {
         return;

@@ -95,6 +95,19 @@ pub trait AuditEngine: Send + Sync {
         manifest: &crate::core::conflict::ConflictManifest,
     ) -> crate::core::conflict::L2AuditResult;
     fn reset(&mut self);
+
+    /// Screen a [`SpawnRequest`] for risk *before* final approval.
+    ///
+    /// This method is **synchronous** so callers can hold a `std::sync::Mutex`
+    /// lock.  Implementations that need async I/O should spawn their own task.
+    /// Returns `None` if the request passes, or a rejection reason otherwise.
+    fn screen_request(
+        &mut self,
+        _request: &crate::core::types::SpawnRequest,
+    ) -> Option<crate::core::types::SpawnRejection> {
+        // Default: pass all requests (no screening).
+        None
+    }
 }
 
 #[async_trait::async_trait]
@@ -115,6 +128,28 @@ impl AuditEngine for L2RuleAuditEngine {
 
     fn reset(&mut self) {
         self.reset_failures();
+    }
+
+    fn screen_request(
+        &mut self,
+        request: &crate::core::types::SpawnRequest,
+    ) -> Option<crate::core::types::SpawnRejection> {
+        // Reject if collapsed.
+        if self.consecutive_failures >= self.max_consecutive_failures {
+            return Some(crate::core::types::SpawnRejection::L2Collapsed);
+        }
+
+        // Reject if depth is too high (already checked in L0, but defense-in-depth).
+        let max_depth = crate::core::types::DEFAULT_MAX_DEPTH;
+        if request.current_depth > max_depth {
+            self.consecutive_failures += 1;
+            return Some(crate::core::types::SpawnRejection::L2Rejected {
+                reason: "Depth exceeds L2 safety limit".to_string(),
+                category: "depth".to_string(),
+            });
+        }
+
+        None
     }
 }
 

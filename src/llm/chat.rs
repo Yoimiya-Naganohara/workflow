@@ -37,7 +37,9 @@ macro_rules! mcp_stream_arm {
             .max_tokens(crate::core::types::DEFAULT_MAX_TOKENS)
             .tool_server_handle($handle.clone())
             .build();
-        Ok(Self::wrap_tool_stream(agent.stream_chat($msg, $history).await))
+        Ok(Self::wrap_tool_stream(
+            agent.stream_chat($msg, $history).multi_turn(100).await,
+        ))
     }};
 }
 

@@ -7,16 +7,21 @@ use anyhow::Result;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
 use super::Tui;
-use super::state::{AppMode, AppState, Focus};
+use super::state::{AppState, Focus};
 use crate::tui::chat_lines::{build_chat_lines, char_idx_to_byte_idx};
 use crate::tui::dialogs;
 use crate::tui::sidebar::render_sidebar;
+
+/// Rough token estimation: ~4 chars per token (standard heuristic).
+fn estimate_tokens(char_count: usize) -> usize {
+    char_count / 4 + 1
+}
 
 impl Tui {
     pub(crate) async fn draw(&mut self) -> Result<()> {
@@ -27,7 +32,9 @@ impl Tui {
 
             // Auto-scroll to bottom when streaming and user hasn't scrolled up.
             if s.active_chat_requests > 0 && s.auto_scroll {
-                let visible_height = (self.terminal.size().ok().map_or(20, |ts| ts.height.saturating_sub(7))) as usize;
+                let term_h = self.terminal.size().ok().map_or(20, |ts| ts.height);
+                let input_lines = s.input.lines().count().clamp(1, 5) as u16;
+                let visible_height = (term_h.saturating_sub(input_lines + 5)).max(1) as usize;
                 let cache_len = self.chat_lines_cache.len();
                 let max_scroll = cache_len.saturating_sub(visible_height);
                 if s.chat_scroll < max_scroll {
@@ -38,9 +45,16 @@ impl Tui {
 
         let state = self.state.read().await;
         let term_size = self.terminal.size()?;
-        let chat_width = (term_size.width.saturating_sub(4)).max(1) as usize;
         let msg_count = state.messages.len();
         let is_streaming = state.active_chat_requests > 0;
+        let input_lines = state.input.lines().count().clamp(1, 5) as u16;
+        let sidebar_offset = if state.show_status_panel {
+            crate::core::types::SIDEBAR_WIDTH as usize
+        } else {
+            0
+        };
+        // Content area: screen width - sidebar(if shown) - left padding(2) - block borders(2)
+        let chat_width = (term_size.width.saturating_sub(sidebar_offset as u16 + 4)).max(1) as usize;
 
         // Rebuild cache when messages or streaming state change.
         if is_streaming || msg_count != self.chat_cache_msg_count || chat_width != self.chat_cache_width {
@@ -49,7 +63,8 @@ impl Tui {
             self.chat_cache_width = chat_width;
         }
 
-        let visible_height = (term_size.height.saturating_sub(7)).max(1) as usize;
+        // Available lines for chat messages: total height - status bar(1) - input box(height + 2 borders) - chat borders(2)
+        let visible_height = (term_size.height.saturating_sub(input_lines + 5)).max(1) as usize;
         let chat_scroll = state.chat_scroll.min(self.chat_lines_cache.len().saturating_sub(1));
         let visible_lines: Vec<_> = self
             .chat_lines_cache
@@ -62,6 +77,7 @@ impl Tui {
         let show_provider = state.show_provider_dialog;
         let show_key = state.show_key_dialog;
         let show_picker = state.show_model_picker;
+        let show_sidebar = state.show_status_panel;
 
         self.terminal.draw(|f| {
             let vert_chunks = Layout::default()
@@ -69,21 +85,32 @@ impl Tui {
                 .constraints([Constraint::Min(0), Constraint::Length(1)])
                 .split(f.area());
 
-            let main_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Length(crate::core::types::SIDEBAR_WIDTH),
-                    Constraint::Min(0),
-                ])
-                .split(vert_chunks[0]);
+            let main_chunks = if show_sidebar {
+                Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Length(crate::core::types::SIDEBAR_WIDTH),
+                        Constraint::Min(0),
+                    ])
+                    .split(vert_chunks[0])
+            } else {
+                Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Min(0)])
+                    .split(vert_chunks[0])
+            };
 
-            render_sidebar(f, main_chunks[0], &state);
+            if show_sidebar {
+                render_sidebar(f, main_chunks[0], &state);
+            }
 
-            let chat_area = main_chunks[1];
+            let chat_area = if show_sidebar { main_chunks[1] } else { main_chunks[0] };
             Self::render_chat(f, chat_area, &state, &visible_lines);
             Self::render_status_bar(f, vert_chunks[1], &state);
 
-            if show_provider {
+            if state.show_custom_dialog {
+                dialogs::render_custom_provider_dialog(f, vert_chunks[0], &state);
+            } else if show_provider {
                 dialogs::render_provider_dialog(f, vert_chunks[0], &state);
             } else if show_key {
                 dialogs::render_key_dialog(f, vert_chunks[0], &state);
@@ -159,41 +186,37 @@ impl Tui {
     }
 
     fn render_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
-        let mode_indicator = match state.mode {
-            AppMode::Plan => Span::styled(
-                " PLAN ",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ),
-            AppMode::Build => Span::styled(
-                " BUILD ",
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-            ),
-        };
-
-        let hint = if state.show_provider_dialog || state.show_key_dialog {
+        let hint = if state.show_custom_dialog {
+            "Enter continue · Esc cancel".to_string()
+        } else if state.show_provider_dialog || state.show_key_dialog {
             "Esc cancel · Enter confirm".to_string()
         } else if state.show_model_picker {
             "Esc close · Enter toggle · Ctrl+A providers".to_string()
         } else if state.focus == Focus::Chat {
             "↑↓ scroll · g top · G bottom · Ctrl+P models · Ctrl+C quit".to_string()
+        } else if state.active_chat_requests > 0 {
+            "Ctrl+X stop · Ctrl+C quit".to_string()
         } else {
-            let panel_hint = if state.show_status_panel {
-                "Tab hide panel"
-            } else {
-                "Tab show panel"
-            };
-            let mode_hint = match state.mode {
-                AppMode::Plan => "Enter send · Alt+Enter newline · ↑↓ history · /cmd · Ctrl+P/Ctrl+C",
-                AppMode::Build => "/apply execute · /connect provider · Ctrl+P models",
-            };
-            format!("{} · {} · Ctrl+C quit", mode_hint, panel_hint)
+            "Enter send · Alt+Enter newline · ↑↓ history · /cmd · Ctrl+P models · Tab sidebar · Ctrl+C quit".to_string()
         };
+
+        let total_chars: usize = state.messages.iter().map(|m| m.content.len()).sum();
+        let ctx_tokens = estimate_tokens(total_chars);
+        let ctx_info = if state.context_limit > 0 {
+            format!("ctx: {:>4}/{}", ctx_tokens, state.context_limit)
+        } else {
+            format!("ctx: {:>4}", ctx_tokens)
+        };
+
+        let hint_width = hint.len() as u16;
+        let ctx_width = ctx_info.len() as u16;
+        let pad = area.width.saturating_sub(hint_width + ctx_width + 2);
 
         f.render_widget(
             Paragraph::new(Line::from(vec![
-                mode_indicator,
-                Span::raw("  "),
                 Span::styled(hint, Style::default().fg(Color::DarkGray)),
+                Span::raw(" ".repeat(pad as usize)),
+                Span::styled(ctx_info, Style::default().fg(Color::Green)),
             ])),
             area,
         );

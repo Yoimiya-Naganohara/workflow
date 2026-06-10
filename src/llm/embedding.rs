@@ -55,9 +55,7 @@ impl EmbeddingService {
         let raw = &embeddings[0];
         let mut result = [0.0f32; EMBEDDING_DIM];
         let len = raw.len().min(EMBEDDING_DIM);
-        for i in 0..len {
-            result[i] = raw[i];
-        }
+        result[..len].copy_from_slice(&raw[..len]);
         let normalized = normalize_embedding(result);
 
         self.cache.insert(text.to_string(), normalized);
@@ -88,9 +86,7 @@ impl EmbeddingService {
         for ((idx, text), embedding) in uncached.iter().zip(embeddings.iter()) {
             let mut result = [0.0f32; EMBEDDING_DIM];
             let len = embedding.len().min(EMBEDDING_DIM);
-            for i in 0..len {
-                result[i] = embedding[i];
-            }
+            result[..len].copy_from_slice(&embedding[..len]);
             let normalized = normalize_embedding(result);
             self.cache.insert(text.clone(), normalized);
             results[*idx] = normalized;

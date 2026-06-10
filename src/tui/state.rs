@@ -4,6 +4,7 @@ use std::sync::Arc;
 use futures::future::AbortHandle;
 use tokio::sync::RwLock;
 
+use crate::core::types::AgentId;
 use crate::models::ModelRegistry;
 use crate::runtime::AgentRuntime;
 use crate::tools::ToolServerHandle;
@@ -85,6 +86,20 @@ pub struct AppState {
     pub auto_scroll: bool,
     /// MCP tool server handle with built-in tools.
     pub tool_server: ToolServerHandle,
+    /// Agent ID of the root agent that owns the conversation.
+    /// Set automatically on first chat; `spawn_agent` tool spawns children under this agent.
+    pub responsible_agent_id: Option<AgentId>,
+    /// Context window limit (from selected model), 0 if unknown.
+    pub context_limit: u64,
+    /// Custom provider wizard dialog
+    pub show_custom_dialog: bool,
+    pub custom_step: usize,
+    pub custom_name: String,
+    pub custom_url: String,
+    pub custom_key: String,
+    pub custom_models: String,
+    pub custom_input: String,
+    pub custom_cursor: usize,
 }
 
 #[derive(Clone)]
@@ -150,13 +165,7 @@ impl Default for AppState {
             messages: vec![
                 ChatMessage {
                     role: MessageRole::System,
-                    content: "Workflow Agent v0.1.0".to_string(),
-                    timestamp: "00:00:00".to_string(),
-                    status: MessageStatus::Completed,
-                },
-                ChatMessage {
-                    role: MessageRole::System,
-                    content: "Describe your goal and I'll create a plan. Use /apply to execute.".to_string(),
+                    content: "Workflow Agent — connected. Describe your goal and I'll help. Use `/connect` to set up a provider, then start chatting.".to_string(),
                     timestamp: "00:00:00".to_string(),
                     status: MessageStatus::Completed,
                 },
@@ -202,6 +211,16 @@ impl Default for AppState {
             think_frame: 0,
             auto_scroll: true,
             tool_server: crate::tools::create_tool_server(),
+            responsible_agent_id: None,
+            context_limit: 0,
+            show_custom_dialog: false,
+            custom_step: 0,
+            custom_name: String::new(),
+            custom_url: String::new(),
+            custom_key: String::new(),
+            custom_models: String::new(),
+            custom_input: String::new(),
+            custom_cursor: 0,
         }
     }
 }
@@ -209,10 +228,10 @@ impl Default for AppState {
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/connect", "Configure a provider"),
     ("/models", "Select a model for chat"),
-    ("/apply", "Approve and execute plan"),
     ("/clear", "Clear conversation"),
     ("/sh", "Run a shell command"),
     ("/pool", "Manage experience pool (flush/clear/stats/export/import)"),
     ("/keymap", "Show keyboard shortcuts"),
+    ("/custom", "Add/list/remove custom providers"),
     ("/help", "Show help"),
 ];

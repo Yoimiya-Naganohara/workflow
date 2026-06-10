@@ -180,6 +180,14 @@ impl ModelRegistry {
         Some((provider, model))
     }
 
+    /// Get the context window limit for a given model (provider_id + model_id).
+    /// Returns 0 if the model or provider is not found.
+    pub fn get_context_limit(&self, provider_id: &str, model_id: &str) -> u64 {
+        self.get_model(provider_id, model_id)
+            .map(|m| m.limit.context)
+            .unwrap_or(0)
+    }
+
     pub fn search_models(&self, query: &str) -> Vec<(&Provider, &Model)> {
         if query.is_empty() {
             return self
@@ -216,6 +224,134 @@ impl ModelRegistry {
                     })
                     .map(move |m| (p, m))
             })
+            .collect()
+    }
+}
+
+// ── Custom provider support ──
+
+/// A user-defined custom provider (OpenAI-compatible).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomProvider {
+    pub id: String,
+    pub name: String,
+    pub api_url: String,
+    pub api_key: String,
+    pub models: Vec<String>,
+}
+
+impl CustomProvider {
+    /// Build a provider slug from the custom name.
+    pub fn slug(name: &str) -> String {
+        let slug: String = name
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if slug.is_empty() { "custom".to_string() } else { slug }
+    }
+}
+
+impl ModelRegistry {
+    /// Add a custom provider into the registry so it appears in dialogs.
+    pub fn add_custom_provider(&mut self, custom: &CustomProvider) {
+        let id = format!("custom-{}", Self::sanitize_id(&custom.id));
+        // Build model entries from the custom provider's model list
+        let models: HashMap<String, Model> = if custom.models.is_empty() {
+            let mut m = HashMap::new();
+            m.insert(
+                "default".to_string(),
+                Model {
+                    id: "default".to_string(),
+                    name: "Default Model".to_string(),
+                    family: None,
+                    attachment: false,
+                    reasoning: false,
+                    tool_call: true,
+                    temperature: true,
+                    knowledge: None,
+                    release_date: None,
+                    last_updated: None,
+                    modalities: Modalities {
+                        input: vec!["text".to_string()],
+                        output: vec!["text".to_string()],
+                    },
+                    open_weights: false,
+                    limit: ModelLimit {
+                        context: 128000,
+                        output: 4096,
+                        input: None,
+                    },
+                    cost: default_cost(),
+                    status: None,
+                },
+            );
+            m
+        } else {
+            custom
+                .models
+                .iter()
+                .map(|m_id| {
+                    let model = Model {
+                        id: m_id.clone(),
+                        name: m_id.clone(),
+                        family: None,
+                        attachment: false,
+                        reasoning: false,
+                        tool_call: true,
+                        temperature: true,
+                        knowledge: None,
+                        release_date: None,
+                        last_updated: None,
+                        modalities: Modalities {
+                            input: vec!["text".to_string()],
+                            output: vec!["text".to_string()],
+                        },
+                        open_weights: false,
+                        limit: ModelLimit {
+                            context: 128000,
+                            output: 4096,
+                            input: None,
+                        },
+                        cost: default_cost(),
+                        status: None,
+                    };
+                    (m_id.clone(), model)
+                })
+                .collect()
+        };
+
+        let provider = Provider {
+            id: id.clone(),
+            name: custom.name.clone(),
+            env: vec![format!(
+                "CUSTOM_{}_API_KEY",
+                Self::sanitize_id(&custom.id).to_uppercase()
+            )],
+            api: Some(custom.api_url.clone()),
+            doc: None,
+            models,
+        };
+
+        // Replace existing or push new
+        if let Some(pos) = self.providers.iter().position(|p| p.id == id) {
+            self.providers[pos] = provider;
+        } else {
+            self.providers.push(provider);
+        }
+        self.providers.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Remove a custom provider by its custom ID.
+    pub fn remove_custom_provider(&mut self, custom_id: &str) {
+        let id = format!("custom-{}", Self::sanitize_id(custom_id));
+        self.providers.retain(|p| p.id != id);
+    }
+
+    fn sanitize_id(name: &str) -> String {
+        name.to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
             .collect()
     }
 }

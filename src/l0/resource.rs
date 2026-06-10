@@ -136,6 +136,20 @@ impl BudgetGuard {
     pub fn task_id(&self) -> &TaskId {
         &self.root_task_id
     }
+
+    /// Create a [`BudgetGuard`] from a permit's already-acquired resources.
+    ///
+    /// Unlike [`BudgetGuard::new`], this does **not** re-acquire budget or
+    /// tools — it takes ownership directly.
+    pub fn from_permit(task_id: TaskId, amount: u64, state: Arc<TaskResourceState>, tools: u64) -> Self {
+        Self {
+            root_task_id: task_id,
+            amount,
+            resource_state: Arc::downgrade(&state),
+            committed: false,
+            requested_tools: tools,
+        }
+    }
 }
 
 impl Drop for BudgetGuard {

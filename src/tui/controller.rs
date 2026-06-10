@@ -14,6 +14,7 @@ use rig::providers::{llamafile, ollama};
 use tokio::sync::RwLock;
 
 use crate::llm::{self, LlmProvider};
+use crate::models::CustomProvider;
 use crate::tui::state::{AgentEntry, AppState, ChatMessage, MessageRole, MessageStatus, SelectedModel};
 
 // ============================================================================
@@ -22,6 +23,10 @@ use crate::tui::state::{AgentEntry, AppState, ChatMessage, MessageRole, MessageS
 
 pub fn is_no_auth_provider(provider_id: &str) -> bool {
     matches!(provider_id, "ollama" | "llamafile")
+}
+
+pub fn is_custom_provider(provider_id: &str) -> bool {
+    provider_id.starts_with("custom-")
 }
 
 pub fn get_or_create_provider_client(state: &mut AppState, provider_id: &str) -> Result<Arc<LlmProvider>> {
@@ -56,6 +61,14 @@ pub fn get_or_create_provider_client(state: &mut AppState, provider_id: &str) ->
     }
 
     let env_key = provider.env.first().cloned().unwrap_or_default();
+
+    // Custom provider without API key (no-auth custom)
+    if is_custom_provider(provider_id) && !state.api_keys.contains_key(&env_key) {
+        let client = Arc::new(LlmProvider::from_key("", provider.api.as_deref(), "openai")?);
+        state.provider_clients.insert(provider_id.to_string(), client.clone());
+        return Ok(client);
+    }
+
     if env_key.is_empty() {
         anyhow::bail!("Provider {} has no env var configured", provider_id);
     }
@@ -167,12 +180,18 @@ pub async fn load_initial_state(state: &mut AppState) {
     state.api_keys.extend(persisted.api_keys);
     state.provider_clients.clear();
 
+    // Merge custom providers into the model registry
+    merge_custom_providers(state);
+
     if !state.configured_providers.is_empty() || !state.selected_models.is_empty() {
         if let Some(cached) = crate::persistence::load_provider_cache() {
             state.models = cached;
         }
     }
     if !state.selected_models.is_empty() {
+        if let Some(first) = state.selected_models.first() {
+            state.context_limit = state.models.get_context_limit(&first.provider_id, &first.model_id);
+        }
         state.messages.push(ChatMessage {
             role: MessageRole::System,
             content: format!("Loaded {} selected models", state.selected_models.len()),
@@ -307,6 +326,53 @@ pub fn execute_pool_command(state: &Arc<RwLock<AppState>>, cmd: &str, now: &str)
                 MessageStatus::Completed,
             ),
             "import" => ("Import not yet implemented".to_string(), MessageStatus::Completed),
+            _ if cmd.starts_with("query ") || cmd.starts_with("q ") => {
+                let query_text = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim().to_string();
+                if query_text.is_empty() {
+                    ("Usage: /pool query <text>".to_string(), MessageStatus::Completed)
+                } else if let Some(runtime) = &s.runtime {
+                    if let Ok(rt) = runtime.try_read() {
+                        match rt.embed(&query_text).await {
+                            Ok(emb) => {
+                                let results = rt.search_experience(&emb, 10);
+                                if results.is_empty() {
+                                    ("No matching experiences found.".to_string(), MessageStatus::Completed)
+                                } else {
+                                    let lines: Vec<String> = results
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, (entry, score))| {
+                                            let ts = entry.timestamp;
+                                            format!(
+                                                "  #{:<3} score={:.4}  weight={:.2}  ts={}  tools={:016b}",
+                                                i + 1,
+                                                score,
+                                                entry.weight,
+                                                ts,
+                                                entry.tool_bitmap
+                                            )
+                                        })
+                                        .collect();
+                                    (
+                                        format!(
+                                            "Top {} experiences for \"{}\":\n{}",
+                                            results.len(),
+                                            query_text,
+                                            lines.join("\n")
+                                        ),
+                                        MessageStatus::Completed,
+                                    )
+                                }
+                            }
+                            Err(e) => (format!("Embedding failed: {}", e), MessageStatus::Error),
+                        }
+                    } else {
+                        ("Runtime locked".to_string(), MessageStatus::Completed)
+                    }
+                } else {
+                    ("Runtime not available".to_string(), MessageStatus::Completed)
+                }
+            }
             _ => (
                 format!("Unknown pool command: {}. Use /pool for help.", cmd),
                 MessageStatus::Completed,
@@ -326,6 +392,61 @@ pub fn execute_pool_command(state: &Arc<RwLock<AppState>>, cmd: &str, now: &str)
 // ============================================================================
 //  Chat / Agent execution
 // ============================================================================
+
+async fn ensure_initial_agent(state: &Arc<RwLock<AppState>>, goal_hint: &str) -> Result<crate::core::types::AgentId> {
+    let existing = {
+        let s = state.read().await;
+        if let Some(agent_id) = s.responsible_agent_id {
+            let pool = s.agent_pool.read().await;
+            if pool.get_agent(&agent_id).is_some() {
+                Some(agent_id)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+    if let Some(agent_id) = existing {
+        return Ok(agent_id);
+    }
+
+    let (runtime, agent_pool) = {
+        let s = state.read().await;
+        let runtime = s
+            .runtime
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Runtime not initialized"))?;
+        (runtime, s.agent_pool.clone())
+    };
+
+    let goal = if goal_hint.trim().is_empty() {
+        "Own the user conversation, produce plans, and execute approved plans."
+    } else {
+        goal_hint
+    };
+
+    let agent_id = {
+        let runtime = runtime.read().await;
+        let mut pool = agent_pool.write().await;
+        runtime.bootstrap_root_agent(goal, "general_business_analyst", &mut pool)
+    };
+
+    let mut s = state.write().await;
+    s.responsible_agent_id = Some(agent_id);
+    let entry = AgentEntry {
+        id: crate::agent::AgentPool::agent_id_str(&agent_id),
+        name: format!("planner-{:04x}", u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
+        status: crate::tui::state::AgentStatus::Running,
+        budget: 0,
+    };
+    if let Some(slot) = s.agents.iter_mut().find(|a| a.id == "agent-000") {
+        *slot = entry;
+    } else if !s.agents.iter().any(|a| a.id == entry.id) {
+        s.agents.push(entry);
+    }
+    Ok(agent_id)
+}
 
 /// Find the slot index of the currently streaming message (fallback to last thinking/streaming).
 fn find_streaming_slot(messages: &[ChatMessage], preferred: usize) -> usize {
@@ -349,8 +470,14 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
     tokio::spawn(async move {
         let mut full_response = String::new();
 
-        // ── Setup: get runtime, provider, model ──
-        let (provider, model_id) = {
+        // ── Setup: get runtime, provider, model, system prompt ──
+        let default_tool_prompt = concat!(
+            "You are a helpful assistant with access to tools. ",
+            "You can read/write files, execute shell commands, and list directories. ",
+            "Always use the appropriate tool when asked. ",
+            "Produce a concrete result."
+        );
+        let (provider, model_id, system_prompt) = {
             let mut s = state_clone.write().await;
             let runtime = match &s.runtime {
                 Some(r) => r.clone(),
@@ -377,6 +504,19 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
             }
             drop(s);
 
+            let agent_id = match ensure_initial_agent(&state_clone, &input_clone).await {
+                Ok(id) => id,
+                Err(e) => {
+                    let mut s = state_clone.write().await;
+                    if let Some(msg) = s.messages.get_mut(response_index) {
+                        msg.content = format!("Initial agent unavailable: {}", e);
+                        msg.status = MessageStatus::Error;
+                    }
+                    s.active_chat_requests = 0;
+                    return;
+                }
+            };
+
             let rt = runtime.read().await;
             let provider = match &rt.provider {
                 Some(p) => p.clone(),
@@ -391,22 +531,45 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
                 }
             };
             let model_id = rt.model_id.clone();
-            (provider, model_id)
+            let agent_prompt = {
+                let s = state_clone.read().await;
+                let pool = s.agent_pool.read().await;
+                pool.get_agent(&agent_id)
+                    .map(|agent| agent.config.system_prompt.clone())
+                    .unwrap_or_else(|| default_tool_prompt.to_string())
+            };
+            let system_prompt = format!(
+                "{}\n\nYou are the workflow agent. Chat with the user, clarify the goal, and delegate tasks by calling the `spawn_agent` tool (roles: planner, developer, tester, reviewer, worker, etc.). You are fully responsible for all spawned agents — the human does not approve or manage them.\n\nYou have access to tools: read_file, write_file, sh, list_dir, and spawn_agent. Always use the appropriate tool when asked.",
+                agent_prompt
+            );
+            (provider, model_id, system_prompt)
         };
 
         // ── Tool-enabled stream ──
-        let system_prompt = concat!(
-            "You are a helpful assistant with access to tools. ",
-            "You can read/write files, execute shell commands, and list directories. ",
-            "Always use the appropriate tool when asked. ",
-            "Produce a concrete result."
-        );
         let tool_server = {
             let s = state_clone.read().await;
             s.tool_server.clone()
         };
+        // ── Build conversation history from previous messages ──
+        let history = {
+            let s = state_clone.read().await;
+            let mut hist: Vec<(String, String)> = Vec::new();
+            for msg in &s.messages {
+                match msg.role {
+                    crate::tui::state::MessageRole::User => {
+                        hist.push(("user".to_string(), msg.content.clone()));
+                    }
+                    crate::tui::state::MessageRole::Agent => {
+                        hist.push(("assistant".to_string(), msg.content.clone()));
+                    }
+                    _ => {}
+                }
+            }
+            hist
+        };
+
         let mut stream = match provider
-            .chat_with_tools_stream_mcp(&model_id, system_prompt, &input_clone, &[], &tool_server)
+            .chat_with_tools_stream_mcp(&model_id, &system_prompt, &input_clone, &history, &tool_server)
             .await
         {
             Ok(s) => s,
@@ -435,10 +598,31 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
                                 msg.status = MessageStatus::Streaming;
                             }
                         }
-                        llm::ToolEvent::ToolCall { name, args, result: _ } => {
-                            let args_str =
-                                serde_json::to_string_pretty(&args).unwrap_or_else(|_| format!("{:?}", args));
-                            let tool_msg = format!("🔧 **{}**\n```json\n{}\n```", name, args_str);
+                        llm::ToolEvent::ToolCall { name, args, .. } => {
+                            let args_str = match &args {
+                                serde_json::Value::Object(map) if map.len() <= 3 => {
+                                    // Compact one-line for typical spawn/tool calls
+                                    let parts: Vec<String> = map
+                                        .iter()
+                                        .map(|(k, v)| {
+                                            let val = match v {
+                                                serde_json::Value::String(s) => {
+                                                    if s.len() > 60 {
+                                                        format!("\"{}…\"", &s[..57])
+                                                    } else {
+                                                        format!("\"{}\"", s)
+                                                    }
+                                                }
+                                                other => other.to_string(),
+                                            };
+                                            format!("{}: {}", k, val)
+                                        })
+                                        .collect();
+                                    parts.join(", ")
+                                }
+                                other => serde_json::to_string_pretty(other).unwrap_or_else(|_| format!("{:?}", other)),
+                            };
+                            let tool_msg = format!("🔧 {} — {}", name, args_str);
                             let now = chrono::Local::now().format("%H:%M:%S").to_string();
                             let mut s = state_clone.write().await;
                             s.messages.push(ChatMessage {
@@ -458,55 +642,78 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
         .await;
 
         // ── Finalize ──
-        let mut s = state_clone.write().await;
-        let slot = s
-            .messages
-            .get(response_index)
-            .filter(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
-            .map(|_| response_index)
-            .or_else(|| {
-                s.messages
-                    .iter()
-                    .rposition(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
-            })
-            .unwrap_or(response_index);
+        {
+            let mut s = state_clone.write().await;
+            let slot = s
+                .messages
+                .get(response_index)
+                .filter(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
+                .map(|_| response_index)
+                .or_else(|| {
+                    s.messages
+                        .iter()
+                        .rposition(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
+                })
+                .unwrap_or(response_index);
 
-        match stream_result {
-            Ok(Ok(full)) => {
-                if let Some(msg) = s.messages.get_mut(slot) {
-                    if !full.is_empty() {
-                        msg.content = full.clone();
+            let response_text = match &stream_result {
+                Ok(Ok(full)) => Some(full.clone()),
+                _ => None,
+            };
+
+            match stream_result {
+                Ok(Ok(full)) => {
+                    if let Some(msg) = s.messages.get_mut(slot) {
+                        if !full.is_empty() {
+                            msg.content = full;
+                        }
+                        msg.status = MessageStatus::Completed;
                     }
-                    msg.status = MessageStatus::Completed;
                 }
-                if let Some(mut plan) = crate::agent::plan::Plan::parse_from_response(&full) {
-                    plan.goal = input_clone;
-                    s.current_plan = Some(plan);
-                    s.messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: "Plan detected. Type /apply to approve and execute.".to_string(),
-                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                        status: MessageStatus::Completed,
-                    });
+                Ok(Err(e)) => {
+                    if let Some(msg) = s.messages.get_mut(slot) {
+                        msg.content = format!("Error: {}", e);
+                        msg.status = MessageStatus::Error;
+                    }
                 }
-            }
-            Ok(Err(e)) => {
-                if let Some(msg) = s.messages.get_mut(slot) {
-                    msg.content = format!("Error: {}", e);
-                    msg.status = MessageStatus::Error;
+                Err(_) => {
+                    // Aborted (Ctrl+X)
+                    if let Some(msg) = s.messages.get_mut(slot) {
+                        msg.content += " (cancelled)";
+                        msg.status = MessageStatus::Completed;
+                    }
                 }
             }
-            Err(_) => {
-                // Aborted (Ctrl+X)
-                if let Some(msg) = s.messages.get_mut(slot) {
-                    msg.content += " (cancelled)";
-                    msg.status = MessageStatus::Completed;
+            if s.active_chat_request_id == request_id {
+                s.active_chat_abort = None;
+                s.active_chat_requests = 0;
+            }
+
+            // Record experience for successful chat responses to seed the pool.
+            if let Some(full) = response_text {
+                if !full.is_empty() {
+                    if let Some(runtime) = &s.runtime {
+                        if let Ok(rt) = runtime.try_read() {
+                            if let Ok(emb) = rt.embed(&input_clone).await {
+                                rt.record_experience(crate::core::types::ExperienceEntry {
+                                    embedding: emb,
+                                    applicability_vector: [0.0f32; 128],
+                                    tool_bitmap: 0,
+                                    role_template_id: None,
+                                    weight: 0.6,
+                                    domain_version: 0,
+                                    timestamp: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs(),
+                                    l2_override_weight: 0.0,
+                                    l2_override_created_at: 0,
+                                });
+                            }
+                        }
+                    }
                 }
             }
-        }
-        if s.active_chat_request_id == request_id {
-            s.active_chat_abort = None;
-            s.active_chat_requests = 0;
         }
     });
 
@@ -514,138 +721,202 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
 }
 
 // ============================================================================
-//  Plan execution
+//  Custom provider management
 // ============================================================================
 
-pub fn execute_plan(state: &Arc<RwLock<AppState>>) {
-    let state_clone = state.clone();
-    tokio::spawn(async move {
-        // ── Gather tasks and prepare runtime ──
-        let (tasks, runtime, agent_pool) = {
-            let mut s = state_clone.write().await;
+fn provider_env_key(custom_id: &str) -> String {
+    format!("CUSTOM_{}_API_KEY", custom_id.to_uppercase())
+}
 
-            let tasks: Vec<(usize, String)> = s
-                .current_plan
-                .as_ref()
-                .map(|p| {
-                    p.tasks
-                        .iter()
-                        .filter(|t| t.status == crate::agent::plan::TaskStatus::Pending)
-                        .map(|t| (t.id, t.description.clone()))
-                        .collect()
-                })
-                .unwrap_or_default();
+pub fn save_custom_provider(state: &mut AppState, name: &str, url: &str, key: &str, models_str: &str) {
+    let custom_id = CustomProvider::slug(name);
+    let env_key = provider_env_key(&custom_id);
 
-            let runtime = match &s.runtime {
-                Some(r) => r.clone(),
-                None => {
-                    s.messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: "Runtime not initialized".to_string(),
-                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                        status: MessageStatus::Error,
-                    });
-                    return;
-                }
-            };
+    let models: Vec<String> = if models_str.trim().is_empty() {
+        vec!["default".to_string()]
+    } else {
+        models_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
 
-            let agent_pool = s.agent_pool.clone();
+    let provider = CustomProvider {
+        id: custom_id.clone(),
+        name: name.to_string(),
+        api_url: url.to_string(),
+        api_key: key.to_string(),
+        models: models.clone(),
+    };
 
-            // Configure provider/model on runtime
-            if let Some(ref sel) = s.selected_models.first().cloned() {
-                let provider_id = sel.provider_id.clone();
-                if s.configured_providers.iter().any(|id| id == &provider_id) {
-                    if let Ok(client) = get_or_create_provider_client(&mut s, &provider_id) {
-                        let mut rt = runtime.write().await;
-                        rt.set_provider_from_state(client);
-                        rt.set_default_model(&sel.model_id);
-                    }
-                }
-            }
+    // Persist
+    if let Err(e) = crate::persistence::save_custom_provider(&provider) {
+        let now = chrono::Local::now().format("%H:%M:%S").to_string();
+        state.messages.push(ChatMessage {
+            role: MessageRole::System,
+            content: format!("Failed to save custom provider: {}", e),
+            timestamp: now,
+            status: MessageStatus::Error,
+        });
+        return;
+    }
 
-            (tasks, runtime, agent_pool)
-        };
-
-        let mut task_results: Vec<(usize, String)> = Vec::new();
-
-        // ── Execute each task through the experience pipeline ──
-        for (task_id, task_desc) in &tasks {
-            // Mark running in UI
-            {
-                let mut s = state_clone.write().await;
-                if let Some(p) = &mut s.current_plan {
-                    p.mark_task_running(*task_id);
-                }
-                s.agents.push(AgentEntry {
-                    id: format!("task-{:03}", task_id),
-                    name: format!("Task {}: {}", task_id, task_desc.chars().take(24).collect::<String>()),
-                    status: crate::tui::state::AgentStatus::Running,
-                    budget: 0,
-                });
-            }
-
-            // Step 1: spawn_root_agent through decision pipeline
-            // Uses role="planner" template which has system prompt for decomposition
-            let agent_id = match runtime
-                .read()
-                .await
-                .spawn_root_agent(task_desc, "planner", &mut *agent_pool.write().await)
-                .await
-            {
-                Ok(id) => id,
-                Err(e) => {
-                    let mut s = state_clone.write().await;
-                    if let Some(p) = &mut s.current_plan {
-                        p.mark_task_failed(*task_id, e.to_string());
-                    }
-                    s.messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("Task {} rejected: {}", task_id, e),
-                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                        status: MessageStatus::Error,
-                    });
-                    continue;
-                }
-            };
-
-            // Step 2: execute agent tree (recursive @role → spawn_child → aggregate)
-            runtime.read().await.execute_agent(agent_id, &agent_pool).await;
-
-            // Step 3: collect result
-            let result = runtime.read().await.await_agent(agent_id, &agent_pool).await;
-
-            let result_snippet = result.chars().take(200).collect::<String>();
-            task_results.push((*task_id, result.clone()));
-
-            // Mark completed in UI
-            {
-                let mut s = state_clone.write().await;
-                if let Some(p) = &mut s.current_plan {
-                    p.mark_task_completed(*task_id, result_snippet.clone());
-                }
-                if let Some(agent) = s.agents.iter_mut().find(|a| a.id == format!("task-{:03}", task_id)) {
-                    agent.status = crate::tui::state::AgentStatus::Completed;
-                }
-                s.messages.push(ChatMessage {
-                    role: MessageRole::Agent,
-                    content: format!("✅ Task {} complete: {}", task_id, result_snippet),
-                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                    status: MessageStatus::Completed,
-                });
-            }
+    // Store API key for client creation
+    if !key.is_empty() {
+        if !state.configured_providers.contains(&custom_id) {
+            state.configured_providers.push(custom_id.clone());
         }
+        state.api_keys.insert(env_key.clone(), key.to_string());
+        // Also persist the key
+        let _ = crate::persistence::save_configured_provider(&custom_id, &env_key, key);
+    } else {
+        // No-auth custom provider
+        if !state.configured_providers.contains(&custom_id) {
+            state.configured_providers.push(custom_id.clone());
+        }
+    }
 
-        // ── Final summary ──
-        {
-            let mut s = state_clone.write().await;
-            let completed = task_results.len();
-            let total = tasks.len();
+    // Merge into model registry
+    state.models.add_custom_provider(&provider);
+
+    // Pre-create provider client
+    let provider_id = format!("custom-{}", custom_id);
+    let _ = get_or_create_provider_client(state, &provider_id);
+
+    let now = chrono::Local::now().format("%H:%M:%S").to_string();
+    let model_list = models.join(", ");
+    state.messages.push(ChatMessage {
+        role: MessageRole::System,
+        content: format!(
+            "Custom provider \"{}\" configured — {} model(s): {}",
+            name,
+            models.len(),
+            model_list
+        ),
+        timestamp: now,
+        status: MessageStatus::Completed,
+    });
+}
+
+pub fn remove_custom_provider(state: &Arc<RwLock<AppState>>, name: &str, now: &str) {
+    let custom_id = CustomProvider::slug(name);
+    let provider_id = format!("custom-{}", custom_id);
+    let now = now.to_string();
+    let state_clone = state.clone();
+    let name = name.to_string();
+
+    tokio::spawn(async move {
+        let mut s = state_clone.write().await;
+
+        // Remove from persistence
+        if let Err(e) = crate::persistence::remove_custom_provider(&custom_id) {
             s.messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: format!("Plan execution finished: {}/{} tasks completed.", completed, total),
-                timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                content: format!("Failed to remove custom provider: {}", e),
+                timestamp: now.clone(),
+                status: MessageStatus::Error,
+            });
+            return;
+        }
+
+        // Remove from model registry
+        s.models.remove_custom_provider(&custom_id);
+
+        // Remove from configured providers and clients
+        s.configured_providers.retain(|p| p != &provider_id && p != &custom_id);
+        s.provider_clients.remove(&provider_id);
+
+        // Remove API key
+        let env_key = provider_env_key(&custom_id);
+        s.api_keys.remove(&env_key);
+
+        // Also clean up any selected models from this provider
+        s.selected_models.retain(|sm| sm.provider_id != provider_id);
+
+        s.messages.push(ChatMessage {
+            role: MessageRole::System,
+            content: format!("Custom provider \"{}\" removed", name),
+            timestamp: now,
+            status: MessageStatus::Completed,
+        });
+    });
+}
+
+pub fn list_custom_providers(state: &Arc<RwLock<AppState>>, now: &str) {
+    let state_clone = state.clone();
+    let now = now.to_string();
+
+    tokio::spawn(async move {
+        let s = state_clone.read().await;
+        let custom: Vec<_> = s
+            .models
+            .providers()
+            .iter()
+            .filter(|p| p.id.starts_with("custom-"))
+            .collect();
+
+        if custom.is_empty() {
+            let mut s = state_clone.write().await;
+            s.messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: "No custom providers configured.".to_string(),
+                timestamp: now,
                 status: MessageStatus::Completed,
             });
+            return;
         }
+
+        let mut lines = vec![format!("Custom Providers ({}):", custom.len())];
+        for p in &custom {
+            let model_count = p.models.len();
+            let has_key = if let Some(env) = p.env.first() {
+                if s.api_keys.contains_key(env) { "✓" } else { "⌁" }
+            } else {
+                ""
+            };
+            let api_url = p.api.as_deref().unwrap_or("-");
+            lines.push(format!(
+                "  {}  {} ({} model(s)) — {}",
+                has_key, p.name, model_count, api_url
+            ));
+        }
+
+        let mut s = state_clone.write().await;
+        s.messages.push(ChatMessage {
+            role: MessageRole::System,
+            content: lines.join("\n"),
+            timestamp: now,
+            status: MessageStatus::Completed,
+        });
     });
+}
+
+/// Load custom providers from persistence and merge them into the model registry.
+pub fn merge_custom_providers(state: &mut AppState) {
+    let custom_providers = crate::persistence::load_custom_providers();
+    if custom_providers.is_empty() {
+        return;
+    }
+    for cp in &custom_providers {
+        // Restore API key if we have it
+        let env_key = provider_env_key(&cp.id);
+        if !cp.api_key.is_empty() {
+            state.api_keys.insert(env_key.clone(), cp.api_key.clone());
+            if !state.configured_providers.contains(&cp.id) {
+                state.configured_providers.push(cp.id.clone());
+            }
+        }
+        // Add to registry
+        state.models.add_custom_provider(cp);
+    }
+    if !custom_providers.is_empty() {
+        let count = custom_providers.len();
+        state.messages.push(ChatMessage {
+            role: MessageRole::System,
+            content: format!("Loaded {} custom provider(s)", count),
+            timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+            status: MessageStatus::Completed,
+        });
+    }
 }

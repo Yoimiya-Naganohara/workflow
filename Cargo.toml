@@ -37,9 +37,11 @@ async-stream = "0.3"
 futures = "0.3"
 fastembed = "4"
 ort = "=2.0.0-rc.9"
+pulldown-cmark = "0.13"
 
 [dev-dependencies]
 tokio-test = "0.4"
+tempfile = "3"
 
 [profile.release]
 lto = true

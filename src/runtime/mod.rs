@@ -1,14 +1,16 @@
 pub mod pipeline;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
+use ::serde::{Deserialize, Serialize};
 use anyhow::Result;
 use tokio::sync::RwLock;
 
 use crate::agent::plan::{PlanEntity, PlanRegistry as PlanRegistryConcrete, PlanStatus, Task, TaskStatus};
 use crate::agent::{Agent, AgentPool, AgentStatus};
 use crate::core::types::*;
+use crate::experience::RoleTemplateStore;
+use crate::l0::resource::BudgetGuard;
 use crate::llm::EmbeddingService;
 use crate::llm::LlmProvider;
 use crate::runtime::pipeline::{DecisionPipeline, DecisionPipelineBuilder};
@@ -53,12 +55,56 @@ impl Default for AgentRuntimeConfig {
 //  RoleTemplate
 // ============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct RoleTemplate {
     pub role: String,
     pub label: String,
     pub system_prompt: String,
     pub template_id: u32,
+    #[serde(with = "opt_big_array_384")]
+    pub embedding: Option<[f32; crate::core::types::EMBEDDING_DIM]>,
+}
+
+/// Serde helpers for `Option<[f32; EMBEDDING_DIM]>`.
+///
+/// Serializes as `null` or a JSON array of floats.
+mod opt_big_array_384 {
+    use crate::core::types::EMBEDDING_DIM;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(val: &Option<[f32; EMBEDDING_DIM]>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match val {
+            Some(arr) => arr.as_slice().serialize(serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<[f32; EMBEDDING_DIM]>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let opt: Option<Vec<f32>> = Option::deserialize(deserializer)?;
+        match opt {
+            Some(v) => {
+                if v.len() != EMBEDDING_DIM {
+                    return Err(serde::de::Error::custom(format!(
+                        "expected {} elements, got {}",
+                        EMBEDDING_DIM,
+                        v.len()
+                    )));
+                }
+                let mut arr = [0.0f32; EMBEDDING_DIM];
+                for (i, val) in v.into_iter().enumerate() {
+                    arr[i] = val;
+                }
+                Ok(Some(arr))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 // ============================================================================
@@ -93,8 +139,8 @@ pub struct AgentRuntime {
     pub provider: Option<Arc<LlmProvider>>,
     /// Active model identifier.
     pub model_id: String,
-    /// Role templates for sub-agent spawning.
-    role_templates: HashMap<String, RoleTemplate>,
+    /// Role template store backed by persistent JSON.
+    role_template_store: Arc<RoleTemplateStore>,
 }
 
 impl AgentRuntime {
@@ -151,54 +197,143 @@ impl AgentRuntime {
     /// Use this when you want full control over every layer's
     /// implementation (mocking, custom audit engines, etc.).
     pub fn from_pipeline(pipeline: DecisionPipeline) -> Self {
-        let mut role_templates: HashMap<String, RoleTemplate> = HashMap::new();
-        role_templates.insert(
-            "planner".to_string(),
+        let store_path = Self::default_store_path();
+        let store = RoleTemplateStore::open(&store_path).expect("Failed to open role template store");
+
+        // Seed default templates if the store is empty.
+        store.seed_if_empty(vec![
             RoleTemplate {
-                role: "planner".to_string(),
-                label: "Senior Architect".to_string(),
-                system_prompt: "You are a senior architect. Decompose goals into jobs and assign @role to each."
+                role: "general_business_analyst".to_string(),
+                label: "General Business Analyst".to_string(),
+                system_prompt: "
+                ## Role
+
+                You are a senior business analyst (requirements analyst) skilled at extracting complete, verifiable requirements from vague or fragmented information. Your core task is to help stakeholders (product managers, business users, developers, etc.) clarify the problem, define objectives, identify stakeholders, set scope, and specify acceptance criteria. Follow the framework below for analysis and output.
+
+                ### Role Definition
+                - **Neutral Facilitator** – Don’t assume answers; ask clarifying questions.
+                - **Structured Organizer** – Convert messy descriptions into standardised requirements.
+                - **Consensus Builder** – Detect conflicting needs and drive alignment.
+                - **Scope Guardian** – Clarify what is in scope and out of scope to prevent creep.
+
+                ### Workflow (apply automatically, no need to list steps)
+
+                After receiving the user’s description, progressively go through the phases below. If information is insufficient, **actively ask specific clarifying questions** instead of guessing.
+
+                #### Phase 1: Problem Definition & Goal Alignment
+                - Identify the **business problem** or **opportunity**.
+                - Clarify the **context** (when, where, under what scenario).
+                - Define the **core objective** (measurable business value, e.g., “reduce handling time by 20%”, not “build a nicer UI”).
+                - Set **project boundaries** – what is in scope and what is out of scope.
+
+                #### Phase 2: Stakeholder Identification & Analysis
+                - List all **stakeholders** (end users, decision makers, operations, compliance, etc.).
+                - Analyse each stakeholder’s **pain points** and **expectations**.
+                - Flag potential **requirement conflicts** (e.g., admin wants detailed logs vs. user wants simple actions).
+
+                #### Phase 3: Requirements Elicitation & Breakdown
+                - Break high‑level needs into **functional requirements** (system behaviours) and **non‑functional requirements** (quality attributes: performance, security, usability, maintainability, etc.).
+                - Use **user stories** (“As a… I want… so that…”) or **use cases**.
+                - Assign **priorities** using MoSCoW: Must have / Should have / Could have / Won’t have.
+                - Identify **constraints** (tech stack, compliance, budget, timeline) and **assumptions**.
+
+                #### Phase 4: Specification & Validation
+                - Ensure each requirement follows **INVEST** principles: Independent, Negotiable, Valuable, Estimable, Small, Testable.
+                - Write **acceptance criteria** (Given‑When‑Then format or checklist).
+                - Highlight **ambiguities** and ask for clarification (e.g., “fast response” → “95% of requests within 200 ms”).
+
+                #### Phase 5: Requirements Management & Change Readiness
+                - Suggest a **naming / tracking scheme** for requirements.
+                - Remind the user: any future change should be evaluated for impact.
+
+                ### Output Format
+
+                Organise your answer as follows (if a section has no info, say why):
+
+                ```markdown
+                ## 1. Problem & Goal Summary
+                (restate your understanding of the core problem and business goal – wait for user confirmation)
+
+                ## 2. Stakeholders & Expectations
+                | Stakeholder | Main Pain Points | Expected Requirements | Conflicts |
+
+                ## 3. Functional Requirements
+                - FR-01 (Priority: Must): [description]
+                  Acceptance criteria: Given… when… then…
+                - FR-02 ...
+
+                ## 4. Non‑functional Requirements
+                - NFR-01 (Category: Performance | Priority: Should): [specific metric]
+                - NFR-02 ...
+
+                ## 5. Constraints & Assumptions
+                - Constraints: ...
+                - Assumptions: ...
+
+                ## 6. Open Questions / Clarifications Needed
+                (list at least 2–5 key questions for the user)
+
+                ## 7. Suggested Next Steps
+                (e.g., “Please confirm the above understanding and provide more details about scenario X.”)
+                ```
+
+                ### Communication Principles
+                1. **No fluff** – Get straight to analysis. Avoid openings like “As an AI model, I can help you…”.
+                2. **Ask first when missing information** – If lack of info materially impacts quality, ask questions before analysing. If enough info is provided, give a structured draft.
+                3. **Quantify where possible** – Turn “good”, “fast”, “stable” into measurable metrics.
+                4. **Focus on value** – For each requirement, ask “What real problem does this solve?” Don’t include low‑value items.
+                5. **Explain terms briefly** – Define acronyms like INVEST or MoSCoW when first used, but don’t over‑explain basics.
+
+                ### Example Opening Line (before user input)
+
+                > Please share your initial idea or requirement description (it can be a few sentences, user feedback, meeting notes, a problem with an existing system, etc.). I’ll use the framework above to help you clarify. If you give no input, I’ll start by asking about the context.
+                "
                     .to_string(),
                 template_id: 0,
+                embedding: None,
             },
-        );
-        role_templates.insert(
-            "tester".to_string(),
             RoleTemplate {
                 role: "tester".to_string(),
                 label: "QA Engineer".to_string(),
                 system_prompt: "You are a QA engineer. Write and execute tests. Decompose testing work into sub-goals and assign @tester sub-agents if needed."
                     .to_string(),
                 template_id: 1,
+                embedding: None,
             },
-        );
-        role_templates.insert(
-            "developer".to_string(),
             RoleTemplate {
                 role: "developer".to_string(),
                 label: "Developer".to_string(),
                 system_prompt: "You are a developer. Implement features from specifications. Decompose implementation into sub-goals and assign @developer sub-agents if needed."
                     .to_string(),
                 template_id: 2,
+                embedding: None,
             },
-        );
-        role_templates.insert(
-            "reviewer".to_string(),
             RoleTemplate {
                 role: "reviewer".to_string(),
                 label: "Code Reviewer".to_string(),
                 system_prompt: "You are a code reviewer. Review code for correctness, security, and style. Decompose review work into sub-goals and assign @reviewer sub-agents if needed."
                     .to_string(),
                 template_id: 3,
+                embedding: None,
             },
-        );
+        ]);
 
         Self {
             pipeline,
             provider: None,
             model_id: String::new(),
-            role_templates,
+            role_template_store: Arc::new(store),
         }
+    }
+
+    /// Default path for the role template store.
+    fn default_store_path() -> std::path::PathBuf {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(home)
+            .join(".workflow")
+            .join("role_templates.json")
     }
 
     // ── Pipeline delegation ──
@@ -237,6 +372,13 @@ impl AgentRuntime {
         self.pipeline.process_request(request).await
     }
 
+    // ── Budget guard ──
+
+    /// Take the budget guard from the last approved request.
+    pub fn take_pending_guard(&self) -> Option<BudgetGuard> {
+        self.pipeline.take_pending_guard()
+    }
+
     // ── Experience ──
 
     pub fn experience_count(&self) -> usize {
@@ -245,6 +387,21 @@ impl AgentRuntime {
 
     pub fn add_experience(&self, entry: ExperienceEntry) {
         self.pipeline.add_experience(entry);
+    }
+
+    /// Record an experience entry into the pool (feedback loop).
+    pub fn record_experience(&self, entry: ExperienceEntry) {
+        self.pipeline.record_experience(entry);
+    }
+
+    /// Embed text using the pipeline's embedding service.
+    pub async fn embed(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
+        self.pipeline.embedding().embed(text).await
+    }
+
+    /// Search the experience pool by embedding vector.
+    pub fn search_experience(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)> {
+        self.pipeline.search_experience(query, k)
     }
 
     // ── Resource status ──
@@ -294,8 +451,8 @@ impl AgentRuntime {
 
     // ── Role templates ──
 
-    pub fn get_role_template(&self, role: &str) -> Option<&RoleTemplate> {
-        self.role_templates.get(role)
+    pub fn get_role_template(&self, role: &str) -> Option<RoleTemplate> {
+        self.role_template_store.get_by_role(role)
     }
 
     // ── Chat ──
@@ -308,6 +465,7 @@ impl AgentRuntime {
             self.spawn_root_agent(goal, "planner", &mut pool).await?
         };
 
+        // Spawned agents are leaf nodes; execute directly.
         self.execute_agent(agent_id, agent_pool).await;
         self.await_agent(agent_id, agent_pool).await;
 
@@ -327,19 +485,61 @@ impl AgentRuntime {
 
     // ── Agent lifecycle ──
 
-    pub async fn spawn_root_agent(&self, goal: &str, role: &str, agent_pool: &mut AgentPool) -> Result<AgentId> {
-        let role_tpl = self.role_templates.get(role).cloned().unwrap_or(RoleTemplate {
+    /// Create the initial interactive agent.
+    ///
+    /// This is a bootstrap actor rather than a spawned child, so it is
+    /// registered directly in the pool. Any agents it creates later still go
+    /// through the normal L-1/L0/L1/L2 spawn pipeline.
+    pub fn bootstrap_root_agent(&self, goal: &str, role: &str, agent_pool: &mut AgentPool) -> AgentId {
+        let role_tpl = self.role_template_store.get_by_role(role).unwrap_or(RoleTemplate {
             role: role.to_string(),
             label: role.to_string(),
             system_prompt: format!("You are a {}. Execute the given goal.", role),
             template_id: 0,
+            embedding: None,
         });
+
+        let agent_id: AgentId = rand::random();
+        let agent = Agent {
+            id: agent_id,
+            name: format!("{}-{:04x}", role, u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
+            role: role.to_string(),
+            parent_id: None,
+            children: Vec::new(),
+            depth: 0,
+            goal: goal.to_string(),
+            config: crate::agent::AgentConfig {
+                system_prompt: role_tpl.system_prompt,
+                model_id: self.model_id.clone(),
+                ..Default::default()
+            },
+            status: AgentStatus::Idle,
+            result: None,
+            child_results: Vec::new(),
+        };
+        agent_pool.add_agent(agent);
+        agent_id
+    }
+
+    pub async fn spawn_root_agent(&self, goal: &str, role: &str, agent_pool: &mut AgentPool) -> Result<AgentId> {
+        let role_emb = self.pipeline.embedding().embed(role).await?;
+        let task_emb = self.pipeline.embedding().embed(goal).await?;
+
+        let role_tpl = self
+            .role_template_store
+            .get_by_role(role)
+            .or_else(|| self.role_template_store.find_closest(&role_emb, 0.85))
+            .unwrap_or(RoleTemplate {
+                role: role.to_string(),
+                label: role.to_string(),
+                system_prompt: format!("You are a {}. Execute the given goal.", role),
+                template_id: 0,
+                embedding: None,
+            });
 
         let agent_id: AgentId = rand::random();
 
         // Run the decision pipeline
-        let role_emb = self.pipeline.embedding().embed(role).await?;
-        let task_emb = self.pipeline.embedding().embed(goal).await?;
         let value_emb = self.pipeline.embedding().embed("default").await?;
 
         let request = SpawnRequest {
@@ -358,6 +558,10 @@ impl AgentRuntime {
         let decision = self.pipeline.process_request(request).await?;
         match decision {
             SpawnDecision::Approved(_config) => {
+                // Attach budget guard to the agent (ownership transferred).
+                if let Some(guard) = self.pipeline.take_pending_guard() {
+                    agent_pool.attach_budget_guard(agent_id, guard);
+                }
                 let agent = Agent {
                     id: agent_id,
                     name: format!("{}-{:04x}", role, u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
@@ -391,16 +595,21 @@ impl AgentRuntime {
         responsibility_chain: &[AgentId],
         agent_pool: &mut AgentPool,
     ) -> Result<AgentId> {
-        let role_tpl = self.role_templates.get(role).cloned().unwrap_or(RoleTemplate {
-            role: role.to_string(),
-            label: role.to_string(),
-            system_prompt: format!("You are a {}. Execute the given goal.", role),
-            template_id: 0,
-        });
+        let role_emb = self.pipeline.embedding().embed(role).await?;
+
+        let role_tpl = self
+            .role_template_store
+            .get_by_role(role)
+            .or_else(|| self.role_template_store.find_closest(&role_emb, 0.85))
+            .unwrap_or(RoleTemplate {
+                role: role.to_string(),
+                label: role.to_string(),
+                system_prompt: format!("You are a {}. Execute the given goal.", role),
+                template_id: 0,
+                embedding: None,
+            });
 
         let agent_id: AgentId = rand::random();
-
-        let role_emb = self.pipeline.embedding().embed(goal).await?;
         let task_emb = self.pipeline.embedding().embed(goal).await?;
         let value_emb = self.pipeline.embedding().embed("default").await?;
 
@@ -423,6 +632,10 @@ impl AgentRuntime {
         let decision = self.pipeline.process_request(request).await?;
         match decision {
             SpawnDecision::Approved(_config) => {
+                // Attach budget guard to the child agent.
+                if let Some(guard) = self.pipeline.take_pending_guard() {
+                    agent_pool.attach_budget_guard(agent_id, guard);
+                }
                 let agent = Agent {
                     id: agent_id,
                     name: format!("{}-{:04x}", role, u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
@@ -481,87 +694,85 @@ impl AgentRuntime {
         }
     }
 
-    pub async fn execute_agent(&self, agent_id: AgentId, agent_pool: &Arc<RwLock<AgentPool>>) {
-        // Process agent and get any child assignments
-        let maybe_assignments = self.execute_agent_inner(agent_id, agent_pool).await;
+    pub async fn spawn_plan_task_agent(
+        &self,
+        owner_id: AgentId,
+        role: &str,
+        goal: &str,
+        agent_pool: &mut AgentPool,
+    ) -> Result<AgentId> {
+        let (parent_depth, responsibility_chain) = agent_pool
+            .get_agent(&owner_id)
+            .map(|agent| (agent.depth, vec![owner_id]))
+            .ok_or_else(|| anyhow::anyhow!("Responsible agent not found"))?;
 
-        let assignments = match maybe_assignments {
-            Some(a) => a,
-            None => return, // leaf or error — already completed in inner
+        self.spawn_child(owner_id, parent_depth, role, goal, &responsibility_chain, agent_pool)
+            .await
+    }
+
+    pub async fn synthesize_plan_result(
+        &self,
+        owner_id: AgentId,
+        plan_goal: &str,
+        task_results: &[(usize, String)],
+        agent_pool: &Arc<RwLock<AgentPool>>,
+    ) -> String {
+        let (config, provider) = {
+            let mut pool = agent_pool.write().await;
+            let config = match pool.get_agent_mut(&owner_id) {
+                Some(agent) => {
+                    agent.status = AgentStatus::Aggregating;
+                    agent.config.clone()
+                }
+                None => return "Responsible agent not found".to_string(),
+            };
+            (config, self.provider.clone())
         };
 
-        let (goal, config, depth) = {
+        let result = if let Some(provider) = provider {
+            let task_summary = task_results
+                .iter()
+                .map(|(id, result)| format!("Task {}:\n{}", id, result))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            let prompt = format!(
+                "You own this approved plan.\n\nPlan goal: {}\n\nCompleted task results:\n{}\n\nSynthesize the final result for the user.",
+                plan_goal, task_summary
+            );
+            provider
+                .chat(&config.model_id, &config.system_prompt, &prompt)
+                .await
+                .unwrap_or_else(|e| format!("Plan synthesis failed: {}", e))
+        } else {
+            "No LLM provider configured".to_string()
+        };
+
+        let mut pool = agent_pool.write().await;
+        if let Some(agent) = pool.get_agent_mut(&owner_id) {
+            agent.result = Some(result.clone());
+            agent.status = AgentStatus::Completed;
+            pool.notify_completed(&owner_id);
+        }
+        result
+    }
+
+    pub async fn execute_agent(&self, agent_id: AgentId, agent_pool: &Arc<RwLock<AgentPool>>) {
+        self.execute_agent_inner(agent_id, agent_pool).await;
+    }
+
+    /// Execute a single leaf agent: LLM call, store result, record experience.
+    ///
+    /// Children are not spawned from text output; spawning is done via the
+    /// `spawn_agent` tool in the TUI chat stream. This is always a leaf agent.
+    async fn execute_agent_inner(&self, agent_id: AgentId, agent_pool: &Arc<RwLock<AgentPool>>) {
+        let (goal, config) = {
             let pool = agent_pool.read().await;
             let agent = match pool.get_agent(&agent_id) {
                 Some(a) => a.clone(),
                 None => return,
             };
-            (agent.goal, agent.config, agent.depth)
+            (agent.goal, agent.config.clone())
         };
-
-        // Mark awaiting children
-        {
-            let mut pool = agent_pool.write().await;
-            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                agent.status = AgentStatus::AwaitingChildren;
-            }
-        }
-
-        // Spawn children
-        let mut child_ids = Vec::new();
-        for (child_role, child_goal) in &assignments {
-            let responsibility_chain = vec![agent_id];
-            match self
-                .spawn_child(
-                    agent_id,
-                    depth,
-                    child_role,
-                    child_goal,
-                    &responsibility_chain,
-                    &mut *agent_pool.write().await,
-                )
-                .await
-            {
-                Ok(child_id) => {
-                    child_ids.push(child_id);
-                }
-                Err(e) => {
-                    let mut pool = agent_pool.write().await;
-                    if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                        agent
-                            .child_results
-                            .push(([0; 16], format!("Failed to spawn {}: {}", child_role, e)));
-                    }
-                }
-            }
-        }
-
-        // Execute each child (iterative, not recursive)
-        for child_id in &child_ids {
-            self.execute_agent_inner(*child_id, agent_pool).await;
-        }
-
-        // Await each child
-        let mut child_results = Vec::new();
-        for child_id in &child_ids {
-            let result = self.await_agent(*child_id, agent_pool).await;
-            child_results.push((*child_id, result));
-        }
-
-        // Process grandchildren
-        for child_id in &child_ids {
-            let grandchild_ids: Vec<AgentId> = {
-                let pool = agent_pool.read().await;
-                pool.get_agent(child_id).map(|a| a.children.clone()).unwrap_or_default()
-            };
-            for gc_id in &grandchild_ids {
-                self.execute_agent_inner(*gc_id, agent_pool).await;
-            }
-            for gc_id in &grandchild_ids {
-                let result = self.await_agent(*gc_id, agent_pool).await;
-                child_results.push((*gc_id, result));
-            }
-        }
 
         let provider = match &self.provider {
             Some(p) => p.clone(),
@@ -570,72 +781,10 @@ impl AgentRuntime {
                 if let Some(agent) = pool.get_agent_mut(&agent_id) {
                     agent.status = AgentStatus::Failed;
                     agent.result = Some("No LLM provider configured".to_string());
+                    pool.release_budget_guard(&agent_id);
                     pool.notify_completed(&agent_id);
                 }
                 return;
-            }
-        };
-
-        // Aggregation — LLM summarizes children's results
-        {
-            let mut pool = agent_pool.write().await;
-            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                agent.status = AgentStatus::Aggregating;
-                agent.child_results = child_results.clone();
-            }
-        }
-
-        let child_summary: String = child_results
-            .iter()
-            .map(|(id, r)| format!("Sub-agent {:?}: {}", id, r))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let aggregation_prompt = format!(
-            "Your goal: {}\n\nYour sub-agents returned:\n{}\n\nSynthesize a final result.",
-            goal, child_summary
-        );
-
-        let final_result = provider
-            .chat(&config.model_id, &config.system_prompt, &aggregation_prompt)
-            .await
-            .unwrap_or_else(|e| format!("Aggregation failed: {}", e));
-
-        let mut pool = agent_pool.write().await;
-        if let Some(agent) = pool.get_agent_mut(&agent_id) {
-            agent.result = Some(final_result);
-            agent.status = AgentStatus::Completed;
-            pool.notify_completed(&agent_id);
-        }
-    }
-
-    /// Execute a single agent: LLM call, check for sub-assignments.
-    /// Returns `Some(assignments)` if the agent has children to spawn,
-    /// or `None` if it's a leaf / completed / failed agent.
-    async fn execute_agent_inner(
-        &self,
-        agent_id: AgentId,
-        agent_pool: &Arc<RwLock<AgentPool>>,
-    ) -> Option<Vec<(String, String)>> {
-        let (goal, config, depth) = {
-            let pool = agent_pool.read().await;
-            let agent = match pool.get_agent(&agent_id) {
-                Some(a) => a.clone(),
-                None => return None,
-            };
-            (agent.goal, agent.config, agent.depth)
-        };
-
-        let provider = match &self.provider {
-            Some(p) => p.clone(),
-            None => {
-                let mut pool = agent_pool.write().await;
-                if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                    agent.status = AgentStatus::Failed;
-                    agent.result = Some("No LLM provider configured".to_string());
-                    pool.notify_completed(&agent_id);
-                }
-                return None;
             }
         };
 
@@ -648,7 +797,11 @@ impl AgentRuntime {
         }
 
         let system_prompt = format!(
-            "{}\n\nYour goal: {}\n\nYou can spawn sub-agents by including @role \"description\" in your response. Available roles: planner, developer, tester, reviewer. Always produce a concrete result.",
+            "{}
+
+Your goal: {}
+
+Work independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.",
             config.system_prompt, goal
         );
 
@@ -659,25 +812,40 @@ impl AgentRuntime {
                 if let Some(agent) = pool.get_agent_mut(&agent_id) {
                     agent.status = AgentStatus::Failed;
                     agent.result = Some(format!("LLM error: {}", e));
+                    pool.release_budget_guard(&agent_id);
                     pool.notify_completed(&agent_id);
                 }
-                return None;
+                return;
             }
         };
 
-        let assignments = parse_role_assignments(&response);
-
-        if assignments.is_empty() || depth >= 5 {
-            // Leaf agent — response is the result
+        // Leaf agent — response is the result
+        {
             let mut pool = agent_pool.write().await;
             if let Some(agent) = pool.get_agent_mut(&agent_id) {
                 agent.result = Some(response);
                 agent.status = AgentStatus::Completed;
+                pool.release_budget_guard(&agent_id);
                 pool.notify_completed(&agent_id);
             }
-            None
-        } else {
-            Some(assignments)
+        }
+
+        // Record experience entry (feedback loop).
+        if let Ok(emb) = self.pipeline.embedding().embed(&goal).await {
+            self.pipeline.record_experience(ExperienceEntry {
+                embedding: emb,
+                applicability_vector: [0.0f32; 128],
+                tool_bitmap: 0,
+                role_template_id: None,
+                weight: 0.8,
+                domain_version: 0,
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                l2_override_weight: 0.0,
+                l2_override_created_at: 0,
+            });
         }
     }
 
@@ -696,34 +864,6 @@ impl AgentRuntime {
             .and_then(|a| a.result.clone())
             .unwrap_or_default()
     }
-}
-
-/// Parse agent role assignments like `@planner "description goes here"` from text.
-fn parse_role_assignments(response: &str) -> Vec<(String, String)> {
-    let mut assignments = Vec::new();
-    let roles = ["planner", "developer", "tester", "reviewer"];
-
-    for line in response.lines() {
-        for role in &roles {
-            let pattern = format!("@{}", role);
-            if let Some(pos) = line.find(&pattern) {
-                let after_role = line[pos + pattern.len()..].trim();
-                if let Some(goal_start) = after_role.find('"').or_else(|| after_role.find('\u{201c}')) {
-                    let quote_char = after_role.as_bytes()[goal_start];
-                    let closing = if quote_char == b'"' { '"' } else { '\u{201d}' };
-                    let after_open = &after_role[goal_start + 1..];
-                    if let Some(goal_end) = after_open.find(closing) {
-                        let goal = after_open[..goal_end].to_string();
-                        if !goal.is_empty() {
-                            assignments.push((role.to_string(), goal));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    assignments
 }
 
 #[cfg(test)]
@@ -769,6 +909,21 @@ mod tests {
     #[tokio::test]
     async fn test_basic_spawn() {
         let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), dummy_embedding());
+
+        // Seed an experience so L1 doesn't reject empty pool.
+        let mut emb = [0.0f32; EMBEDDING_DIM];
+        emb[0] = 1.0;
+        runtime.add_experience(ExperienceEntry {
+            embedding: emb,
+            applicability_vector: [0.0f32; 128],
+            tool_bitmap: 0,
+            role_template_id: None,
+            weight: 1.0,
+            domain_version: 0,
+            timestamp: 0,
+            l2_override_weight: 0.0,
+            l2_override_created_at: 0,
+        });
 
         let task = "Implement a REST API";
         let role = "Senior Rust developer";

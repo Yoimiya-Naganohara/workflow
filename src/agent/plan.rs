@@ -164,47 +164,127 @@ impl Plan {
 
     /// Parse a plan from an LLM response.
     ///
-    /// Supports three formats:
-    /// - `- task description`
-    /// - `1. task description`
-    /// - `@role "goal description"`
+    /// Supports full markdown format:
+    /// - Section headers (`## Section`) as task grouping context
+    /// - Unordered lists (`-`, `*`, `+`)
+    /// - Ordered lists (`1.`, `1)`)
+    /// - Task lists with checkboxes (`- [ ] todo`, `- [x] done`)
+    /// - `@role "goal description"` format
+    /// - Code blocks (fenced with ```)
+    /// - Continuation lines (indented content under a task item)
     pub fn parse_from_response(response: &str) -> Option<Self> {
         let mut tasks = Vec::new();
-        let mut task_id = 0;
+        let mut task_id: usize = 0;
+        let lines: Vec<&str> = response.lines().collect();
+        let mut i = 0;
+        let mut current_section = String::new();
 
-        for line in response.lines() {
+        while i < lines.len() {
+            let line = lines[i];
             let trimmed = line.trim();
+
+            // Skip empty lines
+            if trimmed.is_empty() {
+                i += 1;
+                continue;
+            }
+
+            // Detect markdown header as section context
+            if let Some(level) = Self::header_level(trimmed) {
+                current_section = trimmed[level..].trim().to_string();
+                i += 1;
+                continue;
+            }
 
             // Try @role "goal" format first
             if let Some((role, goal)) = Self::parse_role_assignment(trimmed) {
                 task_id += 1;
+                let desc = if current_section.is_empty() {
+                    format!("@{} {}", role, goal)
+                } else {
+                    format!("[{}] @{} {}", current_section, role, goal)
+                };
                 tasks.push(Task {
                     id: task_id,
-                    description: format!("@{} {}", role, goal),
+                    description: desc,
                     status: TaskStatus::Pending,
                     result: None,
                 });
+                i += 1;
                 continue;
             }
 
-            // Match lines like "1. Task description" or "- Task description"
-            if let Some(task_desc) = trimmed
-                .strip_prefix("- ")
-                .or_else(|| {
-                    trimmed
-                        .strip_prefix(|c: char| c.is_ascii_digit())
-                        .map(|s| s.trim_start_matches('.').trim_start())
-                })
-                .filter(|s| !s.is_empty())
-            {
+            // Handle code blocks — skip entirely (not task content)
+            if trimmed.starts_with("```") {
+                i += 1;
+                while i < lines.len() && !lines[i].trim().starts_with("```") {
+                    i += 1;
+                }
+                i += 1;
+                continue;
+            }
+
+            // Try checkbox / task list: - [ ] or - [x]
+            if let Some((marker, text)) = Self::parse_checkbox(trimmed) {
                 task_id += 1;
+                let full_text = format!("{} {}", marker, text);
+                let desc = if current_section.is_empty() {
+                    full_text
+                } else {
+                    format!("[{}] {}", current_section, full_text)
+                };
                 tasks.push(Task {
                     id: task_id,
-                    description: task_desc.to_string(),
+                    description: desc,
                     status: TaskStatus::Pending,
                     result: None,
                 });
+                i = Self::collect_continuation(&lines, i + 1, &mut tasks);
+                continue;
             }
+
+            // Try unordered list: -, *, +
+            if let Some(rest) = trimmed
+                .strip_prefix("- ")
+                .or_else(|| trimmed.strip_prefix("* "))
+                .or_else(|| trimmed.strip_prefix("+ "))
+                .filter(|s| !s.is_empty())
+            {
+                task_id += 1;
+                let desc = if current_section.is_empty() {
+                    rest.to_string()
+                } else {
+                    format!("[{}] {}", current_section, rest)
+                };
+                tasks.push(Task {
+                    id: task_id,
+                    description: desc,
+                    status: TaskStatus::Pending,
+                    result: None,
+                });
+                i = Self::collect_continuation(&lines, i + 1, &mut tasks);
+                continue;
+            }
+
+            // Try ordered list: 1. text, 1) text
+            if let Some(rest) = Self::parse_ordered_item(trimmed) {
+                task_id += 1;
+                let desc = if current_section.is_empty() {
+                    rest.to_string()
+                } else {
+                    format!("[{}] {}", current_section, rest)
+                };
+                tasks.push(Task {
+                    id: task_id,
+                    description: desc,
+                    status: TaskStatus::Pending,
+                    result: None,
+                });
+                i = Self::collect_continuation(&lines, i + 1, &mut tasks);
+                continue;
+            }
+
+            i += 1;
         }
 
         if tasks.is_empty() {
@@ -218,8 +298,104 @@ impl Plan {
         }
     }
 
+    /// Detect markdown header level (1-6) from a trimmed line.
+    fn header_level(s: &str) -> Option<usize> {
+        let mut count = 0;
+        for ch in s.chars() {
+            if ch == '#' {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        if (1..=6).contains(&count) && s.chars().nth(count) == Some(' ') {
+            Some(count)
+        } else {
+            None
+        }
+    }
+
+    /// Parse a checkbox/task list item: `- [ ] text` or `- [x] text`.
+    /// Returns `Some((marker, text))` or `None`.
+    fn parse_checkbox(s: &str) -> Option<(String, &str)> {
+        let s = s.trim_start();
+        if s.len() >= 6 && s.as_bytes()[0] == b'-' && s.as_bytes()[1] == b' ' && s.as_bytes()[2] == b'[' {
+            let checked = s.as_bytes()[3] == b'x' || s.as_bytes()[3] == b'X';
+            if s.as_bytes().get(4) == Some(&b']') && s.as_bytes().get(5) == Some(&b' ') {
+                let marker = if checked { "☑" } else { "☐" };
+                Some((marker.to_string(), &s[6..]))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Parse an ordered list item: `1. text`, `1) text`, `10. text`, etc.
+    fn parse_ordered_item(s: &str) -> Option<&str> {
+        let bytes = s.as_bytes();
+        let mut digit_end = 0;
+        while digit_end < bytes.len() && bytes[digit_end].is_ascii_digit() {
+            digit_end += 1;
+        }
+        if digit_end == 0 {
+            return None;
+        }
+        let rest = &s[digit_end..];
+        if let Some(text) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+        None
+    }
+
+    /// Collect continuation lines (indented content) under the last task.
+    fn collect_continuation(lines: &[&str], start: usize, tasks: &mut Vec<Task>) -> usize {
+        let mut i = start;
+        while i < lines.len() {
+            let next = lines[i];
+            if next.trim().is_empty() {
+                i += 1;
+                continue;
+            }
+            // Stop at another list item or header
+            let t = next.trim();
+            if t.starts_with('-') || t.starts_with('*') || t.starts_with('+') {
+                break;
+            }
+            if Self::header_level(t).is_some() {
+                break;
+            }
+            // Skip code blocks entirely
+            if t.starts_with("```") {
+                i += 1;
+                while i < lines.len() && !lines[i].trim().starts_with("```") {
+                    i += 1;
+                }
+                i += 1;
+                continue;
+            }
+            if Self::parse_ordered_item(t).is_some() {
+                break;
+            }
+            // Indented continuation
+            if next.starts_with(' ') || next.starts_with('\t') {
+                if let Some(task) = tasks.last_mut() {
+                    task.description.push('\n');
+                    task.description.push_str(t.trim());
+                }
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        i
+    }
+
     /// Parse a single `@role "goal"` assignment from a line.
-    fn parse_role_assignment(line: &str) -> Option<(String, String)> {
+    pub fn parse_role_assignment(line: &str) -> Option<(String, String)> {
         for role in Self::ROLES {
             let pattern = format!("@{}", role);
             if let Some(pos) = line.find(&pattern) {
@@ -370,7 +546,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_plan() {
+    fn test_parse_plan_dash() {
+        let response = "- Task one\n- Task two";
+        let plan = Plan::parse_from_response(response).unwrap();
+        assert_eq!(plan.tasks.len(), 2);
+        assert_eq!(plan.tasks[0].description, "Task one");
+        assert_eq!(plan.tasks[1].description, "Task two");
+    }
+
+    #[test]
+    fn test_parse_plan_ordered() {
         let response = "Here's the plan:\n1. First task\n2. Second task\n3. Third task";
         let plan = Plan::parse_from_response(response).unwrap();
         assert_eq!(plan.tasks.len(), 3);
@@ -380,10 +565,68 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_plan_with_dashes() {
-        let response = "- Task one\n- Task two";
+    fn test_parse_plan_star_list() {
+        let response = "* Task A\n* Task B\n* Task C";
+        let plan = Plan::parse_from_response(response).unwrap();
+        assert_eq!(plan.tasks.len(), 3);
+        assert_eq!(plan.tasks[0].description, "Task A");
+    }
+
+    #[test]
+    fn test_parse_plan_plus_list() {
+        let response = "+ Task X\n+ Task Y";
         let plan = Plan::parse_from_response(response).unwrap();
         assert_eq!(plan.tasks.len(), 2);
+        assert_eq!(plan.tasks[1].description, "Task Y");
+    }
+
+    #[test]
+    fn test_parse_plan_checkboxes() {
+        let response = "- [ ] Todo item\n- [x] Done item";
+        let plan = Plan::parse_from_response(response).unwrap();
+        assert_eq!(plan.tasks.len(), 2);
+        assert!(plan.tasks[0].description.starts_with("☐"));
+        assert!(plan.tasks[1].description.starts_with("☑"));
+    }
+
+    #[test]
+    fn test_parse_plan_with_headers() {
+        let response = "## Phase 1\n- Setup environment\n- Install deps\n\n## Phase 2\n- Run tests\n- Deploy";
+        let plan = Plan::parse_from_response(response).unwrap();
+        assert_eq!(plan.tasks.len(), 4);
+        assert!(plan.tasks[0].description.contains("Phase 1"));
+        assert!(plan.tasks[2].description.contains("Phase 2"));
+    }
+
+    #[test]
+    fn test_parse_plan_with_code_block() {
+        let response = "- Write script\n  ```\n  echo hello\n  ```\n  More detail\n- Next task";
+        let plan = Plan::parse_from_response(response).unwrap();
+        assert_eq!(plan.tasks.len(), 2);
+        assert_eq!(plan.tasks[0].description, "Write script\nMore detail");
+    }
+
+    #[test]
+    fn test_parse_plan_with_continuation() {
+        let response = "- Main task\n  with detail\n  and more\n- Next task";
+        let plan = Plan::parse_from_response(response).unwrap();
+        assert_eq!(plan.tasks.len(), 2);
+        assert_eq!(plan.tasks[0].description, "Main task\nwith detail\nand more");
+    }
+
+    #[test]
+    fn test_parse_plan_with_bold_markdown() {
+        let response = "- Implement **login** feature\n- Add `error` handling";
+        let plan = Plan::parse_from_response(response).unwrap();
+        assert_eq!(plan.tasks.len(), 2);
+        assert_eq!(plan.tasks[0].description, "Implement **login** feature");
+        assert_eq!(plan.tasks[1].description, "Add `error` handling");
+    }
+
+    #[test]
+    fn test_parse_plan_empty() {
+        assert!(Plan::parse_from_response("Just some text without list items").is_none());
+        assert!(Plan::parse_from_response("").is_none());
     }
 
     #[test]

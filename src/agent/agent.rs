@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
 use crate::core::types::AgentId;
+use crate::l0::resource::BudgetGuard;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -56,6 +57,9 @@ pub struct AgentPool {
     agents: Vec<Agent>,
     pub(crate) provider: Option<Arc<crate::llm::LlmProvider>>,
     completions: HashMap<AgentId, Arc<Notify>>,
+    /// Active budget guards keyed by agent ID.
+    /// Guards are dropped (releasing budget) when agents complete or fail.
+    budget_guards: HashMap<AgentId, BudgetGuard>,
 }
 
 impl Default for AgentPool {
@@ -70,6 +74,7 @@ impl AgentPool {
             agents: Vec::new(),
             provider: None,
             completions: HashMap::new(),
+            budget_guards: HashMap::new(),
         }
     }
 
@@ -100,6 +105,20 @@ impl AgentPool {
         self.completions.get(id).cloned()
     }
 
+    /// Attach a budget guard to an agent (called after spawn approval).
+    ///
+    /// The guard will be released (budget returned to pool) when the
+    /// agent completes or fails.
+    pub fn attach_budget_guard(&mut self, agent_id: AgentId, guard: BudgetGuard) {
+        self.budget_guards.insert(agent_id, guard);
+    }
+
+    /// Release an agent's budget guard (typically when agent completes/fails).
+    /// Drops the guard, which returns any unspent budget to the pool.
+    pub fn release_budget_guard(&mut self, agent_id: &AgentId) {
+        self.budget_guards.remove(agent_id);
+    }
+
     pub fn notify_completed(&mut self, id: &AgentId) {
         if let Some(notify) = self.completions.get(id) {
             notify.notify_one();
@@ -111,9 +130,18 @@ impl AgentPool {
         let running = self
             .agents
             .iter()
-            .filter(|a| matches!(a.status, AgentStatus::Planning | AgentStatus::AwaitingChildren | AgentStatus::Aggregating))
+            .filter(|a| {
+                matches!(
+                    a.status,
+                    AgentStatus::Planning | AgentStatus::AwaitingChildren | AgentStatus::Aggregating
+                )
+            })
             .count();
-        let completed = self.agents.iter().filter(|a| a.status == AgentStatus::Completed).count();
+        let completed = self
+            .agents
+            .iter()
+            .filter(|a| a.status == AgentStatus::Completed)
+            .count();
         let failed = self.agents.iter().filter(|a| a.status == AgentStatus::Failed).count();
         format!(
             "Agents: {} total, {} running, {} completed, {} failed",

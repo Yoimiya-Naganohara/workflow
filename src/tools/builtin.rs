@@ -18,6 +18,8 @@ pub fn register_tools(server: crate::tools::ToolServer) -> crate::tools::ToolSer
 #[derive(Deserialize)]
 pub struct ReadFileArgs {
     pub path: String,
+    pub start: Option<usize>,
+    pub end: Option<usize>,
 }
 
 pub struct ReadFile;
@@ -32,13 +34,25 @@ impl Tool for ReadFile {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "Read the contents of a file from the filesystem.".into(),
+            description: "Read a file from the filesystem. Returns contents plus file metadata (lines, bytes). Truncated at 10KB.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
                         "description": "Path to the file to read"
+                    },
+                    "start": {
+                        "type": "integer",
+                        "description": "Optional start line to read from",
+                        "minimum": 0,
+                        "optional": true
+                    },
+                    "end": {
+                        "type": "integer",
+                        "description": "Optional end line to read to",
+                        "minimum": 0,
+                        "optional": true
                     }
                 },
                 "required": ["path"]
@@ -48,7 +62,24 @@ impl Tool for ReadFile {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let content = std::fs::read_to_string(&args.path).map_err(|e| ToolCallError(e.to_string()))?;
-        Ok(content)
+        let total_bytes = content.len();
+        let total_lines = content.lines().count();
+        let start = args.start.unwrap_or(0);
+        let end = args.end.unwrap_or(total_lines);
+        let preview = if total_bytes > 10000 {
+            format!(
+                "{}\n\n... [truncated, {} total bytes, {} lines]",
+                &content[start..end],
+                total_bytes - (end - start),
+                end - start
+            )
+        } else {
+            content
+        };
+        Ok(format!(
+            "(file: {}, {} lines, {} bytes)\n\n{}",
+            args.path, total_lines, total_bytes, preview
+        ))
     }
 }
 
@@ -58,6 +89,8 @@ impl Tool for ReadFile {
 pub struct WriteFileArgs {
     pub path: String,
     pub content: String,
+    pub start: Option<usize>,
+    pub end: Option<usize>,
 }
 
 pub struct WriteFile;
@@ -72,7 +105,9 @@ impl Tool for WriteFile {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "Write content to a file. Creates or overwrites.".into(),
+            description:
+                "Write content to a file (creates or overwrites). Returns write confirmation with a content preview."
+                    .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -83,6 +118,16 @@ impl Tool for WriteFile {
                     "content": {
                         "type": "string",
                         "description": "Content to write"
+                    },
+                    "start": {
+                        "type": "integer",
+                        "description": "Start position in content to write",
+                        "optional": true
+                    },
+                    "end": {
+                        "type": "integer",
+                        "description": "End position in content to write",
+                        "optional": true
                     }
                 },
                 "required": ["path", "content"]
@@ -92,8 +137,21 @@ impl Tool for WriteFile {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let len = args.content.len();
-        std::fs::write(&args.path, &args.content).map_err(|e| ToolCallError(e.to_string()))?;
-        Ok(format!("Written {} bytes to {}", len, args.path))
+        let start = args.start.unwrap_or(0);
+        let end = args.end.unwrap_or(len);
+        std::fs::write(&args.path, &args.content[start..end]).map_err(|e| ToolCallError(e.to_string()))?;
+        let preview = if len > 200 {
+            format!("{}...", &args.content[start..start + 200])
+        } else {
+            args.content[start..end].to_string()
+        };
+        Ok(format!(
+            "Written {} bytes to {}\nFirst {} chars:\n---\n{}\n---",
+            end - start,
+            args.path,
+            preview.len(),
+            preview
+        ))
     }
 }
 
@@ -116,7 +174,7 @@ impl Tool for Shell {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "Execute a shell command and return stdout/stderr.".into(),
+            description: "Execute a shell command and return stdout/stderr with exit code. The working directory is the project root.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -137,6 +195,7 @@ impl Tool for Shell {
             .output()
             .map_err(|e| ToolCallError(e.to_string()))?;
 
+        let code = output.status.code().unwrap_or(-1);
         let mut result = String::new();
         if !output.stdout.is_empty() {
             result.push_str(&String::from_utf8_lossy(&output.stdout));
@@ -145,11 +204,10 @@ impl Tool for Shell {
             if !result.is_empty() {
                 result.push('\n');
             }
+            result.push_str("stderr:\n");
             result.push_str(&String::from_utf8_lossy(&output.stderr));
         }
-        if result.is_empty() {
-            result = format!("(exit code: {})", output.status.code().unwrap_or(-1));
-        }
+        result.push_str(&format!("\n(exit code: {})", code));
         Ok(result)
     }
 }
@@ -173,7 +231,7 @@ impl Tool for ListDir {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "List files and directories in a given path.".into(),
+            description: "List files and directories in a path. Shows file sizes and directory counts.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -190,18 +248,26 @@ impl Tool for ListDir {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let entries = std::fs::read_dir(&args.path).map_err(|e| ToolCallError(e.to_string()))?;
         let mut items: Vec<String> = Vec::new();
+        let mut dir_count = 0u32;
+        let mut file_count = 0u32;
         for entry in entries {
             let entry = entry.map_err(|e| ToolCallError(e.to_string()))?;
             let name = entry.file_name().to_string_lossy().to_string();
-            let kind = if entry.file_type().map_err(|e| ToolCallError(e.to_string()))?.is_dir() {
-                "dir"
+            let meta = entry.metadata().map_err(|e| ToolCallError(e.to_string()))?;
+            if meta.is_dir() {
+                dir_count += 1;
+                items.push(format!("  {}/", name));
             } else {
-                "file"
-            };
-            items.push(format!("  {} [{}]", name, kind));
+                file_count += 1;
+                let size = meta.len();
+                items.push(format!("  {}  ({} bytes)", name, size));
+            }
         }
         items.sort();
-        let mut result = format!("Contents of '{}':\n", args.path);
+        let mut result = format!(
+            "Contents of '{}': {} files, {} dirs\n",
+            args.path, file_count, dir_count
+        );
         result.push_str(&items.join("\n"));
         Ok(result)
     }

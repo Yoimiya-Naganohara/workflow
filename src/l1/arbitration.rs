@@ -1,7 +1,7 @@
-use crate::core::types::EMBEDDING_DIM;
 use crate::core::conflict::{ConflictManifest, ConflictType};
 use crate::core::simd::cosine_similarity_768;
 use crate::core::types::AgentId;
+use crate::core::types::EMBEDDING_DIM;
 use smallvec::SmallVec;
 
 pub struct L1Arbitrator {
@@ -13,7 +13,11 @@ impl L1Arbitrator {
         Self { semantic_threshold }
     }
 
-    pub fn detect_semantic_conflict(&self, embedding_a: &[f32; EMBEDDING_DIM], embedding_b: &[f32; EMBEDDING_DIM]) -> bool {
+    pub fn detect_semantic_conflict(
+        &self,
+        embedding_a: &[f32; EMBEDDING_DIM],
+        embedding_b: &[f32; EMBEDDING_DIM],
+    ) -> bool {
         let sim = cosine_similarity_768(embedding_a, embedding_b);
         sim < self.semantic_threshold
     }

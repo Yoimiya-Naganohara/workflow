@@ -3,6 +3,7 @@
 //! Built-in tools are registered on a shared [`ToolServerHandle`] and
 //! agents connect via `.tool_server_handle()`.
 
+pub mod agent;
 pub mod builtin;
 
 pub use rig::tool::server::{ToolServer, ToolServerHandle};
@@ -12,6 +13,14 @@ pub use rig::tool::server::{ToolServer, ToolServerHandle};
 /// The handle is cheaply cloneable and can be shared across agents.
 pub fn create_tool_server() -> ToolServerHandle {
     builtin::register_tools(ToolServer::new()).run()
+}
+
+/// Create a [`ToolServerHandle`] with built-ins plus workflow agent tools.
+pub fn create_agent_tool_server(
+    state: std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>,
+) -> ToolServerHandle {
+    let server = builtin::register_tools(ToolServer::new());
+    agent::register_tools(server, state).run()
 }
 
 /// Create a [`ToolServerHandle`] and register one extra tool.

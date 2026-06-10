@@ -9,7 +9,7 @@ use crossterm::event::KeyCode;
 use futures::future::AbortHandle;
 
 use super::Tui;
-use super::state::{AppMode, AppState, COMMANDS, ChatMessage, Focus, MessageRole, MessageStatus, Panel, SelectedModel};
+use super::state::{AppState, COMMANDS, ChatMessage, Focus, MessageRole, MessageStatus, SelectedModel};
 use crate::models::filter_providers;
 use crate::tui::chat_lines::char_idx_to_byte_idx;
 use crate::tui::controller;
@@ -17,6 +17,11 @@ use crate::tui::controller;
 impl Tui {
     pub(crate) fn handle_chat_keys(&self, state: &mut AppState, key: crossterm::event::KeyEvent) -> bool {
         let code = key.code;
+
+        // ── Custom provider dialog ──
+        if state.show_custom_dialog {
+            return self.handle_custom_dialog(state, code);
+        }
 
         // ── Key dialog ──
         if state.show_key_dialog {
@@ -48,13 +53,9 @@ impl Tui {
                         state.command_popup_selection = (state.command_popup_selection + 1) % matches.len();
                     }
                 } else {
-                    state.mode = match state.mode {
-                        AppMode::Plan => AppMode::Build,
-                        AppMode::Build => AppMode::Plan,
-                    };
+                    state.show_status_panel = !state.show_status_panel;
                 }
             }
-            KeyCode::Char('1') => state.panel = Panel::Chat,
             KeyCode::Char('x') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
                 if let Some(abort) = state.active_chat_abort.take() {
                     abort.abort();
@@ -79,10 +80,10 @@ impl Tui {
                 state.chat_scroll = state.chat_scroll.saturating_sub(1);
                 state.auto_scroll = false; // manual scroll up = stop auto
             }
-            KeyCode::Char('g') if state.focus == Focus::Chat => {
+            KeyCode::Home if state.focus == Focus::Chat => {
                 state.chat_scroll = 0; // gg → top
             }
-            KeyCode::Char('G') if state.focus == Focus::Chat => {
+            KeyCode::End if state.focus == Focus::Chat => {
                 state.chat_scroll = usize::MAX / 2; // G → bottom
                 state.auto_scroll = true;
             }
@@ -252,6 +253,94 @@ impl Tui {
         true
     }
 
+    // ── Custom provider wizard ──
+
+    fn handle_custom_dialog(&self, state: &mut AppState, code: KeyCode) -> bool {
+        let step = state.custom_step;
+        match code {
+            KeyCode::Esc => {
+                state.show_custom_dialog = false;
+                state.custom_step = 0;
+                state.custom_name.clear();
+                state.custom_url.clear();
+                state.custom_key.clear();
+                state.custom_models.clear();
+                state.custom_input.clear();
+                state.custom_cursor = 0;
+            }
+            KeyCode::Char(c) => {
+                let byte_idx = char_idx_to_byte_idx(&state.custom_input, state.custom_cursor);
+                state.custom_input.insert(byte_idx, c);
+                state.custom_cursor += 1;
+            }
+            KeyCode::Backspace => {
+                if state.custom_cursor > 0 {
+                    state.custom_cursor -= 1;
+                    let byte_idx = char_idx_to_byte_idx(&state.custom_input, state.custom_cursor);
+                    state.custom_input.remove(byte_idx);
+                }
+            }
+            KeyCode::Left => {
+                state.custom_cursor = state.custom_cursor.saturating_sub(1);
+            }
+            KeyCode::Right => {
+                if state.custom_cursor < Self::char_count(&state.custom_input) {
+                    state.custom_cursor += 1;
+                }
+            }
+            KeyCode::Enter => {
+                let input = state.custom_input.trim().to_string();
+                match step {
+                    0 => {
+                        // Provider name
+                        if !input.is_empty() {
+                            state.custom_name = input;
+                            state.custom_step = 1;
+                            state.custom_input.clear();
+                            state.custom_cursor = 0;
+                        }
+                    }
+                    1 => {
+                        // API URL
+                        if !input.is_empty() {
+                            state.custom_url = input;
+                            state.custom_step = 2;
+                            state.custom_input.clear();
+                            state.custom_cursor = 0;
+                        }
+                    }
+                    2 => {
+                        // API key
+                        state.custom_key = input;
+                        state.custom_step = 3;
+                        state.custom_input.clear();
+                        state.custom_cursor = 0;
+                    }
+                    3 => {
+                        // Model IDs — save
+                        let name = state.custom_name.clone();
+                        let url = state.custom_url.clone();
+                        let key = state.custom_key.clone();
+                        let models = input;
+                        state.custom_models = models.clone();
+                        state.show_custom_dialog = false;
+                        state.custom_step = 0;
+                        state.custom_input.clear();
+                        state.custom_cursor = 0;
+                        state.custom_name.clear();
+                        state.custom_url.clear();
+                        state.custom_key.clear();
+                        state.custom_models.clear();
+                        controller::save_custom_provider(state, &name, &url, &key, &models);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+        true
+    }
+
     fn handle_model_picker(&self, state: &mut AppState, code: KeyCode) -> bool {
         let results = state.models.search_models(&state.model_picker_search_query);
         match code {
@@ -331,6 +420,7 @@ impl Tui {
                             status: MessageStatus::Completed,
                         });
                     } else {
+                        let ctx = state.models.get_context_limit(&provider_id, &model_id);
                         state.selected_models.push(SelectedModel {
                             provider_id,
                             model_id,
@@ -340,6 +430,7 @@ impl Tui {
                         state.input.clear();
                         state.input_cursor = 0;
                         state.chat_scroll = 0;
+                        state.context_limit = ctx;
                     }
                     if let Err(e) = controller::save_selected_models(&state.selected_models) {
                         state.messages.push(ChatMessage {
@@ -495,16 +586,16 @@ impl Tui {
 
         if trimmed == "/help" || trimmed == "/?" {
             let help_text = [
-                "/connect  - Configure a provider with API key",
-                "/models   - Select a model for chat",
-                "/apply    - Approve and execute plan",
-                "/clear    - Clear conversation",
-                "/sh <cmd> - Run a shell command",
-                "/help     - Show this help",
+                "/connect        - Configure a provider with API key",
+                "/models         - Select a model for chat",
+                "/custom         - Add/list/remove custom providers",
+                "/clear          - Clear conversation",
+                "/sh <cmd>       - Run a shell command",
+                "/help           - Show this help",
                 "",
-                "Ctrl+P    - Open model picker",
-                "Ctrl+X    - Stop current response",
-                "Ctrl+C    - Quit",
+                "Ctrl+P          - Open model picker",
+                "Ctrl+X          - Stop current response",
+                "Ctrl+C          - Quit",
             ]
             .join("\n");
             state.messages.push(ChatMessage {
@@ -522,13 +613,14 @@ impl Tui {
             state.messages.clear();
             state.messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: "Workflow Agent v0.1.0".to_string(),
+                content: "Workflow Agent — conversation cleared. Describe your goal and I'll help.".to_string(),
                 timestamp: now.clone(),
                 status: MessageStatus::Completed,
             });
             state.input.clear();
             state.input_cursor = 0;
             state.chat_scroll = 0;
+            state.responsible_agent_id = None;
             return true;
         }
 
@@ -566,11 +658,12 @@ impl Tui {
         if trimmed == "/pool" {
             let help = [
                 "Pool commands:",
-                "  /pool stats    - Show experience pool statistics",
-                "  /pool flush    - Flush bedrock to disk",
-                "  /pool clear    - Clear both tracks",
-                "  /pool export   - Export experiences as JSON",
-                "  /pool import   - Import experiences from JSON",
+                "  /pool stats      - Show experience pool statistics",
+                "  /pool flush      - Flush bedrock to disk",
+                "  /pool clear      - Clear both tracks",
+                "  /pool query <q>  - Query experiences by text similarity",
+                "  /pool export     - Export experiences as JSON",
+                "  /pool import     - Import experiences from JSON",
             ]
             .join("\n");
             state.messages.push(ChatMessage {
@@ -592,46 +685,55 @@ impl Tui {
             return true;
         }
 
-        if trimmed == "/apply" {
-            if let Some(plan) = &mut state.current_plan {
-                if plan.status == crate::agent::plan::PlanStatus::Draft {
-                    plan.approve();
-                    state.mode = AppMode::Build;
-                    state.messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("Plan approved. Entered build mode. {}", plan.summary()),
-                        timestamp: now.clone(),
-                        status: MessageStatus::Completed,
-                    });
-                } else if plan.status == crate::agent::plan::PlanStatus::Approved {
-                    plan.status = crate::agent::plan::PlanStatus::Executing;
-                    let plan_summary = plan.summary();
-                    state.messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("Starting execution: {}", plan_summary),
-                        timestamp: now.clone(),
-                        status: MessageStatus::Completed,
-                    });
-                    controller::execute_plan(&self.state);
-                } else {
-                    state.messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("Plan not executable. {}", plan.summary()),
-                        timestamp: now,
-                        status: MessageStatus::Completed,
-                    });
-                }
-            } else {
-                state.messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "No plan to apply. Chat first to create a plan.".to_string(),
-                    timestamp: now,
-                    status: MessageStatus::Completed,
-                });
+        // ── Custom provider commands ──
+
+        if trimmed == "/custom" {
+            let help = [
+                "Custom Provider Commands:",
+                "  /custom add                              - Add a new custom provider (wizard)",
+                "  /custom list                             - List configured custom providers",
+                "  /custom remove <name>                    - Remove a custom provider",
+            ]
+            .join("\n");
+            state.messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: help,
+                timestamp: now.clone(),
+                status: MessageStatus::Completed,
+            });
+            state.input.clear();
+            state.input_cursor = 0;
+            return true;
+        }
+
+        if trimmed == "/custom add" {
+            state.show_custom_dialog = true;
+            state.custom_step = 0;
+            state.custom_name.clear();
+            state.custom_url.clear();
+            state.custom_key.clear();
+            state.custom_models.clear();
+            state.custom_input.clear();
+            state.custom_cursor = 0;
+            state.input.clear();
+            state.input_cursor = 0;
+            return true;
+        }
+
+        if trimmed == "/custom list" {
+            controller::list_custom_providers(&self.state, &now);
+            state.input.clear();
+            state.input_cursor = 0;
+            return true;
+        }
+
+        if let Some(arg) = trimmed.strip_prefix("/custom remove ") {
+            let name = arg.trim();
+            if !name.is_empty() {
+                controller::remove_custom_provider(&self.state, name, &now);
             }
             state.input.clear();
             state.input_cursor = 0;
-            state.chat_scroll = 0;
             return true;
         }
 

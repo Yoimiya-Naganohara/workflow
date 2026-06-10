@@ -221,9 +221,12 @@ impl ExperiencePool {
         scored.into_iter().map(|(i, s)| (self.entries[i].clone(), s)).collect()
     }
 
-    /// Remove all entries and reset the file.
+    /// Remove all entries and reset the file, truncating to initial capacity.
     pub fn clear(&mut self) -> Result<()> {
         self.entries.clear();
+        // Set capacity to 0 to force grow_file to re-create the file
+        // at DEFAULT_CAPACITY (truncating any prior growth).
+        self.capacity = 0;
         self.dirty.store(true, Ordering::Release);
         self.flush()
     }

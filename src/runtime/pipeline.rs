@@ -16,9 +16,11 @@ use crate::agent::suspend::SuspendQueueOps;
 use crate::core::types::*;
 use crate::l0::CircuitBreaker;
 use crate::l0::L0Permit;
+use crate::l0::resource::BudgetGuard;
 use crate::l1::ExperienceRetrieval;
 use crate::l1::L1Assessment;
 use crate::l2::AuditEngine;
+use crate::l2::llm::{L2LlmAuditEngine, L2LlmConfig};
 use crate::llm::EmbeddingService;
 
 // ============================================================================
@@ -50,6 +52,15 @@ impl DecisionPipelineBuilder {
     builder_method!(embedding, Arc<dyn EmbeddingService>);
     builder_method!(suspend, Box<dyn SuspendQueueOps>);
     builder_method!(plans, Box<dyn PlanRegistryOps>);
+
+    /// Use the LLM-powered audit engine instead of the default rule engine.
+    ///
+    /// This creates an [`L2LlmAuditEngine`] that uses a language model
+    /// judge to review conflicts and screen requests.
+    pub fn llm_audit_engine(mut self, provider: Arc<crate::llm::LlmProvider>, config: L2LlmConfig) -> Self {
+        self.audit_engine = Some(Box::new(L2LlmAuditEngine::new(provider, config)));
+        self
+    }
 
     /// Build the pipeline, using defaults for any unset dependencies.
     pub fn build(self) -> DecisionPipeline {
@@ -92,6 +103,7 @@ impl DecisionPipelineBuilder {
                 self.plans
                     .unwrap_or_else(|| Box::new(crate::agent::plan::PlanRegistry::new())),
             )),
+            pending_guard: Mutex::new(None),
         }
     }
 }
@@ -113,6 +125,8 @@ pub struct DecisionPipeline {
     embedding: Arc<dyn EmbeddingService>,
     suspend: Mutex<Box<dyn SuspendQueueOps>>,
     plans: Arc<RwLock<Box<dyn PlanRegistryOps>>>,
+    /// Budget guard from the last approved request, if any.
+    pending_guard: Mutex<Option<BudgetGuard>>,
 }
 
 impl DecisionPipeline {
@@ -157,11 +171,31 @@ impl DecisionPipeline {
             exp.check_confidence(task_emb, role_emb)?
         };
 
-        // ── L2: (not triggered unless a conflict escalates) ──
+        // ── L2: Screen request before final approval (sync, no .await) ──
+        if let Some(rejection) = self
+            .audit_engine
+            .lock()
+            .expect("audit_engine poisoned")
+            .screen_request(&request)
+        {
+            return Ok(SpawnDecision::Rejected(rejection));
+        }
 
         let agent_id: AgentId = rand::random();
         let task_id: TaskId = rand::random();
         let allocated_budget = _l0_permit.budget_amount();
+
+        // Consume the L0 permit into a BudgetGuard (resource ownership
+        // transfers to the guard; permit's Drop becomes a no-op).
+        let guard = _l0_permit.into_budget_guard(task_id);
+        if guard.is_none() {
+            // Should never happen: the permit was just acquired.
+            return Ok(SpawnDecision::Rejected(SpawnRejection::SystemOverloaded));
+        }
+        {
+            let mut slot = self.pending_guard.lock().expect("pending_guard poisoned");
+            *slot = guard;
+        }
 
         Ok(SpawnDecision::Approved(ChildAgentConfig {
             agent_id,
@@ -226,6 +260,27 @@ impl DecisionPipeline {
     pub fn audit_engine(&self) -> &Mutex<Box<dyn AuditEngine>> {
         &self.audit_engine
     }
+
+    /// Take the budget guard from the last approved request.
+    pub fn take_pending_guard(&self) -> Option<BudgetGuard> {
+        self.pending_guard.lock().expect("pending_guard poisoned").take()
+    }
+
+    /// Record an experience entry into the pool.
+    pub fn record_experience(&self, entry: ExperienceEntry) {
+        self.experience
+            .lock()
+            .expect("experience mutex poisoned")
+            .add_experience(entry);
+    }
+
+    /// Search the experience pool by text query.
+    pub fn search_experience(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)> {
+        self.experience
+            .lock()
+            .expect("experience mutex poisoned")
+            .retrieve(query, k)
+    }
 }
 
 // ============================================================================
@@ -256,6 +311,21 @@ mod tests {
     #[tokio::test]
     async fn test_pipeline_approves_valid_request() {
         let pipeline = DecisionPipelineBuilder::new().embedding(dummy_embedding()).build();
+
+        // Add a matching experience so L1 does not reject (empty pool = presumed guilty).
+        let mut exp_emb = [0.0f32; EMBEDDING_DIM];
+        exp_emb[0] = 1.0;
+        pipeline.add_experience(ExperienceEntry {
+            embedding: exp_emb,
+            applicability_vector: [0.0f32; 128],
+            tool_bitmap: 0b101,
+            role_template_id: None,
+            weight: 1.0,
+            domain_version: 0,
+            timestamp: 0,
+            l2_override_weight: 0.0,
+            l2_override_created_at: 0,
+        });
 
         let mut task_emb = [0.0f32; EMBEDDING_DIM];
         task_emb[0] = 1.0;

@@ -65,7 +65,7 @@ impl L0CircuitBreaker {
         Ok(L0Permit {
             budget_amount: allocated,
             requested_tools,
-            resource_state: self.resource_state.clone(),
+            resource_state: Some(self.resource_state.clone()),
         })
     }
 
@@ -84,7 +84,8 @@ impl L0CircuitBreaker {
 pub struct L0Permit {
     budget_amount: u64,
     requested_tools: u64,
-    resource_state: Arc<resource::TaskResourceState>,
+    /// `None` once consumed by [`L0Permit::into_budget_guard`].
+    resource_state: Option<Arc<resource::TaskResourceState>>,
 }
 
 impl L0Permit {
@@ -92,23 +93,30 @@ impl L0Permit {
         self.budget_amount
     }
 
-    pub fn into_budget_guard(self, task_id: TaskId) -> Option<resource::BudgetGuard> {
-        resource::BudgetGuard::new(
+    /// Convert this permit into a [`BudgetGuard`] without re-acquiring
+    /// resources (the permit already holds them via the L0 circuit breaker).
+    ///
+    /// After this call the permit is consumed — its `Drop` is a no-op.
+    pub fn into_budget_guard(mut self, task_id: TaskId) -> Option<resource::BudgetGuard> {
+        let state = self.resource_state.take()?;
+        Some(resource::BudgetGuard::from_permit(
             task_id,
             self.budget_amount,
-            self.resource_state.clone(),
+            state,
             self.requested_tools,
-        )
+        ))
     }
 }
 
 impl Drop for L0Permit {
     fn drop(&mut self) {
-        self.resource_state.release_budget(self.budget_amount);
-        if self.requested_tools != 0 {
-            self.resource_state.release_tools(self.requested_tools);
+        if let Some(ref state) = self.resource_state {
+            state.release_budget(self.budget_amount);
+            if self.requested_tools != 0 {
+                state.release_tools(self.requested_tools);
+            }
+            state.decrement_depth();
         }
-        self.resource_state.decrement_depth();
     }
 }
 

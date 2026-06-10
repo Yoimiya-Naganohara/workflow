@@ -89,7 +89,9 @@ impl Tui {
                         let mut state = self.state.write().await;
                         match mouse.kind {
                             MouseEventKind::ScrollDown => {
-                                if state.show_model_picker {
+                                if state.show_custom_dialog {
+                                    // no scrolling in custom dialog (simple form)
+                                } else if state.show_model_picker {
                                     let results = state.models.search_models(&state.model_picker_search_query);
                                     if !results.is_empty() {
                                         state.selected_model_picker_idx =
@@ -109,7 +111,9 @@ impl Tui {
                                 }
                             }
                             MouseEventKind::ScrollUp => {
-                                if state.show_model_picker {
+                                if state.show_custom_dialog {
+                                    // no scrolling in custom dialog (simple form)
+                                } else if state.show_model_picker {
                                     state.selected_model_picker_idx = state.selected_model_picker_idx.saturating_sub(1);
                                 } else if state.show_provider_dialog {
                                     state.selected_provider_idx = state.selected_provider_idx.saturating_sub(1);

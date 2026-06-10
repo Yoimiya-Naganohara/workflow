@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing;
 
-use crate::models::ModelRegistry;
+use crate::models::{CustomProvider, ModelRegistry};
 use crate::tui::state::SelectedModel;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13,6 +13,8 @@ pub struct PersistedState {
     pub configured_providers: Vec<String>,
     #[serde(default)]
     pub api_keys: HashMap<String, String>,
+    #[serde(default)]
+    pub custom_providers: Vec<CustomProvider>,
 }
 
 fn config_dir() -> Result<PathBuf> {
@@ -77,6 +79,27 @@ pub fn save_configured_provider(provider_id: &str, env_key: &str, api_key: &str)
 
 pub fn load_api_keys() -> HashMap<String, String> {
     load().api_keys
+}
+
+pub fn load_custom_providers() -> Vec<CustomProvider> {
+    load().custom_providers
+}
+
+pub fn save_custom_provider(provider: &CustomProvider) -> Result<()> {
+    let mut state = load();
+    let idx = state.custom_providers.iter().position(|p| p.id == provider.id);
+    if let Some(i) = idx {
+        state.custom_providers[i] = provider.clone();
+    } else {
+        state.custom_providers.push(provider.clone());
+    }
+    save(&state)
+}
+
+pub fn remove_custom_provider(custom_id: &str) -> Result<()> {
+    let mut state = load();
+    state.custom_providers.retain(|p| p.id != custom_id);
+    save(&state)
 }
 
 pub fn save_provider_cache(registry: &ModelRegistry) -> Result<()> {

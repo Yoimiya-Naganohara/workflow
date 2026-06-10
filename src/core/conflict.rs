@@ -1,5 +1,5 @@
 use crate::core::types::EMBEDDING_DIM;
-use crate::core::types::{AgentId, ChildAgentConfig, TraceId};
+use crate::core::types::{AgentId, TraceId};
 use smallvec::SmallVec;
 
 /// Unified result returned by any L2 audit engine (rule or LLM).
@@ -43,6 +43,5 @@ pub enum ArbitrationResult {
         winner: AgentId,
         slash_targets: Vec<AgentId>,
     },
-    Merge(ChildAgentConfig),
     Prune(Vec<AgentId>),
 }
