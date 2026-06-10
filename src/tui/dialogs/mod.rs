@@ -1,48 +1,18 @@
-//! Dialog box rendering — provider picker, key input, model picker, command popup.
+//! Dialog box rendering — provider picker, key input, model pool, command popup.
 
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{List, ListItem, ListState, Paragraph},
 };
 
 use super::state::AppState;
+use super::style;
 use crate::models::filter_providers;
 
-/// Unified dialog border style — white border, cyan bold title.
-fn dialog_border(title: &str) -> Block<'static> {
-    Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" {} ", title))
-        .style(Style::default().fg(Color::White))
-        .border_style(Style::default().fg(Color::White))
-}
-
-/// Dialog search box with consistent bordered style.
-fn dialog_search<'a>(content: &'a str) -> Paragraph<'a> {
-    Paragraph::new(content)
-        .style(Style::default().fg(Color::White))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title(" Search "),
-        )
-}
-
-/// Selected item highlight style.
-fn highlight_style() -> Style {
-    Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD)
-}
-
-/// Selected item background highlight.
-fn highlight_bg() -> Style {
-    Style::default().bg(Color::Rgb(20, 40, 60))
-}
+// ── Provider Dialog ──
 
 pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState) {
     let filtered = filter_providers(state.models.providers(), &state.provider_search_query);
@@ -56,7 +26,7 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
     let total_items = filtered.len() + if show_custom { 1 } else { 0 };
 
     if total_items == 0 {
-        let block = dialog_border("Configure Provider");
+        let block = style::panel("Configure Provider");
         let inner = block.inner(area);
         f.render_widget(block, area);
         let msg = if state.models.providers().is_empty() {
@@ -64,7 +34,7 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
         } else {
             "No matching providers."
         };
-        f.render_widget(Paragraph::new(msg).style(Style::default().fg(Color::DarkGray)), inner);
+        f.render_widget(Paragraph::new(msg).style(style::hint_style()), inner);
         return;
     }
 
@@ -76,7 +46,7 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
     let y = area.y + (area.height.saturating_sub(dialog_h)) / 2;
     let dialog_area = Rect::new(x, y, dialog_w, dialog_h);
 
-    let block = dialog_border("Configure Provider");
+    let block = style::panel("Configure Provider");
     let inner = block.inner(dialog_area);
     f.render_widget(block, dialog_area);
 
@@ -85,23 +55,23 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
         .constraints([Constraint::Length(search_h), Constraint::Length(1), Constraint::Min(0)])
         .split(inner);
 
-    f.render_widget(dialog_search(&state.provider_search_query), chunks[0]);
+    // Search box
+    f.render_widget(
+        Paragraph::new(state.provider_search_query.as_str())
+            .style(style::value_style())
+            .block(style::input_box("Search", true)),
+        chunks[0],
+    );
     let prefix_width =
         crate::tui::chat_lines::display_width_up_to(&state.provider_search_query, state.provider_search_cursor);
     let cursor_x = chunks[0].x + prefix_width as u16 + 1;
     let cursor_y = chunks[0].y + 1;
     f.set_cursor_position((cursor_x, cursor_y));
 
-    // Separator line
-    f.render_widget(
-        Paragraph::new(Span::styled(
-            "─".repeat(chunks[1].width as usize),
-            Style::default().fg(Color::DarkGray),
-        )),
-        chunks[1],
-    );
+    // Separator
+    style::render_separator(f, chunks[1]);
 
-    // Build items: filtered providers + optional custom entry.
+    // Build list items
     let mut items: Vec<ListItem> = filtered
         .iter()
         .map(|p| {
@@ -109,22 +79,21 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
             let is_configured = state.configured_providers.iter().any(|id| id == &p.id);
             ListItem::new(Line::from(vec![
                 if is_configured {
-                    Span::styled("✓ ", Style::default().fg(Color::Green))
+                    Span::styled("✓ ", Style::default().fg(style::SUCCESS))
                 } else {
                     Span::raw("  ")
                 },
-                Span::styled(&p.name, Style::default()),
+                Span::styled(&p.name, style::value_style()),
                 Span::raw("  "),
-                Span::styled(format!("{} models", count), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{} models", count), style::hint_style()),
             ]))
         })
         .collect();
 
-    // Add custom entry at the end.
     if show_custom {
         items.push(ListItem::new(Line::from(vec![
             Span::raw("  "),
-            Span::styled(custom_label, Style::default().fg(Color::Cyan)),
+            Span::styled(custom_label, Style::default().fg(style::ACTIVE)),
         ])));
     }
 
@@ -132,13 +101,15 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
     list_state.select(Some(state.selected_provider_idx.min(total_items.saturating_sub(1))));
     f.render_stateful_widget(
         List::new(items)
-            .highlight_style(highlight_style())
-            .highlight_style(highlight_bg())
+            .highlight_style(style::highlight_fg())
+            .highlight_style(style::highlight_bg())
             .highlight_symbol("▸ "),
         chunks[2],
         &mut list_state,
     );
 }
+
+// ── Key Dialog ──
 
 pub(crate) fn render_key_dialog(f: &mut Frame, area: Rect, state: &AppState) {
     let provider_name = state
@@ -154,7 +125,7 @@ pub(crate) fn render_key_dialog(f: &mut Frame, area: Rect, state: &AppState) {
     let y = area.y + (area.height.saturating_sub(dialog_h)) / 2;
     let dialog_area = Rect::new(x, y, dialog_w, dialog_h);
 
-    let block = dialog_border(&format!("API Key — {}", provider_name));
+    let block = style::panel(&format!("API Key — {}", provider_name));
     let inner = block.inner(dialog_area);
     f.render_widget(block, dialog_area);
 
@@ -163,52 +134,43 @@ pub(crate) fn render_key_dialog(f: &mut Frame, area: Rect, state: &AppState) {
         .constraints([Constraint::Length(3), Constraint::Length(3)])
         .split(inner);
 
-    // Input field with border
+    // Input field
     let masked: String = state.key_input.chars().map(|_| '•').collect();
-    let input_display = if state.key_input.is_empty() {
-        Paragraph::new(" Type or paste your API key…")
-            .style(Style::default().fg(Color::DarkGray))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" API Key "),
-            )
+    let has_input = !state.key_input.is_empty();
+    let input_display = Paragraph::new(if has_input {
+        masked.as_str()
     } else {
-        Paragraph::new(masked.as_str())
-            .style(Style::default().fg(Color::Yellow))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow))
-                    .title(" API Key "),
-            )
-    };
+        " Type or paste your API key…"
+    })
+    .style(if has_input {
+        Style::default().fg(style::WARNING)
+    } else {
+        style::hint_style()
+    })
+    .block(style::input_box(
+        "API Key",
+        has_input,
+    ));
     f.render_widget(input_display, chunks[0]);
 
-    // Cursor inside the input field
+    // Cursor
     let cursor_x = chunks[0].x + state.key_input.len() as u16 + 1;
     let cursor_y = chunks[0].y + 1;
     f.set_cursor_position((cursor_x.min(chunks[0].right().saturating_sub(2)), cursor_y));
 
     // Hint
-    f.render_widget(
-        Paragraph::new(Span::styled(
-            "Enter to confirm  ·  Esc to cancel",
-            Style::default().fg(Color::DarkGray),
-        )),
-        chunks[1],
-    );
+    style::render_hint(f, chunks[1], "Enter to confirm  ·  Esc to cancel");
 }
 
+// ── Model Picker ──
+
 pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
-    // Only show models from configured providers.
     let results = state
         .models
         .search_configured_models(&state.model_picker_search_query, &state.configured_providers);
 
     if results.is_empty() {
-        let block = dialog_border("Model Pool");
+        let block = style::panel("Model Pool");
         let inner = block.inner(area);
         f.render_widget(block, area);
         let msg = if state.configured_providers.is_empty() {
@@ -216,7 +178,7 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
         } else {
             "No matching models."
         };
-        f.render_widget(Paragraph::new(msg).style(Style::default().fg(Color::DarkGray)), inner);
+        f.render_widget(Paragraph::new(msg).style(style::hint_style()), inner);
         return;
     }
 
@@ -228,7 +190,7 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
     let y = area.y + (area.height.saturating_sub(dialog_h)) / 2;
     let dialog_area = Rect::new(x, y, dialog_w, dialog_h);
 
-    let block = dialog_border("Model Pool");
+    let block = style::panel("Model Pool");
     let inner = block.inner(dialog_area);
     f.render_widget(block, dialog_area);
 
@@ -237,22 +199,23 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
         .constraints([Constraint::Length(search_h), Constraint::Length(1), Constraint::Min(0)])
         .split(inner);
 
-    f.render_widget(dialog_search(&state.model_picker_search_query), chunks[0]);
+    // Search box
+    f.render_widget(
+        Paragraph::new(state.model_picker_search_query.as_str())
+            .style(style::value_style())
+            .block(style::input_box("Search", true)),
+        chunks[0],
+    );
     let prefix_width =
         crate::tui::chat_lines::display_width_up_to(&state.model_picker_search_query, state.model_picker_search_cursor);
     let cursor_x = chunks[0].x + prefix_width as u16 + 1;
     let cursor_y = chunks[0].y + 1;
     f.set_cursor_position((cursor_x, cursor_y));
 
-    // Separator line
-    f.render_widget(
-        Paragraph::new(Span::styled(
-            "─".repeat(chunks[1].width as usize),
-            Style::default().fg(Color::DarkGray),
-        )),
-        chunks[1],
-    );
+    // Separator
+    style::render_separator(f, chunks[1]);
 
+    // Build list items
     let items: Vec<ListItem> = results
         .iter()
         .map(|(p, m)| {
@@ -263,15 +226,15 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
                 .any(|sm| sm.provider_id == p.id && sm.model_id == m.id);
             ListItem::new(Line::from(vec![
                 if is_selected {
-                    Span::styled("✓ ", Style::default().fg(Color::Green))
+                    Span::styled("✓ ", Style::default().fg(style::SUCCESS))
                 } else {
                     Span::raw("  ")
                 },
-                Span::styled(&m.name, Style::default()),
+                Span::styled(&m.name, style::value_style()),
                 Span::raw(" "),
-                Span::styled(badge, Style::default().fg(Color::DarkGray).italic()),
+                Span::styled(badge, style::hint_style().italic()),
                 Span::raw(" "),
-                Span::styled(&p.name, Style::default().fg(Color::DarkGray)),
+                Span::styled(&p.name, style::hint_style()),
             ]))
         })
         .collect();
@@ -282,13 +245,15 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
     ));
     f.render_stateful_widget(
         List::new(items)
-            .highlight_style(highlight_style())
-            .highlight_style(highlight_bg())
+            .highlight_style(style::highlight_fg())
+            .highlight_style(style::highlight_bg())
             .highlight_symbol("▸ "),
         chunks[2],
         &mut list_state,
     );
 }
+
+// ── Custom Provider Wizard ──
 
 pub(crate) fn render_custom_provider_dialog(f: &mut Frame, area: Rect, state: &AppState) {
     let steps = ["Provider Name", "API Base URL", "API Key", "Model IDs"];
@@ -307,7 +272,7 @@ pub(crate) fn render_custom_provider_dialog(f: &mut Frame, area: Rect, state: &A
     let y = area.y + (area.height.saturating_sub(dialog_h)) / 2;
     let dialog_area = Rect::new(x, y, dialog_w, dialog_h);
 
-    let block = dialog_border(&format!("Custom Provider — Step {}/{}", step + 1, total_steps));
+    let block = style::panel(&format!("Custom Provider — Step {}/{}", step + 1, total_steps));
     let inner = block.inner(dialog_area);
     f.render_widget(block, dialog_area);
 
@@ -316,41 +281,29 @@ pub(crate) fn render_custom_provider_dialog(f: &mut Frame, area: Rect, state: &A
         .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Length(1)])
         .split(inner);
 
-    // ── Step progress indicator ──
+    // ── Step progress ──
     let mut progress_spans: Vec<Span> = Vec::new();
     for (i, label) in steps.iter().enumerate() {
         if i > 0 {
-            progress_spans.push(Span::styled(
-                " ─ ",
-                Style::default().fg(Color::DarkGray),
-            ));
+            progress_spans.push(Span::styled(" ─ ", style::hint_style()));
         }
         let (icon, color) = if i < step {
-            ("●", Color::Green) // completed
+            ("●", style::SUCCESS)
         } else if i == step {
-            ("●", Color::Cyan)  // active
+            ("●", style::ACTIVE)
         } else {
-            ("○", Color::DarkGray) // pending
+            ("○", style::INACTIVE)
         };
-        progress_spans.push(Span::styled(
-            format!("{} {}", icon, label),
-            Style::default().fg(color),
-        ));
+        progress_spans.push(Span::styled(format!("{} {}", icon, label), Style::default().fg(color)));
     }
-    f.render_widget(
-        Paragraph::new(Line::from(progress_spans)).style(Style::default()),
-        chunks[0],
-    );
+    f.render_widget(Paragraph::new(Line::from(progress_spans)), chunks[0]);
 
-    // ── Summary of previous steps ──
-    // (rendered as a small overlay in the progress line — we display completed
-    //  values inline for compactness)
+    // ── Summary banner ──
     let mut summary_parts: Vec<String> = Vec::new();
     if !state.custom_name.is_empty() {
         summary_parts.push(format!("Name: {}", state.custom_name));
     }
     if !state.custom_url.is_empty() {
-        // Truncate long URLs
         let url_display = if state.custom_url.len() > 40 {
             format!("{}…", &state.custom_url[..37])
         } else {
@@ -361,40 +314,27 @@ pub(crate) fn render_custom_provider_dialog(f: &mut Frame, area: Rect, state: &A
     if !state.custom_key.is_empty() {
         summary_parts.push("Key: ••••••••".to_string());
     }
-    let summary_line = if summary_parts.is_empty() {
+
+    let summary_text: &str = if summary_parts.is_empty() {
         prompts[step]
     } else {
-        &summary_parts.join("  │  ")
+        // Leak for lifetime — this is a short-lived render function.
+        // In practice, the string lives long enough for the Frame.
+        let joined = summary_parts.join("  │  ");
+        Box::leak(joined.into_boxed_str())
     };
 
-    // ── Current step input ──
-    let input_display = if state.custom_input.is_empty() && !summary_parts.is_empty() {
-        // Show placeholder when already have previous data
-        Paragraph::new(Span::styled(summary_line, Style::default().fg(Color::DarkGray)))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" Input "),
-            )
-    } else if state.custom_input.is_empty() {
-        // Show step prompt as placeholder
-        Paragraph::new(Span::styled(prompts[step], Style::default().fg(Color::DarkGray)))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan))
-                    .title(steps[step]),
-            )
+    // ── Input ──
+    let has_previous = !summary_parts.is_empty();
+    let has_input = !state.custom_input.is_empty();
+
+    let input_display = if !has_input {
+        Paragraph::new(Span::styled(summary_text, style::hint_style()))
+            .block(style::input_box("Input", has_previous))
     } else {
         Paragraph::new(state.custom_input.as_str())
-            .style(Style::default().fg(Color::White))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan))
-                    .title(steps[step]),
-            )
+            .style(style::value_style())
+            .block(style::input_box(steps[step], true))
     };
     f.render_widget(input_display, chunks[1]);
 
@@ -412,11 +352,10 @@ pub(crate) fn render_custom_provider_dialog(f: &mut Frame, area: Rect, state: &A
     } else {
         "Enter to continue  ·  Esc to cancel"
     };
-    f.render_widget(
-        Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
-        chunks[2],
-    );
+    style::render_hint(f, chunks[2], hint);
 }
+
+// ── Command Popup ──
 
 pub(crate) fn render_command_popup(f: &mut Frame, chat_area: Rect, state: &AppState) {
     if state.focus != super::state::Focus::Input || !state.input.starts_with('/') {
@@ -437,9 +376,9 @@ pub(crate) fn render_command_popup(f: &mut Frame, chat_area: Rect, state: &AppSt
         .iter()
         .map(|(cmd, desc)| {
             ListItem::new(Line::from(vec![
-                Span::styled(*cmd, Style::default().fg(Color::Cyan)),
+                Span::styled(*cmd, Style::default().fg(style::ACTIVE)),
                 Span::raw("  "),
-                Span::styled(format!("— {}", desc), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("— {}", desc), style::hint_style()),
             ]))
         })
         .collect();
@@ -449,15 +388,13 @@ pub(crate) fn render_command_popup(f: &mut Frame, chat_area: Rect, state: &AppSt
     let x = chat_area.x;
     let y = chat_area.y + chat_area.height.saturating_sub(popup_h + 3);
 
-    let block = dialog_border("Commands");
-
     let mut list_state = ListState::default();
     list_state.select(Some(state.command_popup_selection.min(matches.len().saturating_sub(1))));
     f.render_stateful_widget(
         List::new(items)
-            .block(block)
-            .highlight_style(highlight_style())
-            .highlight_style(highlight_bg())
+            .block(style::panel("Commands"))
+            .highlight_style(style::highlight_fg())
+            .highlight_style(style::highlight_bg())
             .highlight_symbol("▸ "),
         Rect::new(x, y, popup_w, popup_h),
         &mut list_state,

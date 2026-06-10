@@ -6,6 +6,7 @@ pub mod keymap;
 pub mod render;
 pub mod sidebar;
 pub mod state;
+pub mod style;
 
 use anyhow::Result;
 use crossterm::{

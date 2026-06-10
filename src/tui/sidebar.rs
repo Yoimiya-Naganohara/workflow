@@ -3,161 +3,151 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::Paragraph,
 };
 
 use super::state::AppState;
+use super::style;
+
+/// Section header label.
+fn section_label(text: &str) -> Span<'static> {
+    Span::styled(
+        format!(" {} ", text),
+        Style::default()
+            .fg(style::ACTIVE)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+/// Key-value pair: label (dark gray) + value (colored).
+fn kv(label: &str, value: Span<'static>) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("  {:<9}", label), style::label_style()),
+        value,
+    ])
+}
+
+/// Numeric value with optional color based on threshold.
+fn num_val(n: usize, positive: bool) -> Span<'static> {
+    let color = if n > 0 && positive {
+        style::SUCCESS
+    } else if n > 0 {
+        style::WARNING
+    } else {
+        style::INACTIVE
+    };
+    Span::styled(format!("{}", n), Style::default().fg(color))
+}
 
 pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Status ")
-        .style(Style::default().fg(Color::DarkGray));
+    let block = style::panel("Status");
     let inner = block.inner(area);
     f.render_widget(block, area);
 
     let mut lines: Vec<Line> = Vec::new();
 
     // ── Agent ──
+    lines.push(Line::from(section_label("Agent")));
     if let Some(agent_id) = state.responsible_agent_id {
-        lines.push(Line::from(Span::styled(
-            " ── Agent ──",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
-        )));
         let short_id = format!(
             "{:02x}{:02x}{:02x}{:02x}",
             agent_id[0], agent_id[1], agent_id[2], agent_id[3]
         );
-        lines.push(Line::from(vec![
-            Span::styled("  id      ", Style::default().fg(Color::DarkGray)),
-            Span::styled(short_id, Style::default().fg(Color::Cyan)),
-        ]));
+        lines.push(kv("id", Span::styled(short_id, style::value_style())));
+
         let agent_status = state
             .agents
             .iter()
             .find(|a| a.id == crate::agent::AgentPool::agent_id_str(&agent_id))
             .map(|a| &a.status);
         let (status_label, status_color) = match agent_status {
-            Some(super::state::AgentStatus::Running) => ("running", Color::Yellow),
-            Some(super::state::AgentStatus::Completed) => ("completed", Color::Green),
-            Some(super::state::AgentStatus::Failed) => ("failed", Color::Red),
-            Some(super::state::AgentStatus::Suspended) => ("suspended", Color::DarkGray),
-            None => ("idle", Color::DarkGray),
+            Some(super::state::AgentStatus::Running) => ("running", style::WARNING),
+            Some(super::state::AgentStatus::Completed) => ("completed", style::SUCCESS),
+            Some(super::state::AgentStatus::Failed) => ("failed", style::ERROR),
+            Some(super::state::AgentStatus::Suspended) => ("suspended", style::INACTIVE),
+            None => ("idle", style::INACTIVE),
         };
-        lines.push(Line::from(vec![
-            Span::styled("  status  ", Style::default().fg(Color::DarkGray)),
+        lines.push(kv(
+            "status",
             Span::styled(status_label, Style::default().fg(status_color)),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("  agents  ", Style::default().fg(Color::DarkGray)),
+        ));
+        lines.push(kv(
+            "agents",
             Span::styled(
                 format!("{} spawned", state.agents.len()),
-                Style::default().fg(if state.agents.len() > 1 {
-                    Color::Green
-                } else {
-                    Color::DarkGray
-                }),
+                style::value_style(),
             ),
-        ]));
+        ));
+    } else {
+        lines.push(kv("id", Span::styled("—", style::hint_style())));
+        lines.push(kv("agents", Span::styled("0", style::hint_style())));
     }
 
     // ── Network ──
-    lines.push(Line::from(Span::styled(
-        " ── Network ──",
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
-    )));
+    lines.push(Line::from(section_label("Network")));
     let configured = state.configured_providers.len();
-    lines.push(Line::from(vec![
-        Span::styled("  config  ", Style::default().fg(Color::DarkGray)),
+    lines.push(kv(
+        "config",
         Span::styled(
             format!("{} providers", configured),
-            Style::default().fg(if configured > 0 { Color::Green } else { Color::DarkGray }),
+            Style::default().fg(if configured > 0 { style::SUCCESS } else { style::INACTIVE }),
         ),
-    ]));
-    if state.active_chat_requests > 0 {
-        lines.push(Line::from(vec![
-            Span::styled("  stream  ", Style::default().fg(Color::DarkGray)),
+    ));
+    lines.push(kv(
+        "stream",
+        if state.active_chat_requests > 0 {
             Span::styled(
                 "active",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK),
-            ),
-        ]));
-    }
+                Style::default()
+                    .fg(style::WARNING)
+                    .add_modifier(Modifier::SLOW_BLINK),
+            )
+        } else {
+            Span::styled("idle", style::hint_style())
+        },
+    ));
 
-    // ── Experience ──
-    lines.push(Line::from(Span::styled(
-        " ── Memory ──",
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
-    )));
+    // ── Memory ──
+    lines.push(Line::from(section_label("Memory")));
     if let Some(runtime) = &state.runtime {
         if let Ok(rt) = runtime.try_read() {
             let exp_count = rt.experience_count();
             let bedrock = rt.bedrock_count();
             let fluid = rt.fluid_count();
             let pending = rt.pending_suspended();
-            lines.push(Line::from(vec![
-                Span::styled("  total   ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("{}", exp_count),
-                    Style::default().fg(if exp_count > 0 { Color::Green } else { Color::DarkGray }),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  bedrock ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("{}", bedrock),
-                    Style::default().fg(if bedrock > 0 { Color::Green } else { Color::DarkGray }),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  fluid   ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("{}", fluid),
-                    Style::default().fg(if fluid > 0 { Color::Yellow } else { Color::DarkGray }),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  suspend ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("{}", pending),
-                    Style::default().fg(if pending > 0 { Color::Yellow } else { Color::DarkGray }),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  history ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("{}", state.input_history.len()),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
+            lines.push(kv("total", num_val(exp_count, true)));
+            lines.push(kv("bedrock", num_val(bedrock, true)));
+            lines.push(kv("fluid", num_val(fluid, false)));
+            lines.push(kv("suspend", num_val(pending, false)));
+            lines.push(kv("history", num_val(state.input_history.len(), true)));
         }
     }
 
     // ── Budget ──
-    lines.push(Line::from(Span::styled(
-        " ── Budget ──",
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(vec![
-        Span::styled("  used    ", Style::default().fg(Color::DarkGray)),
+    lines.push(Line::from(section_label("Budget")));
+    lines.push(kv(
+        "used",
         Span::styled(
             format!("{}/{}", state.budget_used, state.budget_total),
-            Style::default().fg(Color::White),
+            style::value_style(),
         ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  permits ", Style::default().fg(Color::DarkGray)),
+    ));
+    lines.push(kv(
+        "permits",
         Span::styled(
             format!("{}", state.permits_available),
             Style::default().fg(if state.permits_available > 0 {
-                Color::Green
+                style::SUCCESS
             } else {
-                Color::Red
+                style::ERROR
             }),
         ),
-    ]));
+    ));
 
-    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }), inner);
+    f.render_widget(
+        Paragraph::new(Text::from(lines)),
+        inner,
+    );
 }

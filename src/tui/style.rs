@@ -1,0 +1,120 @@
+//! Unified design system for the TUI.
+//!
+//! Provides consistent colors, borders, highlights, and widget helpers
+//! used across dialogs, sidebar, chat, and status bar.
+
+use ratatui::{
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    text::Span,
+    widgets::{Block, Borders, Paragraph, Wrap},
+    Frame,
+};
+
+// ── Color Palette ──
+
+/// Border color for panels and dialogs.
+pub const BORDER: Color = Color::White;
+/// Title text color (bold cyan).
+pub const TITLE: Color = Color::Cyan;
+/// Foreground for highlighted list items.
+pub const HIGHLIGHT_FG: Color = Color::Cyan;
+/// Background for highlighted list items.
+pub const HIGHLIGHT_BG: Color = Color::Rgb(20, 40, 60);
+/// Active input / search border color.
+pub const ACTIVE: Color = Color::Cyan;
+/// Inactive / subtle border color.
+pub const INACTIVE: Color = Color::DarkGray;
+/// Metadata label color.
+pub const LABEL: Color = Color::DarkGray;
+/// Primary value / content color.
+pub const VALUE: Color = Color::White;
+/// Success / confirm color.
+pub const SUCCESS: Color = Color::Green;
+/// Warning / in-progress color.
+pub const WARNING: Color = Color::Yellow;
+/// Error / failure color.
+pub const ERROR: Color = Color::Red;
+/// Hint / instruction text color.
+pub const HINT: Color = Color::DarkGray;
+
+// ── Style Helpers ──
+
+/// Style for panel / dialog titles.
+pub fn title_style() -> Style {
+    Style::default()
+        .fg(TITLE)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Style for a highlighted (selected) list item foreground.
+pub fn highlight_fg() -> Style {
+    Style::default()
+        .fg(HIGHLIGHT_FG)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Style for a highlighted (selected) list item background.
+pub fn highlight_bg() -> Style {
+    Style::default().bg(HIGHLIGHT_BG)
+}
+
+/// Style for metadata labels.
+pub fn label_style() -> Style {
+    Style::default().fg(LABEL)
+}
+
+/// Style for primary values.
+pub fn value_style() -> Style {
+    Style::default().fg(VALUE)
+}
+
+/// Style for hint / instruction text.
+pub fn hint_style() -> Style {
+    Style::default().fg(HINT)
+}
+
+// ── Widget Builders ──
+
+/// A bordered panel with a title, using unified colors.
+pub fn panel<'a>(title: &str) -> Block<'a> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(BORDER))
+        .title(Span::styled(format!(" {} ", title), title_style()))
+}
+
+/// A search / input box with an optional label, styled with unified colors.
+/// `active` controls whether the border is cyan (focused) or dark gray.
+pub fn input_box<'a>(label: &str, active: bool) -> Block<'a> {
+    let border_color = if active { ACTIVE } else { INACTIVE };
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .title(Span::styled(
+            format!(" {} ", label),
+            if active { title_style() } else { hint_style() },
+        ))
+}
+
+/// Render a hint/instruction line at the bottom of a dialog or panel.
+pub fn render_hint(f: &mut Frame, area: Rect, text: &str) {
+    f.render_widget(
+        Paragraph::new(Span::styled(text, hint_style())),
+        area,
+    );
+}
+
+/// Render a thin horizontal separator line.
+pub fn render_separator(f: &mut Frame, area: Rect) {
+    let width = area.width as usize;
+    if width > 0 {
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                "─".repeat(width),
+                Style::default().fg(INACTIVE),
+            )).wrap(Wrap { trim: false }),
+            area,
+        );
+    }
+}

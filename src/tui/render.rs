@@ -7,13 +7,14 @@ use anyhow::Result;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Paragraph, Wrap},
 };
 
 use super::Tui;
 use super::state::{AppState, Focus};
+use super::style;
 use crate::tui::chat_lines::{build_chat_lines, char_idx_to_byte_idx};
 use crate::tui::dialogs;
 use crate::tui::sidebar::render_sidebar;
@@ -134,41 +135,39 @@ impl Tui {
             .constraints([Constraint::Min(0), Constraint::Length(input_height)])
             .split(area);
 
-        // ── Chat messages with word wrap ──
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Chat ")
-            .style(Style::default().fg(Color::Blue));
-        let inner = block.inner(chunks[0]);
-        f.render_widget(block, chunks[0]);
+        // ── Chat messages ──
+        let chat_block = style::panel("Chat");
+        let inner = chat_block.inner(chunks[0]);
+        f.render_widget(chat_block, chunks[0]);
         f.render_widget(
             Paragraph::new(ratatui::text::Text::from(visible_lines.to_vec())).wrap(Wrap { trim: false }),
             inner,
         );
 
         // ── Input box ──
-        let input_style = if state.focus == Focus::Input {
-            Style::default().fg(Color::Cyan)
+        let is_focused = state.focus == Focus::Input;
+        let input_block = style::input_box("Input", is_focused);
+        let input_style = if is_focused {
+            style::value_style()
         } else {
-            Style::default()
+            style::hint_style()
         };
         let placeholder = "Type a message or /command… (Alt+Enter newline)";
         let input_display = if state.input.is_empty() {
-            Paragraph::new(placeholder).style(input_style.fg(Color::DarkGray))
+            Paragraph::new(placeholder).style(input_style)
         } else {
-            Paragraph::new(state.input.as_str()).style(input_style)
+            Paragraph::new(state.input.as_str()).style(style::value_style())
         };
 
         f.render_widget(
-            input_display
-                .block(Block::default().borders(Borders::ALL))
-                .wrap(Wrap { trim: false }),
+            input_display.block(input_block).wrap(Wrap { trim: false }),
             chunks[1],
         );
 
         // ── Cursor ──
-        if state.focus == Focus::Input && !state.input.is_empty() {
-            let prefix_width = crate::tui::chat_lines::display_width_up_to(&state.input, state.input_cursor);
+        if is_focused && !state.input.is_empty() {
+            let prefix_width =
+                crate::tui::chat_lines::display_width_up_to(&state.input, state.input_cursor);
             let cursor_x = chunks[1].x + prefix_width as u16 + 1;
             // Place cursor on the correct visual line.
             let line_no = state.input[..char_idx_to_byte_idx(&state.input, state.input_cursor)]
@@ -180,7 +179,7 @@ impl Tui {
                 cursor_x.min(chunks[1].right().saturating_sub(1)),
                 cursor_y.min(chunks[1].bottom().saturating_sub(1)),
             ));
-        } else if state.focus == Focus::Input {
+        } else if is_focused {
             f.set_cursor_position((chunks[1].x + 1, chunks[1].y + 1));
         }
     }
@@ -214,9 +213,9 @@ impl Tui {
 
         f.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(hint, Style::default().fg(Color::DarkGray)),
+                Span::styled(hint, style::hint_style()),
                 Span::raw(" ".repeat(pad as usize)),
-                Span::styled(ctx_info, Style::default().fg(Color::Green)),
+                Span::styled(ctx_info, Style::default().fg(style::SUCCESS)),
             ])),
             area,
         );
