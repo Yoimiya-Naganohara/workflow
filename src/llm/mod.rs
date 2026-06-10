@@ -10,6 +10,9 @@ pub use types::*;
 use anyhow::Result;
 use async_trait::async_trait;
 
+// Re-export ProviderProtocol at the crate level for convenience.
+pub use types::ProviderProtocol;
+
 /// Text-to-vector embedding service with caching.
 #[async_trait]
 pub trait EmbeddingService: Send + Sync {
@@ -137,48 +140,73 @@ impl LlmProvider {
 mod tests {
     use super::*;
 
+    // ── ProviderProtocol ──
+
     #[test]
-    fn test_message_serialization() {
-        let msg = Message {
-            role: "user".to_string(),
-            content: "Hello".to_string(),
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("user"));
-        assert!(json.contains("Hello"));
+    fn test_protocol_from_id() {
+        assert_eq!(ProviderProtocol::from_id("openai"), ProviderProtocol::OpenAi);
+        assert_eq!(ProviderProtocol::from_id("anthropic"), ProviderProtocol::Anthropic);
+        assert_eq!(ProviderProtocol::from_id("cohere"), ProviderProtocol::Cohere);
+        assert_eq!(ProviderProtocol::from_id("gemini"), ProviderProtocol::Gemini);
+        assert_eq!(ProviderProtocol::from_id("google"), ProviderProtocol::Gemini);
+        assert_eq!(ProviderProtocol::from_id("mistral"), ProviderProtocol::Mistral);
+        assert_eq!(ProviderProtocol::from_id("ollama"), ProviderProtocol::Ollama);
+        assert_eq!(ProviderProtocol::from_id("llamafile"), ProviderProtocol::Llamafile);
+        assert_eq!(ProviderProtocol::from_id("azure"), ProviderProtocol::Azure);
+        assert_eq!(ProviderProtocol::from_id("github-copilot"), ProviderProtocol::Copilot);
+        assert_eq!(ProviderProtocol::from_id("custom-myapi"), ProviderProtocol::OpenAiCompatible);
     }
 
     #[test]
-    fn test_llm_request_serialization() {
-        let req = LlmRequest {
-            model: "gpt-4".to_string(),
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: "test".to_string(),
-            }],
-            temperature: 0.7,
-            max_tokens: 1000,
-        };
-        let json = serde_json::to_string(&req).unwrap();
-        assert!(json.contains("gpt-4"));
+    fn test_unknown_provider_falls_back_to_openai_compatible() {
+        assert_eq!(ProviderProtocol::from_id("some-new-provider"), ProviderProtocol::OpenAiCompatible);
     }
 
     #[test]
-    fn test_deepseek_routes_to_openai_compatible() {
+    fn test_protocol_requires_api_key() {
+        assert!(ProviderProtocol::OpenAi.requires_api_key());
+        assert!(ProviderProtocol::Anthropic.requires_api_key());
+        assert!(!ProviderProtocol::Ollama.requires_api_key());
+        assert!(!ProviderProtocol::Llamafile.requires_api_key());
+    }
+
+    #[test]
+    fn test_protocol_supports_embeddings() {
+        assert!(ProviderProtocol::OpenAi.supports_embeddings());
+        assert!(ProviderProtocol::OpenAiCompatible.supports_embeddings());
+        assert!(ProviderProtocol::Cohere.supports_embeddings());
+        assert!(ProviderProtocol::Gemini.supports_embeddings());
+        assert!(ProviderProtocol::Mistral.supports_embeddings());
+        assert!(!ProviderProtocol::Anthropic.supports_embeddings());
+        assert!(!ProviderProtocol::Ollama.supports_embeddings());
+    }
+
+    #[test]
+    fn test_protocol_label() {
+        assert_eq!(ProviderProtocol::OpenAi.label(), "OpenAI");
+        assert_eq!(ProviderProtocol::OpenAiCompatible.label(), "OpenAI Compatible");
+        assert_eq!(ProviderProtocol::Anthropic.label(), "Anthropic");
+        assert_eq!(ProviderProtocol::Ollama.label(), "Ollama");
+    }
+
+    // ── from_key routing ──
+
+    #[test]
+    fn test_deepseek_routes_to_openai() {
         let result = LlmProvider::from_key("test-key", Some("https://api.deepseek.com"), "deepseek");
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
     }
 
     #[test]
-    fn test_groq_routes_to_openai_compatible() {
+    fn test_groq_routes_to_openai() {
         let result = LlmProvider::from_key("test-key", Some("https://api.groq.com/openai/v1"), "groq");
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
     }
 
     #[test]
-    fn test_openrouter_routes_to_openai_compatible() {
+    fn test_openrouter_routes_to_openai() {
         let result = LlmProvider::from_key("test-key", Some("https://openrouter.ai/api/v1"), "openrouter");
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
@@ -241,11 +269,7 @@ mod tests {
     fn test_provider_with_base_url() {
         let result = LlmProvider::from_key("sk-test", Some("https://custom.deepseek.com/v1"), "deepseek");
         assert!(result.is_ok());
-        if let LlmProvider::OpenAi(_) = result.unwrap() {
-            // Success
-        } else {
-            panic!("Expected OpenAi variant");
-        }
+        assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
     }
 
     #[test]
@@ -253,5 +277,47 @@ mod tests {
         let result = LlmProvider::from_key("test-key", None, "openai");
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
+    }
+
+    // ── from_protocol ──
+
+    #[test]
+    fn test_from_protocol_openai_compatible() {
+        let result = LlmProvider::from_protocol("test-key", None, ProviderProtocol::OpenAiCompatible);
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
+    }
+
+    #[test]
+    fn test_from_protocol_copilot() {
+        let result = LlmProvider::from_protocol("test-key", None, ProviderProtocol::Copilot);
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), LlmProvider::Copilot(_)));
+    }
+
+    #[test]
+    fn test_message_serialization() {
+        let msg = Message {
+            role: "user".to_string(),
+            content: "Hello".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("user"));
+        assert!(json.contains("Hello"));
+    }
+
+    #[test]
+    fn test_llm_request_serialization() {
+        let req = LlmRequest {
+            model: "gpt-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: "test".to_string(),
+            }],
+            temperature: 0.7,
+            max_tokens: 1000,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("gpt-4"));
     }
 }

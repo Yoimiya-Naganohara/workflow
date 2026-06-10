@@ -1,5 +1,6 @@
 pub mod admission;
 pub mod agent;
+pub mod config;
 pub mod core;
 pub mod experience;
 pub mod l0;
@@ -8,6 +9,7 @@ pub mod l2;
 pub mod llm;
 pub mod models;
 pub mod persistence;
+pub mod provider;
 pub mod runtime;
 pub mod tools;
 pub mod tui;

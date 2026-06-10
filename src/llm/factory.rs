@@ -12,6 +12,11 @@ use rig::providers::ollama;
 use rig::providers::openai;
 
 impl LlmProvider {
+    /// Build a provider from environment variables.
+    ///
+    /// Checks `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `COHERE_API_KEY`,
+    /// `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `OLLAMA_API_BASE_URL`,
+    /// `AZURE_API_KEY`, and `GITHUB_TOKEN` in order.
     pub fn from_env() -> Result<Self> {
         if let Ok(key) = std::env::var("OPENAI_API_KEY") {
             let mut builder = openai::CompletionsClient::builder().api_key(&key);
@@ -72,30 +77,37 @@ impl LlmProvider {
         .is_ok()
     }
 
+    /// Build a provider from an API key + optional base URL + protocol.
     pub fn from_key(api_key: &str, base_url: Option<&str>, provider_id: &str) -> Result<Self> {
-        match provider_id {
-            "anthropic" => {
+        let protocol = ProviderProtocol::from_id(provider_id);
+        Self::from_protocol(api_key, base_url, protocol)
+    }
+
+    /// Build a provider from an API key + optional base URL + protocol.
+    pub fn from_protocol(api_key: &str, base_url: Option<&str>, protocol: ProviderProtocol) -> Result<Self> {
+        match protocol {
+            ProviderProtocol::Anthropic => {
                 let mut builder = anthropic::Client::builder().api_key(api_key);
                 if let Some(url) = base_url {
                     builder = builder.base_url(url);
                 }
                 Ok(Self::Anthropic(builder.build()?))
             }
-            "cohere" => Ok(Self::Cohere(cohere::Client::new(api_key)?)),
-            "gemini" | "google" => Ok(Self::Gemini(gemini::Client::new(api_key)?)),
-            "mistral" => Ok(Self::Mistral(mistral::Client::new(api_key)?)),
-            "ollama" => {
+            ProviderProtocol::Cohere => Ok(Self::Cohere(cohere::Client::new(api_key)?)),
+            ProviderProtocol::Gemini => Ok(Self::Gemini(gemini::Client::new(api_key)?)),
+            ProviderProtocol::Mistral => Ok(Self::Mistral(mistral::Client::new(api_key)?)),
+            ProviderProtocol::Ollama => {
                 let mut builder = ollama::Client::builder().api_key(Nothing);
                 if let Some(url) = base_url {
                     builder = builder.base_url(url);
                 }
                 Ok(Self::Ollama(builder.build()?))
             }
-            "llamafile" => {
+            ProviderProtocol::Llamafile => {
                 let url = base_url.unwrap_or("http://localhost:8080");
                 Ok(Self::Llamafile(llamafile::Client::from_url(url)?))
             }
-            "azure" => {
+            ProviderProtocol::Azure => {
                 let endpoint = base_url.unwrap_or("").to_string();
                 let api_version = std::env::var("AZURE_API_VERSION").unwrap_or_else(|_| "2024-10-21".to_string());
                 Ok(Self::Azure(
@@ -106,8 +118,8 @@ impl LlmProvider {
                         .build()?,
                 ))
             }
-            "github-copilot" | "copilot" => Ok(Self::Copilot(copilot::Client::builder().api_key(api_key).build()?)),
-            _ => {
+            ProviderProtocol::Copilot => Ok(Self::Copilot(copilot::Client::builder().api_key(api_key).build()?)),
+            ProviderProtocol::OpenAi | ProviderProtocol::OpenAiCompatible => {
                 let mut builder = openai::CompletionsClient::builder().api_key(api_key);
                 if let Some(url) = base_url {
                     builder = builder.base_url(url);

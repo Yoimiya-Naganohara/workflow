@@ -1,7 +1,11 @@
-//! Local embedding service using fastembed (ONNX runtime, GPU-accelerated).
+//! Embedding services — local fastembed + remote LLM provider.
 //!
-//! Uses CUDA (NVIDIA GPU) when available, falls back to CPU automatically.
-//! The model runs entirely locally — no external API calls.
+//! Provides two implementations of [`crate::llm::EmbeddingService`]:
+//! - [`EmbeddingService`]: local ONNX inference (fastembed, always available).
+//! - [`EmbeddingRouter`]: strategy-based router that can fall back to a remote
+//!   LLM provider embedding API when available.
+
+use std::sync::Arc;
 
 use anyhow::Result;
 use dashmap::DashMap;
@@ -11,6 +15,25 @@ use tokio::sync::Mutex;
 
 use crate::core::simd::cosine_similarity_768;
 use crate::core::types::EMBEDDING_DIM;
+use crate::llm::{ProviderProtocol, LlmProvider};
+
+// ============================================================================
+//  EmbeddingStrategy
+// ============================================================================
+
+/// Strategy for choosing between local and remote embedding.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum EmbeddingStrategy {
+    /// Use only local fastembed (always available, 384-dim).
+    LocalOnly,
+    /// Use only the remote LLM provider embedding API.
+    RemoteOnly,
+    /// Try remote first; fall back to local on failure.
+    LocalFallback,
+    /// Use remote when supported (higher quality), otherwise local.
+    #[default]
+    QualityFirst,
+}
 
 /// Local embedding service using fastembed (ONNX runtime, GPU-accelerated).
 ///
@@ -126,6 +149,185 @@ fn normalize_embedding(mut embedding: [f32; EMBEDDING_DIM]) -> [f32; EMBEDDING_D
     }
     embedding
 }
+
+// ============================================================================
+//  RemoteEmbedder — wraps LlmProvider for embeddings
+// ============================================================================
+
+/// Wraps an [`LlmProvider`] for remote embedding calls.
+struct RemoteEmbedder {
+    provider: Arc<LlmProvider>,
+    protocol: ProviderProtocol,
+}
+
+impl RemoteEmbedder {
+    fn new(provider: Arc<LlmProvider>) -> Self {
+        let protocol = match &*provider {
+            LlmProvider::OpenAi(_) => ProviderProtocol::OpenAiCompatible,
+            LlmProvider::Anthropic(_) => ProviderProtocol::Anthropic,
+            LlmProvider::Cohere(_) => ProviderProtocol::Cohere,
+            LlmProvider::Gemini(_) => ProviderProtocol::Gemini,
+            LlmProvider::Mistral(_) => ProviderProtocol::Mistral,
+            LlmProvider::Ollama(_) => ProviderProtocol::Ollama,
+            LlmProvider::Llamafile(_) => ProviderProtocol::Llamafile,
+            LlmProvider::Azure(_) => ProviderProtocol::Azure,
+            LlmProvider::Copilot(_) => ProviderProtocol::Copilot,
+        };
+        Self { provider, protocol }
+    }
+
+    fn is_available(&self) -> bool {
+        self.protocol.supports_embeddings()
+    }
+
+    async fn embed(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
+        let raw = self.provider.embed(text).await?;
+        let mut result = [0.0f32; EMBEDDING_DIM];
+        let len = raw.len().min(EMBEDDING_DIM);
+        for i in 0..len {
+            result[i] = raw[i] as f32;
+        }
+        Ok(normalize_embedding(result))
+    }
+}
+
+// ============================================================================
+//  EmbeddingRouter — strategy-based composite
+// ============================================================================
+
+/// Strategy-based embedding router that combines local and remote providers.
+///
+/// ```
+/// use std::sync::Arc;
+/// use workflow::llm::embedding::{EmbeddingRouter, EmbeddingStrategy};
+///
+/// let local = workflow::llm::embedding::EmbeddingService::new();
+/// let router = EmbeddingRouter::new(local, None, EmbeddingStrategy::LocalOnly);
+/// ```
+pub struct EmbeddingRouter {
+    local: crate::llm::embedding::EmbeddingService,
+    remote: Option<RemoteEmbedder>,
+    strategy: EmbeddingStrategy,
+    cache: DashMap<String, [f32; EMBEDDING_DIM]>,
+}
+
+impl EmbeddingRouter {
+    pub fn new(
+        local: crate::llm::embedding::EmbeddingService,
+        remote: Option<Arc<LlmProvider>>,
+        strategy: EmbeddingStrategy,
+    ) -> Self {
+        Self {
+            local,
+            remote: remote.map(RemoteEmbedder::new),
+            strategy,
+            cache: DashMap::new(),
+        }
+    }
+
+    pub fn with_strategy(mut self, strategy: EmbeddingStrategy) -> Self {
+        self.strategy = strategy;
+        self
+    }
+
+    pub fn set_remote(&mut self, provider: Arc<LlmProvider>) {
+        self.remote = Some(RemoteEmbedder::new(provider));
+    }
+
+    pub fn clear_remote(&mut self) {
+        self.remote = None;
+    }
+
+    fn use_remote(&self) -> bool {
+        match self.strategy {
+            EmbeddingStrategy::LocalOnly => false,
+            EmbeddingStrategy::RemoteOnly => self.remote.as_ref().is_some_and(|r| r.is_available()),
+            EmbeddingStrategy::LocalFallback | EmbeddingStrategy::QualityFirst => {
+                self.remote.as_ref().is_some_and(|r| r.is_available())
+            }
+        }
+    }
+
+    async fn embed_impl(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
+        if let Some(cached) = self.cache.get(text) {
+            return Ok(*cached);
+        }
+
+        let result = if self.use_remote() {
+            let remote = self.remote.as_ref().unwrap();
+            match remote.embed(text).await {
+                Ok(emb) => {
+                    if self.strategy == EmbeddingStrategy::LocalFallback {
+                        return Ok(emb);
+                    }
+                    emb
+                }
+                Err(e) => {
+                    if self.strategy == EmbeddingStrategy::RemoteOnly {
+                        return Err(e);
+                    }
+                    // Fall back to local
+                    tracing::warn!("Remote embedding failed, falling back to local: {}", e);
+                    self.local.embed(text).await?
+                }
+            }
+        } else {
+            self.local.embed(text).await?
+        };
+
+        self.cache.insert(text.to_string(), result);
+        Ok(result)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::llm::EmbeddingService for EmbeddingRouter {
+    async fn embed(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
+        self.embed_impl(text).await
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; EMBEDDING_DIM]>> {
+        // Batch uncached texts
+        let mut results = vec![[0.0f32; EMBEDDING_DIM]; texts.len()];
+        let mut uncached: Vec<(usize, String)> = Vec::new();
+
+        for (i, text) in texts.iter().enumerate() {
+            if let Some(cached) = self.cache.get(*text) {
+                results[i] = *cached;
+            } else {
+                uncached.push((i, text.to_string()));
+            }
+        }
+
+        if uncached.is_empty() {
+            return Ok(results);
+        }
+
+        for (idx, text) in &uncached {
+            if let Ok(emb) = self.embed_impl(text).await {
+                results[*idx] = emb;
+            }
+        }
+
+        Ok(results)
+    }
+
+    fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
+        cosine_similarity_768(a, b)
+    }
+
+    fn cache_size(&self) -> usize {
+        self.cache.len()
+    }
+
+    fn clear_cache(&self) {
+        self.cache.clear();
+    }
+}
+
+// ============================================================================
+//  Existing EmbeddingService impl + trait impl
+// ============================================================================
 
 /// Async trait implementation for `crate::llm::EmbeddingService`.
 #[async_trait::async_trait]

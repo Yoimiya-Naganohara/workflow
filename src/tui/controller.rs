@@ -64,7 +64,7 @@ pub fn get_or_create_provider_client(state: &mut AppState, provider_id: &str) ->
 
     // Custom provider without API key (no-auth custom)
     if is_custom_provider(provider_id) && !state.api_keys.contains_key(&env_key) {
-        let client = Arc::new(LlmProvider::from_key("", provider.api.as_deref(), "openai")?);
+        let client = Arc::new(LlmProvider::from_protocol("", provider.api.as_deref(), crate::llm::ProviderProtocol::OpenAiCompatible)?);
         state.provider_clients.insert(provider_id.to_string(), client.clone());
         return Ok(client);
     }

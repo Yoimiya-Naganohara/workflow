@@ -8876,7 +8876,6 @@ dependencies = [
  "rayon",
  "reqwest 0.13.4",
  "rig",
- "rig-core",
  "serde",
  "serde_json",
  "smallvec",

@@ -180,23 +180,25 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
         .map(|(p, m)| {
             let needs_key = !state.configured_providers.iter().any(|id| id == &p.id)
                 && !crate::tui::controller::is_no_auth_provider(&p.id);
+            let badge = m.capability_badge();
+            let is_selected = state
+                .selected_models
+                .iter()
+                .any(|sm| sm.provider_id == p.id && sm.model_id == m.id);
             ListItem::new(Line::from(vec![
                 Span::styled(&p.name, Style::default().fg(Color::DarkGray)),
                 Span::raw(" / "),
                 Span::styled(&m.name, Style::default()),
+                Span::raw(" "),
+                Span::styled(badge, Style::default().fg(Color::DarkGray).italic()),
                 Span::raw("  "),
                 if needs_key {
                     Span::styled("⌁", Style::default().fg(Color::Yellow))
                 } else {
                     Span::raw("")
                 },
-                Span::raw("  "),
-                if state
-                    .selected_models
-                    .iter()
-                    .any(|sm| sm.provider_id == p.id && sm.model_id == m.id)
-                {
-                    Span::styled("✓", Style::default().fg(Color::Green))
+                if is_selected {
+                    Span::styled(" ✓", Style::default().fg(Color::Green))
                 } else {
                     Span::raw("")
                 },

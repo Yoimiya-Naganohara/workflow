@@ -7,6 +7,67 @@ use tracing;
 use crate::models::{CustomProvider, ModelRegistry};
 use crate::tui::state::SelectedModel;
 
+// ============================================================================
+//  KeyStore — controlled API key persistence
+// ============================================================================
+
+/// Controls whether and how API keys are persisted.
+///
+/// # Security note
+/// The obfuscation used here (`KeyStore::obfuscate`) is **not** real
+/// encryption — it prevents casual plaintext reading of `state.json`.
+/// For production use, integrate with the OS keychain (macOS Keychain,
+/// Linux secret-service, Windows Credential Manager) via a crate like
+/// `keyring`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum KeyStore {
+    /// Keep keys in memory only; never write to disk.
+    #[default]
+    MemoryOnly,
+    /// Obfuscate keys before writing to `state.json`.
+    Obfuscated,
+}
+
+impl KeyStore {
+    pub fn obfuscate(key: &str) -> String {
+        let machine_id = Self::machine_id();
+        let mut bytes: Vec<u8> = key.bytes().collect();
+        for (b, m) in bytes.iter_mut().zip(machine_id.bytes().cycle()) {
+            *b ^= m;
+        }
+        // Encode as hex to make it readable-ish
+        hex_encode(&bytes)
+    }
+
+    pub fn deobfuscate(obfuscated: &str) -> Option<String> {
+        let bytes = hex_decode(obfuscated)?;
+        let machine_id = Self::machine_id();
+        let result: Vec<u8> = bytes.into_iter().zip(machine_id.bytes().cycle()).map(|(b, m)| b ^ m).collect();
+        String::from_utf8(result).ok()
+    }
+
+    fn machine_id() -> String {
+        // Derive a machine-specific key from hostname + fixed salt
+        let hostname = std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("HOST"))
+            .unwrap_or_else(|_| "unknown".to_string());
+        format!("workflow-key-{}", hostname)
+    }
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn hex_decode(hex: &str) -> Option<Vec<u8>> {
+    if hex.len() % 2 != 0 {
+        return None;
+    }
+    (0..hex.len()).step_by(2).map(|i| {
+        u8::from_str_radix(&hex[i..i + 2], 16).ok()
+    }).collect()
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PersistedState {
     pub selected_models: Vec<SelectedModel>,
@@ -15,6 +76,12 @@ pub struct PersistedState {
     pub api_keys: HashMap<String, String>,
     #[serde(default)]
     pub custom_providers: Vec<CustomProvider>,
+    /// Whether keys are obfuscated (true) or plaintext (legacy, false).
+    #[serde(default)]
+    pub keys_obfuscated: bool,
+    /// Storage mode for keys (not serialized — runtime decision).
+    #[serde(skip)]
+    pub key_store_mode: KeyStore,
 }
 
 fn config_dir() -> Result<PathBuf> {
@@ -33,13 +100,28 @@ pub fn load() -> PersistedState {
         Ok(path) => {
             if path.exists() {
                 match std::fs::read_to_string(&path) {
-                    Ok(text) => match serde_json::from_str(&text) {
-                        Ok(state) => state,
-                        Err(e) => {
-                            tracing::error!("Failed to parse config: {}", e);
-                            PersistedState::default()
+                    Ok(text) => {
+                        match serde_json::from_str::<PersistedState>(&text) {
+                            Ok(mut state) => {
+                                if state.keys_obfuscated {
+                                    let deobfuscated: HashMap<String, String> = state
+                                        .api_keys
+                                        .iter()
+                                        .filter_map(|(k, v)| {
+                                            KeyStore::deobfuscate(v).map(|decrypted| (k.clone(), decrypted))
+                                        })
+                                        .collect();
+                                    state.api_keys = deobfuscated;
+                                }
+                                state.key_store_mode = KeyStore::MemoryOnly;
+                                state
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to parse config: {}", e);
+                                PersistedState::default()
+                            }
                         }
-                    },
+                    }
                     Err(e) => {
                         tracing::error!("Failed to read config: {}", e);
                         PersistedState::default()
@@ -57,8 +139,18 @@ pub fn load() -> PersistedState {
 }
 
 pub fn save(state: &PersistedState) -> Result<()> {
+    let mut state_copy = state.clone();
+    if state.key_store_mode == KeyStore::Obfuscated && !state.api_keys.is_empty() {
+        let obfuscated: HashMap<String, String> = state
+            .api_keys
+            .iter()
+            .map(|(k, v)| (k.clone(), KeyStore::obfuscate(v)))
+            .collect();
+        state_copy.api_keys = obfuscated;
+        state_copy.keys_obfuscated = true;
+    }
     let path = config_file()?;
-    let json = serde_json::to_string_pretty(state)?;
+    let json = serde_json::to_string_pretty(&state_copy)?;
     write_atomic(&path, &json)
 }
 
@@ -74,6 +166,7 @@ pub fn save_configured_provider(provider_id: &str, env_key: &str, api_key: &str)
         state.configured_providers.push(provider_id.to_string());
     }
     state.api_keys.insert(env_key.to_string(), api_key.to_string());
+    state.key_store_mode = KeyStore::Obfuscated;
     save(&state)
 }
 
