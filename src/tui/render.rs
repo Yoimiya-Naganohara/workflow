@@ -9,11 +9,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Paragraph, Wrap},
+    widgets::{Block, Paragraph, Wrap},
 };
 
 use super::Tui;
-use super::state::{AppState, Focus, MessageRole};
+use super::state::{AppState, Focus};
 use super::style;
 use crate::tui::chat_lines::{build_chat_lines, char_idx_to_byte_idx};
 use crate::tui::dialogs;
@@ -132,18 +132,7 @@ impl Tui {
             .split(area);
 
         // ── Chat messages ──
-        let msg_count = state.messages.len();
-        let chat_title = if msg_count > 0 {
-            let user_msgs = state
-                .messages
-                .iter()
-                .filter(|m| matches!(m.role, MessageRole::User))
-                .count();
-            format!("Chat ({} msgs, {} user)", msg_count, user_msgs)
-        } else {
-            "Chat".to_string()
-        };
-        let chat_block = style::panel(&chat_title);
+        let chat_block = Block::default();
         let inner = chat_block.inner(chunks[0]);
         f.render_widget(chat_block, chunks[0]);
         f.render_widget(
@@ -153,14 +142,7 @@ impl Tui {
 
         // ── Input box ──
         let is_focused = state.focus == Focus::Input;
-        let char_count = state.input.chars().count();
-        let est_tokens = char_count / 4 + 1;
-        let input_title = if char_count > 0 {
-            format!("Input ({} ch / ~{} tok)", char_count, est_tokens)
-        } else {
-            "Input".to_string()
-        };
-        let input_block = style::input_box(&input_title, is_focused);
+        let input_block = style::input_box(is_focused);
         let input_style = if is_focused {
             style::value_style()
         } else {

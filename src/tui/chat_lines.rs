@@ -1,6 +1,8 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Tag, TagEnd};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::{
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+};
 
 use super::state::{AppState, MessageRole, MessageStatus};
 
@@ -10,65 +12,28 @@ pub(crate) fn build_chat_lines(state: &AppState, width: usize) -> Vec<Line<'stat
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     for message in &state.messages {
+        // Skip system-information messages (welcome, status notices, etc.).
+        if matches!(message.role, MessageRole::System) {
+            continue;
+        }
+
         let is_tool_call = matches!(
             message.role,
             MessageRole::Decision if message.content.starts_with('\u{1f527}')
         );
 
         if is_tool_call {
-            let first_newline = message.content.find('\n').unwrap_or(message.content.len());
-            let header_clean = message.content[..first_newline]
-                .trim_start_matches('\u{1f527}')
-                .trim()
-                .to_string();
-            lines.push(Line::from(vec![Span::styled(
-                header_clean,
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-            )]));
-            if first_newline < message.content.len() {
-                for raw_line in message.content[first_newline..].lines() {
-                    let trimmed = raw_line.trim();
-                    if !trimmed.is_empty() && trimmed != "```json" && trimmed != "```" {
-                        lines.push(Line::from(vec![
-                            Span::styled("    ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(trimmed.to_string(), Style::default().fg(Color::Cyan)),
-                        ]));
-                    }
-                }
-            }
-            lines.push(Line::from(String::new()));
+            tool_call_lines(&mut lines, message);
             continue;
         }
 
-        // ── Header (status + timestamp, no role label) ──
-        let state_indicator = match message.status {
-            MessageStatus::Thinking => Span::styled(
-                "  \u{25cc}",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK),
-            ),
-            MessageStatus::Streaming => Span::styled(
-                "  \u{25c9}",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::SLOW_BLINK),
-            ),
-            MessageStatus::Completed => Span::styled("  \u{2713}", Style::default().fg(Color::Green)),
-            MessageStatus::Error => Span::styled("  \u{2717}", Style::default().fg(Color::Red)),
-        };
-
-        let ts = Span::styled(
-            format!("[{}] ", message.timestamp),
-            Style::default().fg(Color::DarkGray),
-        );
-
-        lines.push(Line::from(vec![
-            state_indicator,
-            ts,
-        ]));
+        message_header(&mut lines, message);
 
         if message.content.is_empty() && matches!(message.status, MessageStatus::Thinking) {
             lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    "thinking\u{2026}  ",
+                    "thinking\u{2026}",
                     Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
                 ),
             ]));
@@ -77,40 +42,18 @@ pub(crate) fn build_chat_lines(state: &AppState, width: usize) -> Vec<Line<'stat
         }
 
         // ── Content ──
+        let is_user = matches!(message.role, MessageRole::User);
         let content_lines = render_markdown(&message.content, body_width);
-        for (i, cl) in content_lines.into_iter().enumerate() {
-            if i == 0 {
-                // First content line: flush left
-                lines.push(cl);
+        for cl in content_lines {
+            if is_user {
+                // Add subtle background for user messages
+                let styled_spans: Vec<Span> = cl.spans.into_iter().map(|s| {
+                    Span::styled(s.content, s.style.bg(Color::Rgb(20, 40, 55)))
+                }).collect();
+                lines.push(Line::from(styled_spans));
             } else {
                 lines.push(cl);
             }
-        }
-
-        // Streaming cursor: blinking block at end of streaming messages
-        if matches!(message.status, MessageStatus::Streaming) && !message.content.is_empty() {
-            if let Some(last) = lines.last_mut() {
-                last.spans.push(Span::styled(
-                    " \u{2588}",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::SLOW_BLINK),
-                ));
-            }
-        }
-
-        // ── Separator between messages ──
-        let sep_char = match message.role {
-            MessageRole::System => "\u{2500}",
-            MessageRole::User => "\u{2504}",
-            MessageRole::Agent => "\u{2504}",
-            MessageRole::Decision => "\u{2504}",
-        };
-        let sep_style = Style::default().fg(Color::DarkGray);
-        if content_width >= 4 {
-            let sep_count = content_width.saturating_sub(2);
-            let sep_line = format!("  {}", sep_char.repeat(sep_count));
-            lines.push(Line::from(Span::styled(sep_line, sep_style)));
         }
 
         lines.push(Line::from(String::new()));
@@ -121,6 +64,59 @@ pub(crate) fn build_chat_lines(state: &AppState, width: usize) -> Vec<Line<'stat
     }
 
     lines
+}
+
+/// Render a tool-call decision message in compact form.
+fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::ChatMessage) {
+    let first_newline = message.content.find('\n').unwrap_or(message.content.len());
+    let header_clean = message.content[..first_newline]
+        .trim_start_matches('\u{1f527}')
+        .trim()
+        .to_string();
+    lines.push(Line::from(vec![Span::styled(
+        header_clean,
+        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+    )]));
+    if first_newline < message.content.len() {
+        for raw_line in message.content[first_newline..].lines() {
+            let trimmed = raw_line.trim();
+            if !trimmed.is_empty() && trimmed != "```json" && trimmed != "```" {
+                lines.push(Line::from(vec![
+                    Span::styled("    ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(trimmed.to_string(), Style::default().fg(Color::Cyan)),
+                ]));
+            }
+        }
+    }
+    lines.push(Line::from(String::new()));
+}
+
+/// Render a message header: status indicator only.
+/// Adds a subtle background tint for user messages.
+fn message_header(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::ChatMessage) {
+    let is_user = matches!(message.role, MessageRole::User);
+    let bg = if is_user { Color::Rgb(20, 40, 55) } else { Color::Reset };
+
+    let state_indicator = match message.status {
+        MessageStatus::Thinking => Span::styled(
+            " \u{25cc}",
+            Style::default().fg(Color::Yellow).bg(bg).add_modifier(Modifier::SLOW_BLINK),
+        ),
+        MessageStatus::Streaming => Span::styled(
+            " \u{25c9}",
+            Style::default().fg(Color::Cyan).bg(bg).add_modifier(Modifier::SLOW_BLINK),
+        ),
+        MessageStatus::Completed => Span::styled(
+            " \u{2713}",
+            Style::default().fg(Color::Green).bg(bg),
+        ),
+        MessageStatus::Error => Span::styled(
+            " \u{2717}",
+            Style::default().fg(Color::Red).bg(bg),
+        ),
+    };
+
+    lines.push(Line::from(vec![state_indicator]));
 }
 
 fn render_markdown(text: &str, body_width: usize) -> Vec<Line<'static>> {

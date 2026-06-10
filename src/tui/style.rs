@@ -4,11 +4,11 @@
 //! used across dialogs, sidebar, chat, and status bar.
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::Span,
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
 // ── Color Palette ──
@@ -46,16 +46,12 @@ pub const SCROLL_BAR_BG: Color = Color::Rgb(25, 35, 50);
 
 /// Style for panel / dialog titles.
 pub fn title_style() -> Style {
-    Style::default()
-        .fg(TITLE)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(TITLE).add_modifier(Modifier::BOLD)
 }
 
 /// Style for a highlighted (selected) list item foreground.
 pub fn highlight_fg() -> Style {
-    Style::default()
-        .fg(HIGHLIGHT_FG)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(HIGHLIGHT_FG).add_modifier(Modifier::BOLD)
 }
 
 /// Style for a highlighted (selected) list item background.
@@ -90,23 +86,16 @@ pub fn panel<'a>(title: &str) -> Block<'a> {
 
 /// A search / input box with an optional label, styled with unified colors.
 /// `active` controls whether the border is cyan (focused) or dark gray.
-pub fn input_box<'a>(label: &str, active: bool) -> Block<'a> {
+pub fn input_box<'a>(active: bool) -> Block<'a> {
     let border_color = if active { ACTIVE } else { INACTIVE };
     Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
-        .title(Span::styled(
-            format!(" {} ", label),
-            if active { title_style() } else { hint_style() },
-        ))
 }
 
 /// Render a hint/instruction line at the bottom of a dialog or panel.
 pub fn render_hint(f: &mut Frame, area: Rect, text: &str) {
-    f.render_widget(
-        Paragraph::new(Span::styled(text, hint_style())),
-        area,
-    );
+    f.render_widget(Paragraph::new(Span::styled(text, hint_style())), area);
 }
 
 /// Render a thin horizontal separator line.
@@ -114,10 +103,7 @@ pub fn render_separator(f: &mut Frame, area: Rect) {
     let width = area.width as usize;
     if width > 0 {
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "─".repeat(width),
-                Style::default().fg(INACTIVE),
-            )).wrap(Wrap { trim: false }),
+            Paragraph::new(Span::styled("─".repeat(width), Style::default().fg(INACTIVE))).wrap(Wrap { trim: false }),
             area,
         );
     }

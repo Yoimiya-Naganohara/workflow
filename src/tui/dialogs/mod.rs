@@ -59,7 +59,7 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
     f.render_widget(
         Paragraph::new(state.provider_search_query.as_str())
             .style(style::value_style())
-            .block(style::input_box("Search", true)),
+            .block(style::input_box(true)),
         chunks[0],
     );
     let prefix_width =
@@ -147,10 +147,7 @@ pub(crate) fn render_key_dialog(f: &mut Frame, area: Rect, state: &AppState) {
     } else {
         style::hint_style()
     })
-    .block(style::input_box(
-        "API Key",
-        has_input,
-    ));
+    .block(style::input_box(has_input));
     f.render_widget(input_display, chunks[0]);
 
     // Cursor
@@ -203,7 +200,7 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(
         Paragraph::new(state.model_picker_search_query.as_str())
             .style(style::value_style())
-            .block(style::input_box("Search", true)),
+            .block(style::input_box(true)),
         chunks[0],
     );
     let prefix_width =
@@ -329,12 +326,11 @@ pub(crate) fn render_custom_provider_dialog(f: &mut Frame, area: Rect, state: &A
     let has_input = !state.custom_input.is_empty();
 
     let input_display = if !has_input {
-        Paragraph::new(Span::styled(summary_text, style::hint_style()))
-            .block(style::input_box("Input", has_previous))
+        Paragraph::new(Span::styled(summary_text, style::hint_style())).block(style::input_box(has_previous))
     } else {
         Paragraph::new(state.custom_input.as_str())
             .style(style::value_style())
-            .block(style::input_box(steps[step], true))
+            .block(style::input_box(true))
     };
     f.render_widget(input_display, chunks[1]);
 

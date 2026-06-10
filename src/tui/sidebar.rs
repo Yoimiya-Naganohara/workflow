@@ -15,9 +15,7 @@ use super::style;
 fn section_label(text: &str) -> Span<'static> {
     Span::styled(
         format!(" {} ", text),
-        Style::default()
-            .fg(style::ACTIVE)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(style::ACTIVE).add_modifier(Modifier::BOLD),
     )
 }
 
@@ -75,10 +73,7 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
         ));
         lines.push(kv(
             "agents",
-            Span::styled(
-                format!("{} spawned", state.agents.len()),
-                style::value_style(),
-            ),
+            Span::styled(format!("{} spawned", state.agents.len()), style::value_style()),
         ));
     } else {
         lines.push(kv("id", Span::styled("—", style::hint_style())));
@@ -92,7 +87,11 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
         "config",
         Span::styled(
             format!("{} providers", configured),
-            Style::default().fg(if configured > 0 { style::SUCCESS } else { style::INACTIVE }),
+            Style::default().fg(if configured > 0 {
+                style::SUCCESS
+            } else {
+                style::INACTIVE
+            }),
         ),
     ));
     lines.push(kv(
@@ -100,9 +99,7 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
         if state.active_chat_requests > 0 {
             Span::styled(
                 "active",
-                Style::default()
-                    .fg(style::WARNING)
-                    .add_modifier(Modifier::SLOW_BLINK),
+                Style::default().fg(style::WARNING).add_modifier(Modifier::SLOW_BLINK),
             )
         } else {
             Span::styled("idle", style::hint_style())
@@ -146,8 +143,5 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
         ),
     ));
 
-    f.render_widget(
-        Paragraph::new(Text::from(lines)),
-        inner,
-    );
+    f.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
