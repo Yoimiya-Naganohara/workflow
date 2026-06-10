@@ -37,6 +37,10 @@ pub const WARNING: Color = Color::Yellow;
 pub const ERROR: Color = Color::Red;
 /// Hint / instruction text color.
 pub const HINT: Color = Color::DarkGray;
+/// Subtle background for code blocks.
+pub const CODE_BG: Color = Color::Rgb(18, 22, 30);
+/// Scroll indicator bar background.
+pub const SCROLL_BAR_BG: Color = Color::Rgb(25, 35, 50);
 
 // ── Style Helpers ──
 

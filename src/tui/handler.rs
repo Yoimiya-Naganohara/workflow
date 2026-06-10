@@ -76,6 +76,7 @@ impl Tui {
             }
             KeyCode::Home if state.focus == Focus::Chat => {
                 state.chat_scroll = 0; // gg → top
+                state.auto_scroll = false;
             }
             KeyCode::End if state.focus == Focus::Chat => {
                 state.chat_scroll = usize::MAX / 2; // G → bottom

@@ -10,14 +10,15 @@ pub mod style;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind},
+    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind, MouseEventKind},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use futures::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend, text::Line};
 use std::io;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 pub use self::state::AppState;
@@ -59,81 +60,90 @@ impl Tui {
             crate::tui::controller::load_initial_state(&mut state).await;
         }
 
-        let mut last_tick = Instant::now();
-        let tick_rate = Duration::from_millis(100);
+        let mut event_stream = EventStream::new();
+        let mut interval = tokio::time::interval(Duration::from_millis(50));
 
         loop {
-            self.draw().await?;
+            tokio::select! {
+                maybe_event = event_stream.next() => {
+                    match maybe_event {
+                        Some(Ok(event)) => {
+                            match event {
+                                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                                    let mut state = self.state.write().await;
 
-            if event::poll(tick_rate.saturating_sub(last_tick.elapsed()))? {
-                match event::read()? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        let mut state = self.state.write().await;
-
-                        // Global keys
-                        if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
-                            && key.code == KeyCode::Char('c')
-                        {
-                            return Ok(());
-                        }
-
-                        // Panel-specific keys
-                        match state.panel {
-                            Panel::Chat => {
-                                if !self.handle_chat_keys(&mut state, key) {
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    }
-                    Event::Mouse(mouse) => {
-                        let mut state = self.state.write().await;
-                        match mouse.kind {
-                            MouseEventKind::ScrollDown => {
-                                if state.show_custom_dialog {
-                                    // no scrolling in custom dialog (simple form)
-                                } else if state.show_model_picker {
-                                    let results = state.models.search_configured_models(&state.model_picker_search_query, &state.configured_providers);
-                                    if !results.is_empty() {
-                                        state.selected_model_picker_idx =
-                                            (state.selected_model_picker_idx + 1).min(results.len() - 1);
+                                    // Global keys
+                                    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                                        && key.code == KeyCode::Char('c')
+                                    {
+                                        return Ok(());
                                     }
-                                } else if state.show_provider_dialog {
-                                    let providers = crate::models::filter_providers(
-                                        state.models.providers(),
-                                        &state.provider_search_query,
-                                    );
-                                    if !providers.is_empty() {
-                                        state.selected_provider_idx =
-                                            (state.selected_provider_idx + 1).min(providers.len() - 1);
+
+                                    // Panel-specific keys
+                                    match state.panel {
+                                        Panel::Chat => {
+                                            if !self.handle_chat_keys(&mut state, key) {
+                                                return Ok(());
+                                            }
+                                        }
                                     }
-                                } else {
-                                    state.chat_scroll = state.chat_scroll.saturating_add(1);
                                 }
-                            }
-                            MouseEventKind::ScrollUp => {
-                                if state.show_custom_dialog {
-                                    // no scrolling in custom dialog (simple form)
-                                } else if state.show_model_picker {
-                                    state.selected_model_picker_idx = state.selected_model_picker_idx.saturating_sub(1);
-                                } else if state.show_provider_dialog {
-                                    state.selected_provider_idx = state.selected_provider_idx.saturating_sub(1);
-                                } else {
-                                    state.chat_scroll = state.chat_scroll.saturating_sub(1);
-                                    state.auto_scroll = false;
+                                Event::Mouse(mouse) => {
+                                    let mut state = self.state.write().await;
+                                    match mouse.kind {
+                                        MouseEventKind::ScrollDown => {
+                                            if state.show_custom_dialog {
+                                                // no scrolling in custom dialog (simple form)
+                                            } else if state.show_model_picker {
+                                                let results = state.models.search_configured_models(&state.model_picker_search_query, &state.configured_providers);
+                                                if !results.is_empty() {
+                                                    state.selected_model_picker_idx =
+                                                        (state.selected_model_picker_idx + 1).min(results.len() - 1);
+                                                }
+                                            } else if state.show_provider_dialog {
+                                                let providers = crate::models::filter_providers(
+                                                    state.models.providers(),
+                                                    &state.provider_search_query,
+                                                );
+                                                if !providers.is_empty() {
+                                                    state.selected_provider_idx =
+                                                        (state.selected_provider_idx + 1).min(providers.len() - 1);
+                                                }
+                                            } else {
+                                                state.chat_scroll = state.chat_scroll.saturating_add(1);
+                                            }
+                                        }
+                                        MouseEventKind::ScrollUp => {
+                                            if state.show_custom_dialog {
+                                                // no scrolling in custom dialog (simple form)
+                                            } else if state.show_model_picker {
+                                                state.selected_model_picker_idx = state.selected_model_picker_idx.saturating_sub(1);
+                                            } else if state.show_provider_dialog {
+                                                state.selected_provider_idx = state.selected_provider_idx.saturating_sub(1);
+                                            } else {
+                                                state.chat_scroll = state.chat_scroll.saturating_sub(1);
+                                                state.auto_scroll = false;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
                                 }
+                                _ => {}
                             }
-                            _ => {}
                         }
+                        Some(Err(e)) => {
+                            eprintln!("Event stream error: {}", e);
+                        }
+                        None => return Ok(()),
                     }
-                    _ => {}
+                }
+
+                _ = interval.tick() => {
+                    // Timer tick — draw below regardless of events.
                 }
             }
 
-            // Update tick
-            if last_tick.elapsed() >= tick_rate {
-                last_tick = Instant::now();
-            }
+            self.draw().await?;
         }
     }
 }

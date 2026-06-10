@@ -10,14 +10,10 @@ pub(crate) fn build_chat_lines(state: &AppState, width: usize) -> Vec<Line<'stat
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     for message in &state.messages {
-        let (label, color) = match message.role {
-            MessageRole::System => ("system", Color::DarkGray),
-            MessageRole::User => ("user", Color::Cyan),
-            MessageRole::Agent => ("agent", Color::Blue),
-            MessageRole::Decision => ("decision", Color::Green),
-        };
-
-        let is_tool_call = message.role == MessageRole::Decision && message.content.starts_with('\u{1f527}');
+        let is_tool_call = matches!(
+            message.role,
+            MessageRole::Decision if message.content.starts_with('\u{1f527}')
+        );
 
         if is_tool_call {
             let first_newline = message.content.find('\n').unwrap_or(message.content.len());
@@ -44,33 +40,35 @@ pub(crate) fn build_chat_lines(state: &AppState, width: usize) -> Vec<Line<'stat
             continue;
         }
 
+        // ── Header (status + timestamp, no role label) ──
         let state_indicator = match message.status {
             MessageStatus::Thinking => Span::styled(
-                " \u{25cc} ",
+                "  \u{25cc}",
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK),
             ),
             MessageStatus::Streaming => Span::styled(
-                " \u{25c9} ",
+                "  \u{25c9}",
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::SLOW_BLINK),
             ),
-            MessageStatus::Completed => Span::styled(" \u{2713} ", Style::default().fg(Color::Green)),
-            MessageStatus::Error => Span::styled(" \u{2717} ", Style::default().fg(Color::Red)),
+            MessageStatus::Completed => Span::styled("  \u{2713}", Style::default().fg(Color::Green)),
+            MessageStatus::Error => Span::styled("  \u{2717}", Style::default().fg(Color::Red)),
         };
+
+        let ts = Span::styled(
+            format!("[{}] ", message.timestamp),
+            Style::default().fg(Color::DarkGray),
+        );
 
         lines.push(Line::from(vec![
             state_indicator,
-            Span::styled(
-                format!("[{}] ", message.timestamp),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(label, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            ts,
         ]));
 
         if message.content.is_empty() && matches!(message.status, MessageStatus::Thinking) {
             lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    "thinking\u{2026}",
+                    "thinking\u{2026}  ",
                     Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
                 ),
             ]));
@@ -78,8 +76,42 @@ pub(crate) fn build_chat_lines(state: &AppState, width: usize) -> Vec<Line<'stat
             continue;
         }
 
+        // ── Content ──
         let content_lines = render_markdown(&message.content, body_width);
-        lines.extend(content_lines);
+        for (i, cl) in content_lines.into_iter().enumerate() {
+            if i == 0 {
+                // First content line: flush left
+                lines.push(cl);
+            } else {
+                lines.push(cl);
+            }
+        }
+
+        // Streaming cursor: blinking block at end of streaming messages
+        if matches!(message.status, MessageStatus::Streaming) && !message.content.is_empty() {
+            if let Some(last) = lines.last_mut() {
+                last.spans.push(Span::styled(
+                    " \u{2588}",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::SLOW_BLINK),
+                ));
+            }
+        }
+
+        // ── Separator between messages ──
+        let sep_char = match message.role {
+            MessageRole::System => "\u{2500}",
+            MessageRole::User => "\u{2504}",
+            MessageRole::Agent => "\u{2504}",
+            MessageRole::Decision => "\u{2504}",
+        };
+        let sep_style = Style::default().fg(Color::DarkGray);
+        if content_width >= 4 {
+            let sep_count = content_width.saturating_sub(2);
+            let sep_line = format!("  {}", sep_char.repeat(sep_count));
+            lines.push(Line::from(Span::styled(sep_line, sep_style)));
+        }
 
         lines.push(Line::from(String::new()));
     }
@@ -119,6 +151,19 @@ fn render_markdown(text: &str, body_width: usize) -> Vec<Line<'static>> {
                 };
                 let code_lines = collect_code_lines(&mut events);
                 flush_code_block(&mut out, &lang, &code_lines);
+            }
+            Event::Start(Tag::HtmlBlock) => {
+                let html_lines = collect_html_block(&mut events);
+                if !html_lines.is_empty() {
+                    for line_text in &html_lines {
+                        wrap_spans(
+                            &mut out,
+                            &[Span::styled(line_text.clone(), Style::default().fg(Color::DarkGray))],
+                            body_width,
+                            "",
+                        );
+                    }
+                }
             }
             Event::Start(Tag::BlockQuote(_)) => {
                 let inner = collect_blockquote(&mut events, body_width);
@@ -292,6 +337,34 @@ where
             Some(Event::SoftBreak | Event::HardBreak) => {
                 lines.push(std::mem::take(&mut line));
             }
+            None => break,
+            _ => {}
+        }
+    }
+    lines
+}
+
+/// Collect all `Event::Html` content lines from an HTML block.
+fn collect_html_block<'a, I>(events: &mut I) -> Vec<String>
+where
+    I: Iterator<Item = Event<'a>>,
+{
+    let mut lines = Vec::new();
+    loop {
+        match events.next() {
+            Some(Event::Html(html)) => {
+                let clean = strip_html(&html);
+                if !clean.is_empty() {
+                    // Split multi-line HTML content into individual lines.
+                    for l in clean.lines() {
+                        let trimmed = l.trim();
+                        if !trimmed.is_empty() {
+                            lines.push(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+            Some(Event::End(TagEnd::HtmlBlock)) => break,
             None => break,
             _ => {}
         }

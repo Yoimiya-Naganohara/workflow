@@ -13,7 +13,7 @@ use ratatui::{
 };
 
 use super::Tui;
-use super::state::{AppState, Focus};
+use super::state::{AppState, Focus, MessageRole};
 use super::style;
 use crate::tui::chat_lines::{build_chat_lines, char_idx_to_byte_idx};
 use crate::tui::dialogs;
@@ -26,22 +26,10 @@ fn estimate_tokens(char_count: usize) -> usize {
 
 impl Tui {
     pub(crate) async fn draw(&mut self) -> Result<()> {
-        // Advance animation frame & auto-scroll (write lock).
+        // Advance animation frame (write lock).
         {
             let mut s = self.state.write().await;
             s.think_frame = s.think_frame.wrapping_add(1);
-
-            // Auto-scroll to bottom when streaming and user hasn't scrolled up.
-            if s.active_chat_requests > 0 && s.auto_scroll {
-                let term_h = self.terminal.size().ok().map_or(20, |ts| ts.height);
-                let input_lines = s.input.lines().count().clamp(1, 5) as u16;
-                let visible_height = (term_h.saturating_sub(input_lines + 5)).max(1) as usize;
-                let cache_len = self.chat_lines_cache.len();
-                let max_scroll = cache_len.saturating_sub(visible_height);
-                if s.chat_scroll < max_scroll {
-                    s.chat_scroll = max_scroll;
-                }
-            }
         }
 
         let state = self.state.read().await;
@@ -66,7 +54,15 @@ impl Tui {
 
         // Available lines for chat messages: total height - status bar(1) - input box(height + 2 borders) - chat borders(2)
         let visible_height = (term_size.height.saturating_sub(input_lines + 5)).max(1) as usize;
-        let chat_scroll = state.chat_scroll.min(self.chat_lines_cache.len().saturating_sub(1));
+
+        // Compute scroll: when auto-scroll is enabled, always pin to the actual bottom
+        // (whether streaming or idle).  The user can temporarily override by scrolling up,
+        // which sets auto_scroll=false.  Pressing End re-enables it.
+        let chat_scroll = if state.auto_scroll {
+            self.chat_lines_cache.len().saturating_sub(visible_height)
+        } else {
+            state.chat_scroll.min(self.chat_lines_cache.len().saturating_sub(1))
+        };
         let visible_lines: Vec<_> = self
             .chat_lines_cache
             .iter()
@@ -136,7 +132,18 @@ impl Tui {
             .split(area);
 
         // ── Chat messages ──
-        let chat_block = style::panel("Chat");
+        let msg_count = state.messages.len();
+        let chat_title = if msg_count > 0 {
+            let user_msgs = state
+                .messages
+                .iter()
+                .filter(|m| matches!(m.role, MessageRole::User))
+                .count();
+            format!("Chat ({} msgs, {} user)", msg_count, user_msgs)
+        } else {
+            "Chat".to_string()
+        };
+        let chat_block = style::panel(&chat_title);
         let inner = chat_block.inner(chunks[0]);
         f.render_widget(chat_block, chunks[0]);
         f.render_widget(
@@ -146,7 +153,14 @@ impl Tui {
 
         // ── Input box ──
         let is_focused = state.focus == Focus::Input;
-        let input_block = style::input_box("Input", is_focused);
+        let char_count = state.input.chars().count();
+        let est_tokens = char_count / 4 + 1;
+        let input_title = if char_count > 0 {
+            format!("Input ({} ch / ~{} tok)", char_count, est_tokens)
+        } else {
+            "Input".to_string()
+        };
+        let input_block = style::input_box(&input_title, is_focused);
         let input_style = if is_focused {
             style::value_style()
         } else {
@@ -159,15 +173,11 @@ impl Tui {
             Paragraph::new(state.input.as_str()).style(style::value_style())
         };
 
-        f.render_widget(
-            input_display.block(input_block).wrap(Wrap { trim: false }),
-            chunks[1],
-        );
+        f.render_widget(input_display.block(input_block).wrap(Wrap { trim: false }), chunks[1]);
 
         // ── Cursor ──
         if is_focused && !state.input.is_empty() {
-            let prefix_width =
-                crate::tui::chat_lines::display_width_up_to(&state.input, state.input_cursor);
+            let prefix_width = crate::tui::chat_lines::display_width_up_to(&state.input, state.input_cursor);
             let cursor_x = chunks[1].x + prefix_width as u16 + 1;
             // Place cursor on the correct visual line.
             let line_no = state.input[..char_idx_to_byte_idx(&state.input, state.input_cursor)]

@@ -551,10 +551,19 @@ pub fn submit_chat(state: &Arc<RwLock<AppState>>, input: &str, response_index: u
             s.tool_server.clone()
         };
         // ── Build conversation history from previous messages ──
+        // IMPORTANT: Exclude the current turn's messages (user input at response_index-1
+        // and empty agent response at response_index) to avoid sending the user
+        // message twice (once in history, once as the prompt) and to avoid sending
+        // an empty assistant message that confuses the LLM.
         let history = {
             let s = state_clone.read().await;
             let mut hist: Vec<(String, String)> = Vec::new();
-            for msg in &s.messages {
+            for (i, msg) in s.messages.iter().enumerate() {
+                // Skip the current turn's user message (response_index - 1)
+                // and the empty agent response (response_index).
+                if i >= response_index.saturating_sub(1) {
+                    break;
+                }
                 match msg.role {
                     crate::tui::state::MessageRole::User => {
                         hist.push(("user".to_string(), msg.content.clone()));
