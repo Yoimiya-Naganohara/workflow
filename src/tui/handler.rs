@@ -347,14 +347,6 @@ impl Tui {
                 state.model_picker_search_cursor = 0;
                 state.selected_model_picker_idx = 0;
             }
-            KeyCode::Char('a') if !state.models.providers().is_empty() => {
-                state.show_model_picker = false;
-                state.show_provider_dialog = true;
-                state.selected_provider_idx = 0;
-                state.provider_search_query.clear();
-                state.provider_search_cursor = 0;
-                state.return_to_model_picker = true;
-            }
             KeyCode::Down if !results.is_empty() => {
                 state.selected_model_picker_idx = (state.selected_model_picker_idx + 1).min(results.len() - 1);
             }
