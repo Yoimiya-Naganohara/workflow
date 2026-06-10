@@ -342,7 +342,10 @@ impl Tui {
     }
 
     fn handle_model_picker(&self, state: &mut AppState, code: KeyCode) -> bool {
-        let results = state.models.search_models(&state.model_picker_search_query);
+        // Only show models from configured providers.
+        let results = state
+            .models
+            .search_configured_models(&state.model_picker_search_query, &state.configured_providers);
         match code {
             KeyCode::Esc => {
                 state.show_model_picker = false;
@@ -394,18 +397,6 @@ impl Tui {
                     let provider_name = provider.name.clone();
                     let model_name = model.name.clone();
 
-                    if !state.configured_providers.contains(&provider_id)
-                        && !controller::is_no_auth_provider(&provider_id)
-                    {
-                        state.show_model_picker = false;
-                        state.show_key_dialog = true;
-                        state.key_provider_id = Some(provider_id);
-                        state.key_input.clear();
-                        state.key_cursor = 0;
-                        state.return_to_model_picker = true;
-                        return true;
-                    }
-
                     if let Some(pos) = state
                         .selected_models
                         .iter()
@@ -448,7 +439,12 @@ impl Tui {
     }
 
     fn handle_provider_dialog(&self, state: &mut AppState, code: KeyCode) -> bool {
-        let providers = filter_providers(state.models.providers(), &state.provider_search_query);
+        // Build list: filtered providers + optional "Add Custom" entry at the end.
+        let filtered = filter_providers(state.models.providers(), &state.provider_search_query);
+        let custom_label = "➕ Add Custom Provider";
+        let show_custom = self.matches_provider_search(&state.provider_search_query, custom_label);
+        let total = filtered.len() + if show_custom { 1 } else { 0 };
+
         match code {
             KeyCode::Esc => {
                 state.show_provider_dialog = false;
@@ -456,8 +452,8 @@ impl Tui {
                 state.provider_search_cursor = 0;
                 state.selected_provider_idx = 0;
             }
-            KeyCode::Down if !providers.is_empty() => {
-                state.selected_provider_idx = (state.selected_provider_idx + 1).min(providers.len() - 1);
+            KeyCode::Down if total > 0 => {
+                state.selected_provider_idx = (state.selected_provider_idx + 1).min(total - 1);
             }
             KeyCode::Up => {
                 state.selected_provider_idx = state.selected_provider_idx.saturating_sub(1);
@@ -485,7 +481,28 @@ impl Tui {
                 }
             }
             KeyCode::Enter => {
-                if let Some(provider) = providers.get(state.selected_provider_idx) {
+                if filtered.is_empty() && !show_custom {
+                    return true;
+                }
+                // Check if the "Add Custom" entry is selected (last position).
+                let is_custom_selected = show_custom && state.selected_provider_idx == filtered.len();
+                if is_custom_selected {
+                    // Open the custom provider wizard.
+                    state.show_provider_dialog = false;
+                    state.show_custom_dialog = true;
+                    state.custom_step = 0;
+                    state.custom_name.clear();
+                    state.custom_url.clear();
+                    state.custom_key.clear();
+                    state.custom_models.clear();
+                    state.custom_input.clear();
+                    state.custom_cursor = 0;
+                    state.provider_search_query.clear();
+                    state.provider_search_cursor = 0;
+                    state.selected_provider_idx = 0;
+                    return true;
+                }
+                if let Some(provider) = filtered.get(state.selected_provider_idx) {
                     let provider_id = provider.id.clone();
                     if controller::is_no_auth_provider(&provider_id) {
                         state.show_provider_dialog = false;
@@ -515,6 +532,15 @@ impl Tui {
             _ => {}
         }
         true
+    }
+
+    /// Check if a provider search query matches a label (for custom entry filtering).
+    fn matches_provider_search(&self, query: &str, label: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+        let q = query.to_lowercase();
+        label.to_lowercase().contains(&q) || q.contains("custom") || q.contains("add")
     }
 
     // ── Input submit ──
@@ -552,13 +578,24 @@ impl Tui {
         }
 
         if trimmed == "/models" || trimmed == "/model" {
+            if state.configured_providers.is_empty() {
+                state.messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "No providers configured. Use `/connect` first.".to_string(),
+                    timestamp: now.clone(),
+                    status: MessageStatus::Completed,
+                });
+                state.input.clear();
+                state.input_cursor = 0;
+                return true;
+            }
             state.show_model_picker = true;
             state.selected_model_picker_idx = 0;
             state.model_picker_search_query.clear();
             state.model_picker_search_cursor = 0;
             state.messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: "Select a model to use".to_string(),
+                content: "Select models to add to your pool".to_string(),
                 timestamp: now.clone(),
                 status: MessageStatus::Completed,
             });
@@ -586,14 +623,14 @@ impl Tui {
 
         if trimmed == "/help" || trimmed == "/?" {
             let help_text = [
-                "/connect        - Configure a provider with API key",
-                "/models         - Select a model for chat",
+                "/connect        - Configure a provider (API key + custom)",
+                "/models         - Manage model pool (add/remove models)",
                 "/custom         - Add/list/remove custom providers",
                 "/clear          - Clear conversation",
                 "/sh <cmd>       - Run a shell command",
                 "/help           - Show this help",
                 "",
-                "Ctrl+P          - Open model picker",
+                "Ctrl+P          - Open model pool picker",
                 "Ctrl+X          - Stop current response",
                 "Ctrl+C          - Quit",
             ]

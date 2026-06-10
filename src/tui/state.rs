@@ -165,7 +165,7 @@ impl Default for AppState {
             messages: vec![
                 ChatMessage {
                     role: MessageRole::System,
-                    content: "Workflow Agent — connected. Describe your goal and I'll help. Use `/connect` to set up a provider, then start chatting.".to_string(),
+                    content: "Workflow Agent — connected. Use `/connect` to configure a provider, then `/models` to add models to your pool.".to_string(),
                     timestamp: "00:00:00".to_string(),
                     status: MessageStatus::Completed,
                 },
@@ -226,8 +226,8 @@ impl Default for AppState {
 }
 
 pub const COMMANDS: &[(&str, &str)] = &[
-    ("/connect", "Configure a provider"),
-    ("/models", "Select a model for chat"),
+    ("/connect", "Configure a provider (API key + custom)"),
+    ("/models", "Manage model pool (add/remove models)"),
     ("/clear", "Clear conversation"),
     ("/sh", "Run a shell command"),
     ("/pool", "Manage experience pool (flush/clear/stats/export/import)"),

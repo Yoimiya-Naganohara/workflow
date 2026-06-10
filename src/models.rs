@@ -96,11 +96,23 @@ impl Model {
     pub fn capability_badge(&self) -> String {
         let caps = self.capabilities();
         let mut parts = Vec::new();
-        if caps.supports_tool_call { parts.push("T"); }
-        if caps.supports_reasoning { parts.push("R"); }
-        if caps.supports_vision { parts.push("V"); }
-        if caps.supports_attachment { parts.push("A"); }
-        let badges = if parts.is_empty() { "-".to_string() } else { parts.join(" ") };
+        if caps.supports_tool_call {
+            parts.push("T");
+        }
+        if caps.supports_reasoning {
+            parts.push("R");
+        }
+        if caps.supports_vision {
+            parts.push("V");
+        }
+        if caps.supports_attachment {
+            parts.push("A");
+        }
+        let badges = if parts.is_empty() {
+            "-".to_string()
+        } else {
+            parts.join(" ")
+        };
 
         let ctx = if caps.max_context >= 1024 {
             format!("{}K", caps.max_context / 1024)
@@ -156,7 +168,9 @@ pub trait ProviderSource: Send + Sync {
     /// Fetch providers from this source.
     async fn fetch(&self) -> Result<Vec<Provider>>;
     /// Priority — higher values override lower when merging.
-    fn priority(&self) -> u8 { 0 }
+    fn priority(&self) -> u8 {
+        0
+    }
 }
 
 // ============================================================================
@@ -210,7 +224,9 @@ impl ProviderSource for ModelsDevSource {
         Ok(providers)
     }
 
-    fn priority(&self) -> u8 { 10 }
+    fn priority(&self) -> u8 {
+        10
+    }
 }
 
 // ============================================================================
@@ -258,7 +274,9 @@ impl ProviderSource for LocalFileSource {
         Ok(providers)
     }
 
-    fn priority(&self) -> u8 { 5 }
+    fn priority(&self) -> u8 {
+        5
+    }
 }
 
 // ============================================================================
@@ -353,7 +371,11 @@ impl ProviderRegistry {
 
     pub fn search_models(&self, query: &str) -> Vec<(&Provider, &Model)> {
         if query.is_empty() {
-            return self.providers.iter().flat_map(|p| p.models.values().map(move |m| (p, m))).collect();
+            return self
+                .providers
+                .iter()
+                .flat_map(|p| p.models.values().map(move |m| (p, m)))
+                .collect();
         }
         let query_lower = query.to_lowercase();
         self.providers
@@ -476,7 +498,11 @@ impl ModelRegistry {
 
     pub fn search_models(&self, query: &str) -> Vec<(&Provider, &Model)> {
         if query.is_empty() {
-            return self.providers.iter().flat_map(|p| p.models.values().map(move |m| (p, m))).collect();
+            return self
+                .providers
+                .iter()
+                .flat_map(|p| p.models.values().map(move |m| (p, m)))
+                .collect();
         }
         let query_lower = query.to_lowercase();
         self.providers
@@ -506,6 +532,18 @@ impl ModelRegistry {
             .collect()
     }
 
+    /// Search models, filtering to only configured providers.
+    pub fn search_configured_models<'a>(
+        &'a self,
+        query: &str,
+        configured_ids: &[String],
+    ) -> Vec<(&'a Provider, &'a Model)> {
+        let all = self.search_models(query);
+        all.into_iter()
+            .filter(|(p, _)| configured_ids.iter().any(|id| id == &p.id))
+            .collect()
+    }
+
     // ── Custom provider support ──
 
     pub fn add_custom_provider(&mut self, custom: &CustomProvider) {
@@ -530,42 +568,57 @@ impl ModelRegistry {
                         output: vec!["text".to_string()],
                     },
                     open_weights: false,
-                    limit: ModelLimit { context: 128000, output: 4096, input: None },
+                    limit: ModelLimit {
+                        context: 128000,
+                        output: 4096,
+                        input: None,
+                    },
                     cost: default_cost(),
                     status: None,
                 },
             );
             m
         } else {
-            custom.models.iter().map(|m_id| {
-                let model = Model {
-                    id: m_id.clone(),
-                    name: m_id.clone(),
-                    family: None,
-                    attachment: false,
-                    reasoning: false,
-                    tool_call: true,
-                    temperature: true,
-                    knowledge: None,
-                    release_date: None,
-                    last_updated: None,
-                    modalities: Modalities {
-                        input: vec!["text".to_string()],
-                        output: vec!["text".to_string()],
-                    },
-                    open_weights: false,
-                    limit: ModelLimit { context: 128000, output: 4096, input: None },
-                    cost: default_cost(),
-                    status: None,
-                };
-                (m_id.clone(), model)
-            }).collect()
+            custom
+                .models
+                .iter()
+                .map(|m_id| {
+                    let model = Model {
+                        id: m_id.clone(),
+                        name: m_id.clone(),
+                        family: None,
+                        attachment: false,
+                        reasoning: false,
+                        tool_call: true,
+                        temperature: true,
+                        knowledge: None,
+                        release_date: None,
+                        last_updated: None,
+                        modalities: Modalities {
+                            input: vec!["text".to_string()],
+                            output: vec!["text".to_string()],
+                        },
+                        open_weights: false,
+                        limit: ModelLimit {
+                            context: 128000,
+                            output: 4096,
+                            input: None,
+                        },
+                        cost: default_cost(),
+                        status: None,
+                    };
+                    (m_id.clone(), model)
+                })
+                .collect()
         };
 
         let provider = Provider {
             id: id.clone(),
             name: custom.name.clone(),
-            env: vec![format!("CUSTOM_{}_API_KEY", Self::sanitize_id(&custom.id).to_uppercase())],
+            env: vec![format!(
+                "CUSTOM_{}_API_KEY",
+                Self::sanitize_id(&custom.id).to_uppercase()
+            )],
             api: Some(custom.api_url.clone()),
             doc: None,
             models,
@@ -663,7 +716,11 @@ mod tests {
                 output: vec!["text".to_string()],
             },
             open_weights: false,
-            limit: ModelLimit { context: 128000, output: 4096, input: None },
+            limit: ModelLimit {
+                context: 128000,
+                output: 4096,
+                input: None,
+            },
             cost: default_cost(),
             status: None,
         };
@@ -693,7 +750,11 @@ mod tests {
                 output: vec!["text".to_string()],
             },
             open_weights: false,
-            limit: ModelLimit { context: 128000, output: 4096, input: None },
+            limit: ModelLimit {
+                context: 128000,
+                output: 4096,
+                input: None,
+            },
             cost: default_cost(),
             status: None,
         };

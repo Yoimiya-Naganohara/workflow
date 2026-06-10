@@ -13,11 +13,19 @@ use crate::models::filter_providers;
 
 pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState) {
     let filtered = filter_providers(state.models.providers(), &state.provider_search_query);
+    let custom_label = "+ Add Custom Provider";
+    let show_custom = state.provider_search_query.is_empty()
+        || state.provider_search_query.to_lowercase().contains("custom")
+        || state.provider_search_query.to_lowercase().contains("add")
+        || custom_label
+            .to_lowercase()
+            .contains(&state.provider_search_query.to_lowercase());
+    let total_items = filtered.len() + if show_custom { 1 } else { 0 };
 
-    if filtered.is_empty() {
+    if total_items == 0 {
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" Select Provider ")
+            .title(" Configure Provider ")
             .style(Style::default().fg(Color::Cyan));
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -32,7 +40,7 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
 
     let dialog_w = 60.min(area.width.saturating_sub(4));
     let search_h = 3u16;
-    let list_h = filtered.len() as u16;
+    let list_h = total_items as u16;
     let dialog_h = (list_h + 4 + search_h).min(area.height.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(dialog_w)) / 2;
     let y = area.y + (area.height.saturating_sub(dialog_h)) / 2;
@@ -40,8 +48,8 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Select Provider ")
-        .style(Style::default().fg(Color::Cyan));
+        .title(" Configure Provider ")
+        .style(Style::default().fg(Color::White).bg(Color::Black));
     let inner = block.inner(dialog_area);
     f.render_widget(block, dialog_area);
 
@@ -50,11 +58,11 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
         .constraints([Constraint::Length(search_h), Constraint::Min(0)])
         .split(inner);
 
-    let search_style = Style::default().fg(Color::Cyan);
+    let search_style = Style::default().fg(Color::White).bg(Color::Black);
     f.render_widget(
         Paragraph::new(state.provider_search_query.as_str())
             .style(search_style)
-            .block(Block::default().borders(Borders::ALL).title("Search")),
+            .block(Block::default().title("Search")),
         chunks[0],
     );
     let prefix_width =
@@ -63,28 +71,40 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
     let cursor_y = chunks[0].y + 1;
     f.set_cursor_position((cursor_x, cursor_y));
 
-    let items: Vec<ListItem> = filtered
+    // Build items: filtered providers + optional custom entry (with embedded separator).
+    let mut items: Vec<ListItem> = filtered
         .iter()
         .map(|p| {
             let count = p.models.len();
-            let env = p.env.first().map(|e| e.as_str()).unwrap_or("no key");
+            let is_configured = state.configured_providers.iter().any(|id| id == &p.id);
             ListItem::new(Line::from(vec![
+                if is_configured {
+                    Span::styled("✓ ", Style::default().fg(Color::Green))
+                } else {
+                    Span::raw("  ")
+                },
                 Span::styled(&p.name, Style::default()),
                 Span::raw("  "),
                 Span::styled(format!("{} models", count), Style::default().fg(Color::DarkGray)),
-                Span::raw("  "),
-                Span::styled(format!("env: {}", env), Style::default().fg(Color::Yellow)),
             ]))
         })
         .collect();
 
+    // Add custom entry at the end (with a separator line above it).
+    if show_custom {
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            custom_label,
+            Style::default().fg(Color::Cyan),
+        )])));
+    }
+
     let mut list_state = ListState::default();
-    list_state.select(Some(state.selected_provider_idx.min(filtered.len().saturating_sub(1))));
+    list_state.select(Some(state.selected_provider_idx.min(total_items.saturating_sub(1))));
     f.render_stateful_widget(
         List::new(items)
-            .block(Block::default().borders(Borders::ALL))
+            // .block(Block::default().borders(Borders::ALL))
             .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-            .highlight_symbol("❯ "),
+            .highlight_style(Style::default().bg(Color::Blue)),
         chunks[1],
         &mut list_state,
     );
@@ -113,12 +133,7 @@ pub(crate) fn render_key_dialog(f: &mut Frame, area: Rect, state: &AppState) {
 
     let masked: String = state.key_input.chars().map(|_| '•').collect();
     f.render_widget(
-        Paragraph::new(if masked.is_empty() {
-            " (type and press Enter) "
-        } else {
-            &masked
-        })
-        .style(Style::default().fg(Color::Cyan)),
+        Paragraph::new(if masked.is_empty() { "" } else { &masked }).style(Style::default().fg(Color::Cyan)),
         inner,
     );
 
@@ -129,17 +144,20 @@ pub(crate) fn render_key_dialog(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
-    let results = state.models.search_models(&state.model_picker_search_query);
+    // Only show models from configured providers.
+    let results = state
+        .models
+        .search_configured_models(&state.model_picker_search_query, &state.configured_providers);
 
     if results.is_empty() {
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" Select Model ")
+            .title(" Model Pool ")
             .style(Style::default().fg(Color::Cyan));
         let inner = block.inner(area);
         f.render_widget(block, area);
-        let msg = if state.models.providers().is_empty() {
-            "No providers loaded. Type /connect to fetch."
+        let msg = if state.configured_providers.is_empty() {
+            "No providers configured. Use /connect first."
         } else {
             "No matching models."
         };
@@ -157,7 +175,7 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Select Model ")
+        .title(" Model Pool ")
         .style(Style::default().fg(Color::Cyan));
     let inner = block.inner(dialog_area);
     f.render_widget(block, dialog_area);
@@ -178,27 +196,19 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
     let items: Vec<ListItem> = results
         .iter()
         .map(|(p, m)| {
-            let needs_key = !state.configured_providers.iter().any(|id| id == &p.id)
-                && !crate::tui::controller::is_no_auth_provider(&p.id);
             let badge = m.capability_badge();
             let is_selected = state
                 .selected_models
                 .iter()
                 .any(|sm| sm.provider_id == p.id && sm.model_id == m.id);
             ListItem::new(Line::from(vec![
-                Span::styled(&p.name, Style::default().fg(Color::DarkGray)),
-                Span::raw(" / "),
                 Span::styled(&m.name, Style::default()),
                 Span::raw(" "),
                 Span::styled(badge, Style::default().fg(Color::DarkGray).italic()),
-                Span::raw("  "),
-                if needs_key {
-                    Span::styled("⌁", Style::default().fg(Color::Yellow))
-                } else {
-                    Span::raw("")
-                },
+                Span::raw(" "),
+                Span::styled(&p.name, Style::default().fg(Color::DarkGray)),
                 if is_selected {
-                    Span::styled(" ✓", Style::default().fg(Color::Green))
+                    Span::styled("  ✓", Style::default().fg(Color::Green))
                 } else {
                     Span::raw("")
                 },
@@ -213,8 +223,7 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_stateful_widget(
         List::new(items)
             .block(Block::default().borders(Borders::ALL))
-            .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-            .highlight_symbol("❯ "),
+            .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         chunks[1],
         &mut list_state,
     );
