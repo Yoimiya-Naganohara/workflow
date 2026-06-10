@@ -93,7 +93,7 @@ impl Tui {
                                 if state.show_custom_dialog {
                                     // no scrolling in custom dialog (simple form)
                                 } else if state.show_model_picker {
-                                    let results = state.models.search_models(&state.model_picker_search_query);
+                                    let results = state.models.search_configured_models(&state.model_picker_search_query, &state.configured_providers);
                                     if !results.is_empty() {
                                         state.selected_model_picker_idx =
                                             (state.selected_model_picker_idx + 1).min(results.len() - 1);

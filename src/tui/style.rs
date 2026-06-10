@@ -14,7 +14,7 @@ use ratatui::{
 // ── Color Palette ──
 
 /// Border color for panels and dialogs.
-pub const BORDER: Color = Color::White;
+pub const BORDER: Color = Color::DarkGray;
 /// Title text color (bold cyan).
 pub const TITLE: Color = Color::Cyan;
 /// Foreground for highlighted list items.
@@ -28,7 +28,7 @@ pub const INACTIVE: Color = Color::DarkGray;
 /// Metadata label color.
 pub const LABEL: Color = Color::DarkGray;
 /// Primary value / content color.
-pub const VALUE: Color = Color::White;
+pub const VALUE: Color = Color::Reset;
 /// Success / confirm color.
 pub const SUCCESS: Color = Color::Green;
 /// Warning / in-progress color.

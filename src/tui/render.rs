@@ -192,11 +192,11 @@ impl Tui {
         } else if state.show_model_picker {
             "Esc close · Enter toggle · Ctrl+A providers".to_string()
         } else if state.focus == Focus::Chat {
-            "↑↓ scroll · g top · G bottom · Ctrl+P models · Ctrl+C quit".to_string()
+            "↑↓ scroll · g top · G bottom · Ctrl+C quit".to_string()
         } else if state.active_chat_requests > 0 {
             "Ctrl+X stop · Ctrl+C quit".to_string()
         } else {
-            "Enter send · Alt+Enter newline · ↑↓ history · /cmd · Ctrl+P models · Tab sidebar · Ctrl+C quit".to_string()
+            "Enter send · Alt+Enter newline · ↑↓ history · /cmd · Tab sidebar · Ctrl+C quit".to_string()
         };
 
         let total_chars: usize = state.messages.iter().map(|m| m.content.len()).sum();

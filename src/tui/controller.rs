@@ -76,7 +76,7 @@ pub fn get_or_create_provider_client(state: &mut AppState, provider_id: &str) ->
         .api_keys
         .get(&env_key)
         .cloned()
-        .ok_or_else(|| anyhow::anyhow!("{} not set. Press Ctrl+P to configure.", env_key))?;
+        .ok_or_else(|| anyhow::anyhow!("{} not set. Use /connect to configure.", env_key))?;
     let client = Arc::new(LlmProvider::from_key(&api_key, provider.api.as_deref(), provider_id)?);
     state.provider_clients.insert(provider_id.to_string(), client.clone());
     Ok(client)

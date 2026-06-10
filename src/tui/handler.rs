@@ -67,12 +67,6 @@ impl Tui {
                     });
                 }
             }
-            KeyCode::Char('p') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                state.show_model_picker = true;
-                state.selected_model_picker_idx = 0;
-                state.model_picker_search_query.clear();
-                state.model_picker_search_cursor = 0;
-            }
             KeyCode::Down if state.focus == Focus::Chat => {
                 state.chat_scroll = state.chat_scroll.saturating_add(1);
             }
@@ -630,7 +624,6 @@ impl Tui {
                 "/sh <cmd>       - Run a shell command",
                 "/help           - Show this help",
                 "",
-                "Ctrl+P          - Open model pool picker",
                 "Ctrl+X          - Stop current response",
                 "Ctrl+C          - Quit",
             ]
