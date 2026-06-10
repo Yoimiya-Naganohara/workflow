@@ -190,7 +190,7 @@ impl Tui {
         } else if state.show_provider_dialog || state.show_key_dialog {
             "Esc cancel · Enter confirm".to_string()
         } else if state.show_model_picker {
-            "Esc close · Enter toggle · Ctrl+A providers".to_string()
+            "Esc close · Enter toggle".to_string()
         } else if state.focus == Focus::Chat {
             "↑↓ scroll · g top · G bottom · Ctrl+C quit".to_string()
         } else if state.active_chat_requests > 0 {

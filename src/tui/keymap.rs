@@ -20,7 +20,6 @@ pub enum Action {
     // Dialog
     Confirm,
     Cancel,
-    OpenProviderDialog,
     SwitchPanel,
 
     // Input
@@ -108,10 +107,6 @@ impl Default for Keymap {
         km.bind(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), Action::Confirm);
         km.bind(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), Action::Cancel);
         km.bind(
-            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
-            Action::OpenProviderDialog,
-        );
-        km.bind(
             KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
             Action::DeleteChar,
         );
@@ -171,7 +166,6 @@ pub fn format_action(action: &Action) -> String {
         Action::ScrollToBottom => "Scroll to bottom",
         Action::Confirm => "Confirm selection",
         Action::Cancel => "Cancel / Close dialog",
-        Action::OpenProviderDialog => "Open provider dialog",
         Action::SwitchPanel => "Switch panel",
         Action::SendMessage => "Send message",
         Action::TypeChar(_) => "Type character",
