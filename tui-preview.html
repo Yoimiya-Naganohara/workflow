@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workflow TUI — Interactive Preview</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d0e14;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    padding: 16px;
+  }
+  .terminal {
+    background: #161822;
+    border-radius: 14px;
+    padding: 10px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 20px 60px rgba(0,0,0,0.7);
+    max-width: 980px;
+    width: 100%;
+  }
+  .terminal-inner { background: #0f1018; border-radius: 8px; overflow: hidden; }
+  .tui {
+    display: grid;
+    grid-template-columns: 1fr 240px;
+    grid-template-rows: 1fr 28px;
+    min-height: 560px;
+  }
+
+  /* ── Chat panel ── */
+  .chat-panel {
+    border: 1px solid #2a2d3a; border-right: none; border-bottom: none;
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .chat-scroll {
+    padding: 8px 10px 0; overflow-y: auto; flex: 1;
+    display: flex; flex-direction: column; gap: 0;
+    scroll-behavior: smooth; min-height: 0;
+  }
+  .msg { padding: 3px 0; line-height: 1.55; animation: fadeIn 0.15s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .msg-user { border-left: 2px solid #3b82f6; padding-left: 8px; margin-bottom: 1px; }
+  .msg-user .text { color: #c8ccd4; font-size: 12.5px; }
+  .msg-agent { padding-left: 8px; margin-bottom: 1px; }
+  .msg-agent .text { color: #e4e7ed; font-size: 12.5px; }
+  .msg-thinking { padding-left: 8px; margin-bottom: 1px; }
+  .msg-thinking .text { color: #6b7280; font-size: 12px; font-style: italic; }
+  .msg-thinking .dots { display: inline-block; min-width: 24px; }
+  .msg-tool { border-left: 2px solid #8b5cf6; padding-left: 8px; margin: 1px 0 3px; }
+  .msg-tool .text {
+    color: #a5b4fc; font-size: 11.5px; padding: 3px 6px;
+    background: rgba(139,92,246,0.08); border-radius: 4px;
+    display: inline-block; margin-top: 2px; word-break: break-all;
+  }
+  .msg-model-tag { font-size: 10.5px; color: #6b7280; padding: 2px 0 4px 10px; }
+  .msg-model-tag .model-name { color: #10b981; }
+  .msg-model-tag .sep { color: #4b5563; }
+  .spacer { flex: 1; min-height: 6px; }
+
+  /* ── Popup area (commands, providers, key — all inline) ── */
+  .popup-area {
+    padding: 0 10px; flex-shrink: 0; display: none;
+  }
+  .popup-area.visible { display: block; }
+  .popup {
+    border: 1px solid #2a2d3a; border-radius: 6px;
+    background: #14151e; overflow: hidden; margin-bottom: 4px;
+  }
+  .popup .header {
+    display: flex; align-items: center; padding: 5px 10px;
+    border-bottom: 1px solid #1e2030; color: #6b7280;
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .popup .row {
+    display: flex; align-items: center; padding: 3px 10px;
+    font-size: 12px; color: #9ca3af; cursor: pointer; transition: background 0.1s;
+  }
+  .popup .row:hover { background: rgba(59,130,246,0.06); }
+  .popup .row .cmd { color: #e4e7ed; font-weight: 500; min-width: 88px; flex-shrink: 0; }
+  .popup .row .desc { color: #6b7280; margin-left: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .popup .row.highlight { background: rgba(59,130,246,0.15); }
+  .popup .row.highlight .cmd { color: #60a5fa; }
+
+  /* ── Provider picker (embedded search + scroll) ── */
+  .popup.provider .search-box {
+    border: none; border-bottom: 1px solid #1e2030;
+    display: flex; align-items: center; background: #0d0e14;
+  }
+  .popup.provider .search-box:focus-within { background: #0f1018; }
+  .popup.provider .search-box .search-icon { color: #4b5563; padding: 0 8px; font-size: 11px; user-select: none; }
+  .popup.provider .search-box input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: #e4e7ed; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; padding: 5px 6px 5px 0; caret-color: #3b82f6;
+  }
+  .popup.provider .search-box input::placeholder { color: #4b5563; }
+  .popup.provider .scroll { max-height: 240px; overflow-y: auto; }
+  .popup.provider .scroll::-webkit-scrollbar { width: 5px; }
+  .popup.provider .scroll::-webkit-scrollbar-track { background: transparent; }
+  .popup.provider .scroll::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
+  .popup .prow {
+    display: flex; align-items: center; padding: 3px 10px;
+    font-size: 12px; color: #9ca3af; cursor: pointer; transition: background 0.1s; gap: 6px;
+  }
+  .popup .prow:hover { background: rgba(59,130,246,0.06); }
+  .popup .prow.highlight { background: rgba(59,130,246,0.15); }
+  .popup .prow .picon { flex-shrink: 0; font-size: 12px; width: 16px; text-align: center; }
+  .popup .prow .picon.on { color: #34d399; }
+  .popup .prow .picon.off { color: #6b7280; }
+  .popup .prow .pname { flex: 1; color: #e4e7ed; font-weight: 500; }
+  .popup .prow .pcount { color: #6b7280; font-size: 10.5px; }
+  .popup .prow .pstatus { font-size: 9px; padding: 1px 5px; border-radius: 4px; }
+  .popup .prow .pstatus.conf { background: rgba(52,211,153,0.1); color: #34d399; }
+  .popup .prow .pstatus.key { background: rgba(107,114,128,0.1); color: #9ca3af; }
+  .popup .prow .pstatus.na  { background: rgba(59,130,246,0.1); color: #60a5fa; }
+  .popup .psep { height: 1px; background: #1e2030; margin: 2px 10px; }
+  .popup .padd { display: flex; align-items: center; gap: 4px; padding: 3px 10px; cursor: pointer; font-size: 11.5px; color: #60a5fa; }
+  .popup .padd:hover { background: rgba(59,130,246,0.06); }
+  .popup .padd.highlight { background: rgba(59,130,246,0.15); }
+  .popup .padd .plus { font-size: 13px; }
+  .popup .no-match { padding: 12px; text-align: center; color: #4b5563; font-size: 11px; }
+
+  /* ── Inline key input ── */
+  .popup .key-provider { color: #9ca3af; font-size: 11px; padding: 6px 10px; border-bottom: 1px solid #1e2030; }
+  .popup .key-provider strong { color: #e4e7ed; }
+  .popup .key-field { border: none; border-bottom: 1px solid #1e2030; display: flex; align-items: center; background: #0d0e14; }
+  .popup .key-field:focus-within { background: #0f1018; }
+  .popup .key-field .klabel { color: #4b5563; padding: 0 8px; font-size: 10px; user-select: none; }
+  .popup .key-field input { flex: 1; background: transparent; border: none; outline: none; color: #e4e7ed; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 5px 6px 5px 0; caret-color: #3b82f6; }
+  .popup .key-field input::placeholder { color: #4b5563; }
+  .popup .key-hint { padding: 5px 10px; color: #4b5563; font-size: 9.5px; text-align: center; }
+  .popup .key-hint kbd { color: #6b7280; border: 1px solid #2a2d3a; padding: 0 4px; border-radius: 3px; font-size: 8.5px; font-family: 'JetBrains Mono', monospace; }
+
+  /* ── Input ── */
+  .input-area { padding: 0 10px 8px; flex-shrink: 0; }
+  .input-box { border: 1px solid #2a2d3a; display: flex; align-items: center; background: #0d0e14; }
+  .input-box:focus-within { border-color: #3b82f6; }
+  .input-box .input-label {
+    display: inline-flex; align-items: center; padding: 0 8px;
+    font-size: 11px; font-weight: 700; color: #6b7280;
+    border-right: 1px solid #2a2d3a; height: 26px;
+    letter-spacing: 0.3px; flex-shrink: 0; user-select: none;
+  }
+  .input-box:focus-within .input-label { color: #3b82f6; border-right-color: #3b82f6; }
+  .input-box .input-text {
+    padding: 4px 8px; font-size: 12.5px; color: #e4e7ed;
+    font-family: 'JetBrains Mono', monospace; flex: 1; min-height: 26px;
+    outline: none; border: none; background: transparent; caret-color: #3b82f6;
+  }
+  .input-box .input-text::placeholder { color: #4b5563; font-size: 12px; }
+  .input-box .input-text:focus { outline: none; border: none; box-shadow: none; }
+
+  /* ── Proposal panel ── */
+  .proposal-panel {
+    border: 1px solid #2a2d3a; border-left: none; border-bottom: none;
+    border-radius: 0 6px 0 0; padding: 10px 10px 0;
+    overflow-y: auto; background: #0d0e14;
+  }
+  .proposal-panel .section { margin-bottom: 14px; }
+  .proposal-panel .section-title { color: #6b7280; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; padding-bottom: 4px; border-bottom: 1px solid #1a1c28; margin-bottom: 5px; }
+  .proposal-panel .section-title .hash { color: #4b5563; }
+  .proposal-panel .commit { font-size: 11px; color: #9ca3af; line-height: 1.6; padding-left: 2px; }
+  .proposal-panel .commit .add { color: #34d399; }
+  .proposal-panel .commit .del { color: #f87171; }
+  .proposal-panel .status-row { display: flex; justify-content: space-between; font-size: 10.5px; padding: 3px 0; color: #6b7280; }
+  .proposal-panel .status-row .val { color: #9ca3af; }
+  .proposal-panel .plan-item { display: flex; align-items: center; gap: 4px; font-size: 10.5px; padding: 2px 0; color: #9ca3af; }
+  .proposal-panel .plan-item .bullet { color: #4b5563; }
+  .proposal-panel .plan-item.active { color: #e4e7ed; }
+  .proposal-panel .plan-item.active .bullet { color: #3b82f6; }
+  .proposal-panel .plan-item.done { color: #6b7280; text-decoration: line-through; }
+  .proposal-panel .plan-item .status-tag { margin-left: auto; font-size: 9px; padding: 1px 5px; border-radius: 4px; background: rgba(59,130,246,0.12); color: #60a5fa; }
+  .proposal-panel .plan-item.done .status-tag { background: rgba(52,211,153,0.1); color: #34d399; }
+
+  /* ── Status bar ── */
+  .status-bar {
+    grid-column: 1 / -1; border: 1px solid #2a2d3a; border-top: none;
+    display: flex; align-items: center; padding: 0 10px; font-size: 10.5px;
+    background: #0a0b11; color: #6b7280; gap: 14px;
+  }
+  .status-bar .stat { display: flex; align-items: center; gap: 2px; }
+  .status-bar .stat .arrow { color: #4b5563; }
+  .status-bar .stat .num { color: #9ca3af; font-weight: 500; }
+  .status-bar .stat .auto { color: #3b82f6; font-weight: 500; font-size: 10px; }
+  .status-bar .right { margin-left: auto; display: flex; gap: 14px; }
+  .status-bar .hint { color: #4b5563; }
+  .status-bar .hint kbd { color: #6b7280; border: 1px solid #2a2d3a; padding: 0 5px; border-radius: 3px; font-size: 9px; font-family: 'JetBrains Mono', monospace; }
+
+  .chat-scroll::-webkit-scrollbar, .proposal-panel::-webkit-scrollbar, .popup.provider .scroll::-webkit-scrollbar { width: 5px; }
+  .chat-scroll::-webkit-scrollbar-track, .proposal-panel::-webkit-scrollbar-track { background: transparent; }
+  .chat-scroll::-webkit-scrollbar-thumb, .proposal-panel::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="app" class="terminal">
+  <div class="terminal-inner">
+    <div class="tui">
+
+      <!-- ═══ CHAT PANEL ═══ -->
+      <div class="chat-panel">
+        <div id="chatScroll" class="chat-scroll">
+          <div id="messages"></div>
+          <div class="spacer"></div>
+        </div>
+
+        <!-- Inline popup (commands, providers, key) -->
+        <div id="popupArea" class="popup-area">
+          <div id="popup" class="popup"></div>
+        </div>
+
+        <!-- Input -->
+        <div class="input-area">
+          <div class="input-box">
+            <span class="input-label">Input</span>
+            <input id="chatInput" class="input-text" type="text" placeholder="type / for commands" spellcheck="false" autofocus>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ PROPOSAL PANEL ═══ -->
+      <div class="proposal-panel" id="proposalPanel">
+        <div class="section"><div class="section-title"><span class="hash">#</span> Proposal</div></div>
+        <div class="section">
+          <div class="section-title"><span class="hash">#</span> 1aab5f8</div>
+          <div class="commit"><span class="del">- abc</span><br><span class="add">+ abcd</span></div>
+        </div>
+        <div class="section">
+          <div class="section-title">Status</div>
+          <div class="status-row"><span>Budget</span><span class="val" id="propBudget">72%</span></div>
+          <div class="status-row"><span>Pool</span><span class="val" id="propPool">1,284</span></div>
+          <div class="status-row"><span>Depth</span><span class="val" id="propDepth">L2</span></div>
+          <div class="status-row"><span>Model</span><span class="val" id="propModel">gpt-4</span></div>
+        </div>
+        <div class="section">
+          <div class="section-title">Plan</div>
+          <div id="planList">
+            <div class="plan-item done"><span class="bullet">▸</span> pool compaction</div>
+            <div class="plan-item active"><span class="bullet">▸</span> export/import <span class="status-tag">in prog</span></div>
+            <div class="plan-item"><span class="bullet">▸</span> flush timer</div>
+            <div class="plan-item"><span class="bullet">▸</span> compaction CLI</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ STATUS BAR ═══ -->
+      <div class="status-bar">
+        <div class="stat"><span class="arrow">↑</span><span class="num" id="statUp">65k</span></div>
+        <div class="stat"><span class="arrow">↓</span><span class="num" id="statDown">13k</span></div>
+        <div class="stat">R<span class="num" id="statR">508k</span></div>
+        <div class="stat">CH<span class="num" id="statCh">97.1</span>%</div>
+        <div class="stat">$<span class="num" id="statDollar">0.014</span></div>
+        <div class="stat right"><span class="num" id="statCtx">2.1</span>%/1.0M <span class="auto">(auto)</span></div>
+        <div class="stat hint"><kbd>Ctrl+A</kbd> providers &nbsp;<kbd>Ctrl+P</kbd> commands &nbsp;<kbd>/</kbd> cmds &nbsp;<kbd>Esc</kbd> clear</div>
+      </div>
+
+    </div><!-- /tui -->
+  </div><!-- /terminal-inner -->
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  DATA
+// ═══════════════════════════════════════════════
+
+const COMMANDS = [
+  { cmd: '/connect', desc: 'Configure a provider' },
+  { cmd: '/models',  desc: 'Open model picker' },
+  { cmd: '/apply',   desc: 'Approve and execute plan' },
+  { cmd: '/clear',   desc: 'Clear conversation' },
+  { cmd: '/pool',    desc: 'Pool management commands' },
+  { cmd: '/sh',      desc: 'Run a shell command' },
+  { cmd: '/help',    desc: 'Show help' },
+];
+
+const SUBCOMMANDS = {
+  '/pool': [
+    { cmd: 'stats',  desc: 'Show pool statistics' },
+    { cmd: 'flush',  desc: 'Flush fluid data to bedrock' },
+    { cmd: 'clear',  desc: 'Clear pool (with confirmation)' },
+    { cmd: 'export', desc: 'Export pool to JSON file' },
+    { cmd: 'import', desc: 'Import pool from JSON file' },
+  ],
+};
+
+const PROVIDERS = [
+  { id: 'openai',     name: 'OpenAI',          models: 45, auth: true },
+  { id: 'anthropic',  name: 'Anthropic',       models: 12, auth: true },
+  { id: 'google',     name: 'Google (Gemini)', models: 28, auth: true },
+  { id: 'groq',       name: 'Groq',            models: 18, auth: true },
+  { id: 'mistral',    name: 'Mistral',         models: 14, auth: true },
+  { id: 'cohere',     name: 'Cohere',          models: 8,  auth: true },
+  { id: 'ollama',     name: 'Ollama',          models: 60, auth: false },
+  { id: 'deepseek',   name: 'DeepSeek',        models: 6,  auth: true },
+  { id: 'xai',        name: 'xAI (Grok)',      models: 4,  auth: true },
+  { id: 'together',   name: 'Together AI',     models: 22, auth: true },
+  { id: 'fireworks',  name: 'Fireworks AI',    models: 16, auth: true },
+  { id: 'openrouter', name: 'OpenRouter',      models: 200,auth: true },
+  { id: 'replicate',  name: 'Replicate',       models: 30, auth: true },
+];
+
+const AGENT_RESPONSES = {
+  default: [
+    "I understand the request. Let me analyze the current state and design a solution.",
+    "Looking at the codebase, the experience pool structure needs some adjustments. The mmap-backed bedrock uses a fixed 1024-byte entry format with weight, last_access, and embedding fields. Compaction can scan for entries below the 0.1 weight threshold or with last_access older than 7 days, then zero them out and set a tombstone flag.",
+    "I'll also add a `rebuild` step that copies non-tombstone entries into a fresh file, reclaiming disk space.",
+  ],
+  '/pool': [
+    "Here are the current pool statistics:\n\n  • Bedrock (A-track):  1,284 entries\n  • Fluid (B-track):    37 entries\n  • Pending suspend:    12\n  • Budget usage:       72%\n  • Last compaction:    6h ago\n  File: `~/.workflow/pool.bin` (2.1 MB). No corruption.",
+    "Pool is healthy. Fluid drain threshold is 50 — currently at 37. Auto-consolidation not needed.",
+  ],
+  '/help': [
+    "Commands:\n  /connect  — Configure a provider\n  /models   — Open model picker\n  /apply    — Approve plan\n  /clear    — Clear conversation\n  /pool     — Pool management\n  /sh       — Shell command\n  /help     — This help\n\nKeybindings:\n  /         — Open command picker\n  Esc       — Clear input / close popup\n  Tab       — Complete command",
+  ],
+  '/sh': ["Running shell command...\n\n$ ls -la ~/.workflow/\ntotal 2148\ndrwxr-xr-x  2 user user    4096 Jun 12 10:23 .\ndrwxr-xr-x 22 user user    4096 Jun 12 08:15 ..\n-rw-r--r--  1 user user 2101248 Jun 12 10:23 pool.bin\n-rw-r--r--  1 user user    2048 Jun 12 10:23 state.json\n\nExit code 0."],
+  '/apply': ["Plan approved. Compaction phase 1:\n  • Scanned  1,284 entries\n  • Found    23 stale\n  • Marked   23 tombstones\n  • Savings  23 KB\nPhase 2 ready. Run `/pool flush`."],
+  '/clear': ["Conversation cleared. Pool data preserved."],
+};
+
+const TOOL_CALLS = {
+  default: [
+    { tool: 'read_file', args: 'src/experience/pool.rs' },
+    { tool: 'bash',      args: 'du -sh ~/.workflow/' },
+  ],
+  '/pool': [
+    { tool: 'bash', args: 'ls -la ~/.workflow/pool.bin' },
+  ],
+};
+
+// ═══════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════
+
+const state = {
+  messages: [],
+  thinking: false,
+  streaming: false,
+  input: '',
+  messageCount: 1,
+  stats: {
+    up: 65, down: 13, r: 508, ch: 97.1, dollar: 0.014, ctx: 2.1,
+    budget: 72, pool: 1284, depth: 'L2', model: 'gpt-4',
+  },
+  planItems: [
+    { label: 'pool compaction', done: true },
+    { label: 'export/import',   active: true },
+    { label: 'flush timer',     active: false },
+    { label: 'compaction CLI',  active: false },
+  ],
+  configuredProviders: ['openai', 'anthropic'],
+  // Popup mode: null | 'command' | 'provider' | 'key'
+  pickerMode: null,
+  pickerSearch: '',
+  pickerIdx: 0,
+  pendingKeyProvider: null,
+};
+
+// ═══════════════════════════════════════════════
+//  DOM REFS
+// ═══════════════════════════════════════════════
+
+const $ = id => document.getElementById(id);
+const chatScroll = $('chatScroll');
+const messagesEl = $('messages');
+const chatInput = $('chatInput');
+const popupArea = $('popupArea');
+const popup = $('popup');
+
+// ═══════════════════════════════════════════════
+//  RENDER HELPERS
+// ═══════════════════════════════════════════════
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function addMsg(type, parts) {
+  const el = document.createElement('div');
+  el.className = `msg msg-${type}`;
+  let html = '';
+  for (const p of parts) {
+    if (typeof p === 'string') html += `<span class="text">${escHtml(p)}</span>`;
+    else if (p.text) html += `<div class="text">${escHtml(p.text)}</div>`;
+  }
+  el.innerHTML = html;
+  messagesEl.appendChild(el);
+  state.messageCount++;
+  scrollDown();
+}
+
+function addThinking() {
+  const el = document.createElement('div');
+  el.className = 'msg msg-thinking';
+  el.id = 'thinkingMsg';
+  el.innerHTML = `<span class="text"><span class="dots" id="thinkingDots">●</span> thinking...</span>`;
+  messagesEl.appendChild(el);
+  state.thinking = true;
+  scrollDown();
+  animateDots();
+}
+
+let dotsInterval = null;
+let dotPhase = 0;
+function animateDots() {
+  dotPhase = 0;
+  if (dotsInterval) clearInterval(dotsInterval);
+  dotsInterval = setInterval(() => {
+    const d = document.getElementById('thinkingDots');
+    if (!d) { clearInterval(dotsInterval); dotsInterval = null; return; }
+    dotPhase = (dotPhase + 1) % 8;
+    const phases = ['●', '●●', '●●●', '●●', '●', '●●', '●●●', '●●'];
+    d.textContent = phases[dotPhase];
+  }, 300);
+}
+
+function removeThinking() {
+  const el = document.getElementById('thinkingMsg');
+  if (el) el.remove();
+  state.thinking = false;
+  if (dotsInterval) { clearInterval(dotsInterval); dotsInterval = null; }
+}
+
+function addToolCall(tool, args) {
+  const el = document.createElement('div');
+  el.className = 'msg msg-tool';
+  el.innerHTML = `<div class="text">${escHtml(tool)} ${escHtml(args)}</div>`;
+  messagesEl.appendChild(el);
+  scrollDown();
+}
+
+function addModelTag() {
+  const el = document.createElement('div');
+  el.className = 'msg-model-tag';
+  el.innerHTML = `<span class="model-name">${escHtml(state.stats.model)}</span> <span class="sep">·</span> streaming`;
+  messagesEl.appendChild(el);
+  scrollDown();
+}
+
+function scrollDown() { requestAnimationFrame(() => { chatScroll.scrollTop = chatScroll.scrollHeight; }); }
+
+function updateProposal() {
+  const s = state.stats;
+  $('propBudget').textContent = s.budget + '%';
+  $('propPool').textContent = s.pool.toLocaleString();
+  $('propDepth').textContent = s.depth;
+  $('propModel').textContent = s.model;
+  $('planList').innerHTML = state.planItems.map(item => `
+    <div class="plan-item ${item.done?'done':''} ${item.active?'active':''}">
+      <span class="bullet">▸</span> ${escHtml(item.label)}
+      ${item.active?'<span class="status-tag">in prog</span>':''}
+      ${item.done?'<span class="status-tag">done</span>':''}
+    </div>`).join('');
+  $('statUp').textContent = s.up + 'k';
+  $('statDown').textContent = s.down + 'k';
+  $('statR').textContent = s.r + 'k';
+  $('statCh').textContent = s.ch.toFixed(1);
+  $('statDollar').textContent = '$' + s.dollar.toFixed(3);
+  $('statCtx').textContent = s.ctx.toFixed(1);
+}
+
+function randomStatTick() {
+  const s = state.stats;
+  s.up += Math.round((Math.random() - 0.3) * 2);
+  s.down += Math.round((Math.random() - 0.4) * 1.5);
+  s.r += Math.round((Math.random() - 0.3) * 5);
+  s.ch = Math.max(90, Math.min(99.9, s.ch + (Math.random() - 0.5) * 0.3));
+  s.ctx = Math.max(0.5, Math.min(99, s.ctx + (Math.random() - 0.45) * 0.2));
+  updateProposal();
+}
+
+// ═══════════════════════════════════════════════
+//  CHAT LOGIC
+// ═══════════════════════════════════════════════
+
+function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function delayed(ms, fn) { return new Promise(r => setTimeout(() => { fn(); r(); }, ms)); }
+
+async function simulateAgentResponse(userInput) {
+  if (state.streaming) return;
+  state.streaming = true;
+  chatInput.disabled = true;
+  const trimmed = userInput.trim();
+  const cmdRoot = trimmed.startsWith('/') ? '/' + trimmed.split(' ')[0].slice(1) : null;
+  const responses = cmdRoot && AGENT_RESPONSES[cmdRoot] ? AGENT_RESPONSES[cmdRoot] : AGENT_RESPONSES.default;
+  const tools = cmdRoot && TOOL_CALLS[cmdRoot] ? TOOL_CALLS[cmdRoot] : TOOL_CALLS.default;
+  const texts = typeof responses === 'string' ? [responses] : responses;
+  const numTurns = Math.min(texts.length, 3);
+  for (let i = 0; i < numTurns; i++) {
+    addThinking();
+    if (i === 0 && Math.random() > 0.3) {
+      const tc = pickRandom(tools);
+      await delayed(600 + Math.random() * 400, () => { removeThinking(); addToolCall(tc.tool, tc.args); });
+      addThinking();
+    }
+    await delayed(800 + Math.random() * 600, () => { removeThinking(); });
+    await delayed(200, () => {
+      addMsg('agent', [texts[i]]);
+      if (i === numTurns - 1 && Math.random() > 0.4) {
+        const activeIdx = state.planItems.findIndex(p => p.active);
+        if (activeIdx >= 0) {
+          state.planItems[activeIdx].done = true;
+          state.planItems[activeIdx].active = false;
+          if (activeIdx + 1 < state.planItems.length) state.planItems[activeIdx + 1].active = true;
+        }
+        state.stats.budget = Math.max(10, state.stats.budget - Math.floor(Math.random() * 8));
+        state.stats.pool += Math.floor(Math.random() * 5);
+        updateProposal();
+      }
+      randomStatTick();
+    });
+  }
+  addModelTag(); scrollDown();
+  chatInput.disabled = false; state.streaming = false; chatInput.focus();
+}
+
+function handleSubmit(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return;
+  if (trimmed === '/clear') {
+    messagesEl.innerHTML = '';
+    state.messageCount = 0;
+    chatInput.value = ''; state.input = '';
+    addMsg('agent', ['Conversation cleared. Pool data preserved.']);
+    chatInput.focus();
+    return;
+  }
+  if (trimmed === '/connect') {
+    chatInput.value = ''; state.input = '';
+    openPicker('provider');
+    return;
+  }
+  addMsg('user', [trimmed]);
+  chatInput.value = ''; state.input = '';
+  randomStatTick();
+  simulateAgentResponse(trimmed);
+}
+
+// ═══════════════════════════════════════════════
+//  INLINE POPUP: commands / providers / key
+// ═══════════════════════════════════════════════
+
+function filterProviders(q) {
+  if (!q) return PROVIDERS.map((p, i) => ({ provider: p, idx: i }));
+  const lq = q.toLowerCase();
+  return PROVIDERS.map((p, i) => ({ provider: p, idx: i }))
+    .filter(item => item.provider.name.toLowerCase().includes(lq)
+      || item.provider.id.toLowerCase().includes(lq)
+      || String(item.provider.models).includes(lq));
+}
+
+function commitProvider(pid) {
+  const p = PROVIDERS.find(x => x.id === pid);
+  if (!p) return;
+  if (!p.auth) {
+    if (!state.configuredProviders.includes(pid)) state.configuredProviders.push(pid);
+    state.stats.model = pid; updateProposal(); closePicker();
+    addMsg('agent', [`${p.name} configured (no API key required).`]); return;
+  }
+  if (state.configuredProviders.includes(pid)) {
+    state.stats.model = pid; updateProposal(); closePicker();
+    addMsg('agent', [`Switched to ${p.name}.`]); return;
+  }
+  state.pendingKeyProvider = pid;
+  state.pickerMode = 'key'; state.pickerSearch = ''; state.pickerIdx = 0;
+  chatInput.value = ''; state.input = '';
+  renderPopup();
+}
+
+function confirmKey(val) {
+  const pid = state.pendingKeyProvider;
+  if (!pid || !val.trim()) return;
+  if (!state.configuredProviders.includes(pid)) state.configuredProviders.push(pid);
+  state.stats.model = pid; updateProposal();
+  const p = PROVIDERS.find(x => x.id === pid);
+  closePicker();
+  if (p) addMsg('agent', [`${p.name} configured with API key.`]);
+}
+
+function openPicker(mode) {
+  state.pickerMode = mode || 'provider';
+  state.pickerSearch = ''; state.pickerIdx = 0; state.pendingKeyProvider = null;
+  chatInput.value = ''; state.input = '';
+  popupArea.classList.add('visible');
+  renderPopup();
+}
+
+function closePicker() {
+  state.pickerMode = null; state.pickerSearch = ''; state.pickerIdx = 0; state.pendingKeyProvider = null;
+  popupArea.classList.remove('visible');
+  chatInput.focus();
+}
+
+function renderPopup() {
+  // ── Key input mode ──
+  if (state.pickerMode === 'key') {
+    popup.className = 'popup';
+    const p = PROVIDERS.find(x => x.id === state.pendingKeyProvider);
+    popup.innerHTML = `
+      <div class="key-provider">Enter API key for <strong>${escHtml(p ? p.name : '?')}</strong></div>
+      <div class="key-field">
+        <span class="klabel">sk-</span>
+        <input id="keyFieldInput" type="text" placeholder="..." autocomplete="off" spellcheck="false">
+      </div>
+      <div class="key-hint"><kbd>Enter</kbd> confirm  ·  <kbd>Esc</kbd> back to providers</div>`;
+    popupArea.classList.add('visible');
+    requestAnimationFrame(() => {
+      const inp = document.getElementById('keyFieldInput');
+      if (inp) { inp.focus(); inp.onkeydown = handleKeyField; }
+    });
+    return;
+  }
+
+  // ── Provider picker mode ──
+  if (state.pickerMode === 'provider') {
+    popup.className = 'popup provider';
+    const items = filterProviders(state.pickerSearch);
+    const sel = state.pickerIdx;
+    let listHtml = '';
+    if (items.length === 0) {
+      listHtml = '<div class="no-match">No matching providers.</div>';
+    } else {
+      items.forEach((item, i) => {
+        const pf = item.provider;
+        const isCfg = state.configuredProviders.includes(pf.id);
+        const hl = i === sel ? ' highlight' : '';
+        const icon = isCfg ? '<span class="picon on">✓</span>' : '<span class="picon off">⌁</span>';
+        const status = isCfg ? '<span class="pstatus conf">configured</span>'
+          : pf.auth ? '<span class="pstatus key">needs key</span>' : '<span class="pstatus na">no auth</span>';
+        listHtml += `<div class="prow${hl}" data-idx="${i}">${icon}<span class="pname">${escHtml(pf.name)}</span><span class="pcount">${pf.models} models</span>${status}</div>`;
+      });
+      listHtml += `<div class="psep"></div><div class="padd${items.length===sel?' highlight':''}" data-idx="custom"><span class="plus">+</span><span>Add Custom Provider</span></div>`;
+    }
+    popup.innerHTML = `
+      <div class="header">Configure Provider</div>
+      <div class="search-box"><span class="search-icon">⌕</span>
+        <input id="provFilter" type="text" placeholder="Search providers..." autocomplete="off" spellcheck="false">
+      </div>
+      <div class="scroll">${listHtml}</div>`;
+    popupArea.classList.add('visible');
+    requestAnimationFrame(() => {
+      const inp = document.getElementById('provFilter');
+      if (inp) {
+        inp.value = state.pickerSearch;
+        inp.focus();
+        inp.oninput = handleProvFilter;
+        inp.onkeydown = handleProvKeydown;
+      }
+      const sc = popup.querySelector('.scroll');
+      if (sc) sc.onclick = handleProvClick;
+    });
+    return;
+  }
+
+  // ── Command popup (default) ──
+  popup.className = 'popup';
+  const val = chatInput.value.trimStart();
+  let info;
+  if (/^\/pool\s+\S/.test(val)) {
+    const partial = val.replace(/^\/pool\s+/, '');
+    const subs = SUBCOMMANDS['/pool'] || [];
+    info = { header: 'pool  ·  manage experience pool', items: partial ? subs.filter(s => s.cmd.startsWith(partial)) : subs };
+  } else if (/^\/pool$/.test(val)) {
+    info = { header: 'pool  ·  manage experience pool', items: SUBCOMMANDS['/pool'] || [] };
+  } else if (/^\/sh\s+\S/.test(val)) {
+    popupArea.classList.remove('visible'); return;
+  } else if (/^\//.test(val)) {
+    const partial = val.slice(1);
+    info = { header: 'Commands', items: partial ? COMMANDS.filter(c => c.cmd.slice(1).startsWith(partial)) : COMMANDS };
+  } else {
+    popupArea.classList.remove('visible'); return;
+  }
+  if (!info || info.items.length === 0) {
+    popup.innerHTML = `<div class="header">${escHtml(info?.header || '')}</div><div class="row" style="color:#4b5563;font-style:italic;padding:6px 10px">no matches</div>`;
+    popupArea.classList.add('visible');
+    return;
+  }
+  let matchIdx = info.items.findIndex((item, i) => {
+    if (info.header === 'Commands') return item.cmd.slice(1).startsWith(val.slice(1));
+    return item.cmd.startsWith(val.replace(/^\/pool\s+/, ''));
+  });
+  matchIdx = Math.max(0, matchIdx);
+  let html = `<div class="header">${escHtml(info.header)}</div>`;
+  info.items.forEach((item, i) => {
+    const hl = i === matchIdx ? ' highlight' : '';
+    html += `<div class="row${hl}" data-idx="${i}"><span class="cmd">${escHtml(item.cmd)}</span><span class="desc">${escHtml(item.desc)}</span></div>`;
+  });
+  popup.innerHTML = html;
+  popupArea.classList.add('visible');
+}
+
+// ── Event handlers for provider popup ──
+
+function handleProvFilter(e) {
+  state.pickerSearch = e.target.value; state.pickerIdx = 0; renderPopup();
+}
+
+function handleProvKeydown(e) {
+  const items = filterProviders(state.pickerSearch);
+  const total = items.length + 1;
+  if (e.key === 'Escape') { e.preventDefault(); closePicker(); return; }
+  if (e.key === 'ArrowDown') { e.preventDefault(); state.pickerIdx = Math.min(state.pickerIdx + 1, total - 1); renderPopup(); return; }
+  if (e.key === 'ArrowUp') { e.preventDefault(); state.pickerIdx = Math.max(state.pickerIdx - 1, 0); renderPopup(); return; }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (state.pickerIdx === items.length) { closePicker(); addMsg('agent', ['Custom provider wizard would open here.']); return; }
+    const item = items[state.pickerIdx];
+    if (item) commitProvider(item.provider.id);
+  }
+}
+
+function handleProvClick(e) {
+  const row = e.target.closest('.prow, .padd');
+  if (!row) return;
+  if (row.dataset.idx === 'custom') { closePicker(); addMsg('agent', ['Custom provider wizard would open here.']); return; }
+  const items = filterProviders(state.pickerSearch);
+  const item = items[parseInt(row.dataset.idx)];
+  if (item) commitProvider(item.provider.id);
+}
+
+// ── Event handlers for key popup ──
+
+function handleKeyField(e) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    state.pickerMode = 'provider'; state.pendingKeyProvider = null;
+    state.pickerSearch = ''; state.pickerIdx = 0; chatInput.value = '';
+    renderPopup(); return;
+  }
+  if (e.key === 'Enter') { e.preventDefault(); confirmKey(e.target.value); }
+}
+
+// ═══════════════════════════════════════════════
+//  INPUT EVENTS
+// ═══════════════════════════════════════════════
+
+chatInput.addEventListener('input', () => {
+  state.input = chatInput.value;
+  if (state.pickerMode) return; // popup is open
+  if (chatInput.value.startsWith('/')) {
+    renderPopup();
+  } else {
+    popupArea.classList.remove('visible');
+  }
+});
+
+chatInput.addEventListener('keydown', (e) => {
+  // Ctrl+A / Ctrl+P: open pickers
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+    e.preventDefault();
+    if (state.streaming) return;
+    if (state.pickerMode) { closePicker(); return; }
+    openPicker('provider'); return;
+  }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+    e.preventDefault();
+    if (state.streaming) return;
+    if (state.pickerMode) { closePicker(); return; }
+    // Open command picker: set input to /
+    chatInput.value = '/'; state.input = '/';
+    renderPopup(); return;
+  }
+
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (state.streaming) return;
+
+    // If in provider/key mode, those handlers manage Enter themselves
+    if (state.pickerMode) return;
+
+    // If command popup is visible, run or expand the highlighted command
+    if (popupArea.classList.contains('visible')) {
+      const hl = popup.querySelector('.row.highlight') || popup.querySelector('.row');
+      if (hl) {
+        const cmdText = hl.querySelector('.cmd')?.textContent || '';
+        const val = chatInput.value.trimStart();
+        let fullCmd;
+        if (val.startsWith('/pool ')) {
+          fullCmd = '/pool ' + cmdText;
+        } else if (val.startsWith('/')) {
+          fullCmd = cmdText.startsWith('/') ? cmdText : '/' + cmdText;
+        } else {
+          fullCmd = cmdText;
+        }
+        // If the command has subcommands, display them instead of executing
+        if (!val.startsWith('/pool ') && SUBCOMMANDS[fullCmd]) {
+          chatInput.value = fullCmd + ' ';
+          state.input = chatInput.value;
+          renderPopup();
+          return;
+        }
+        if (val.startsWith('/pool ') && !val.replace(/^\/pool\s+/,'')) {
+          // Already showing subcommands, execute the selected one
+          popupArea.classList.remove('visible');
+          chatInput.value = '';
+          state.input = '';
+          handleSubmit(fullCmd);
+          return;
+        }
+        popupArea.classList.remove('visible');
+        chatInput.value = '';
+        state.input = '';
+        handleSubmit(fullCmd);
+        return;
+      }
+    }
+
+    handleSubmit(chatInput.value);
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    if (state.pickerMode) { closePicker(); return; }
+    chatInput.value = ''; state.input = '';
+    popupArea.classList.remove('visible');
+    return;
+  }
+
+  // Arrow navigation for command popup
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && popupArea.classList.contains('visible') && !state.pickerMode) {
+    e.preventDefault();
+    const rows = popup.querySelectorAll('.row');
+    if (rows.length === 0) return;
+    let cur = -1;
+    rows.forEach((r, i) => { if (r.classList.contains('highlight')) { cur = i; r.classList.remove('highlight'); } });
+    const next = e.key === 'ArrowDown' ? (cur + 1) % rows.length : (cur - 1 + rows.length) % rows.length;
+    rows[next].classList.add('highlight');
+    return;
+  }
+
+  // Tab completion for command popup
+  if (e.key === 'Tab' && popupArea.classList.contains('visible') && !state.pickerMode) {
+    e.preventDefault();
+    const hl = popup.querySelector('.row.highlight');
+    if (!hl) return;
+    const cmd = hl.querySelector('.cmd')?.textContent || '';
+    const val = chatInput.value.trimStart();
+    if (val.startsWith('/pool')) {
+      chatInput.value = val.replace(/^\/pool\s*/, '/pool ') + cmd + ' ';
+    } else {
+      chatInput.value = (cmd.startsWith('/') ? '' : '/') + cmd + ' ';
+    }
+    state.input = chatInput.value;
+    renderPopup();
+    return;
+  }
+});
+
+// Click on popup rows (for command mode)
+popup.addEventListener('click', (e) => {
+  if (state.pickerMode) return; // handled by provider/key handlers
+  const row = e.target.closest('.row');
+  if (!row) return;
+  const cmd = row.querySelector('.cmd')?.textContent || '';
+  const val = chatInput.value.trimStart();
+  if (val.startsWith('/pool ')) {
+    chatInput.value = val.replace(/^\/pool\s*/, '/pool ') + cmd + ' ';
+  } else {
+    chatInput.value = (cmd.startsWith('/') ? '' : '/') + cmd + ' ';
+  }
+  state.input = chatInput.value;
+  renderPopup();
+  chatInput.focus();
+});
+
+// ═══════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════
+
+addMsg('agent', ['Welcome to the holographic self-evolving multi-agent system. Type a message or `/help` to begin.']);
+setInterval(randomStatTick, 5000);
+chatInput.focus();
+document.addEventListener('click', () => { chatInput.focus(); });
+</script>
+
+</body>
+</html>
