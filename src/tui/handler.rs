@@ -120,7 +120,7 @@ impl Tui {
                 let matches: Vec<_> = COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).collect();
                 if !matches.is_empty() {
                     state.command_popup_selection =
-                        state.command_popup_selection.saturating_sub(1).max(matches.len() - 1);
+                        (matches.len() + state.command_popup_selection).saturating_sub(1) % matches.len();
                 }
             }
             KeyCode::Down if state.focus == Focus::Input && state.input.starts_with('/') => {
@@ -428,7 +428,7 @@ impl Tui {
     fn handle_provider_dialog(&self, state: &mut AppState, code: KeyCode) -> bool {
         // Build list: filtered providers + optional "Add Custom" entry at the end.
         let filtered = filter_providers(state.models.providers(), &state.provider_search_query);
-        let custom_label = "➕ Add Custom Provider";
+        let custom_label = "Add Custom Provider";
         let show_custom = self.matches_provider_search(&state.provider_search_query, custom_label);
         let total = filtered.len() + if show_custom { 1 } else { 0 };
 
@@ -443,7 +443,7 @@ impl Tui {
                 state.selected_provider_idx = (state.selected_provider_idx + 1).min(total - 1);
             }
             KeyCode::Up => {
-                state.selected_provider_idx = state.selected_provider_idx.saturating_sub(1);
+                state.selected_provider_idx = (total + state.selected_provider_idx).saturating_sub(1) % total;
             }
             KeyCode::Char(c) => {
                 let byte_idx = char_idx_to_byte_idx(&state.provider_search_query, state.provider_search_cursor);

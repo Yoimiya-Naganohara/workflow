@@ -16,7 +16,7 @@ use crate::models::filter_providers;
 
 pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState) {
     let filtered = filter_providers(state.models.providers(), &state.provider_search_query);
-    let custom_label = "➕ Add Custom Provider";
+    let custom_label = "Add Custom Provider";
     let show_custom = state.provider_search_query.is_empty()
         || state.provider_search_query.to_lowercase().contains("custom")
         || state.provider_search_query.to_lowercase().contains("add")
@@ -102,8 +102,7 @@ pub(crate) fn render_provider_dialog(f: &mut Frame, area: Rect, state: &AppState
     f.render_stateful_widget(
         List::new(items)
             .highlight_style(style::highlight_fg())
-            .highlight_style(style::highlight_bg())
-            .highlight_symbol("▸ "),
+            .highlight_style(style::highlight_bg()),
         chunks[2],
         &mut list_state,
     );
@@ -243,8 +242,7 @@ pub(crate) fn render_model_picker(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_stateful_widget(
         List::new(items)
             .highlight_style(style::highlight_fg())
-            .highlight_style(style::highlight_bg())
-            .highlight_symbol("▸ "),
+            .highlight_style(style::highlight_bg()),
         chunks[2],
         &mut list_state,
     );
@@ -390,8 +388,7 @@ pub(crate) fn render_command_popup(f: &mut Frame, chat_area: Rect, state: &AppSt
         List::new(items)
             .block(style::panel("Commands"))
             .highlight_style(style::highlight_fg())
-            .highlight_style(style::highlight_bg())
-            .highlight_symbol("▸ "),
+            .highlight_style(style::highlight_bg()),
         Rect::new(x, y, popup_w, popup_h),
         &mut list_state,
     );
