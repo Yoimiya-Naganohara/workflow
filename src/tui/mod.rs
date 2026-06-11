@@ -6,6 +6,7 @@ pub mod dialogs;
 pub mod effect;
 pub mod handler;
 pub mod keymap;
+pub mod popup;
 pub mod render;
 pub mod sidebar;
 pub mod state;

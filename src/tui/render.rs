@@ -7,7 +7,6 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use super::Tui;
 use crate::tui::chat::render_chat;
 use crate::tui::chat_lines::build_chat_lines;
-use crate::tui::dialogs;
 use crate::tui::sidebar::render_sidebar;
 use crate::tui::status::render_status_bar;
 
@@ -89,11 +88,12 @@ impl Tui {
             render_chat(f, chat_area, &state, &visible_lines);
             render_status_bar(f, vert_chunks[1], &state);
 
-            // Dialog overlay or command popup
+            // Dialog overlay (full-screen centered).
+            // Popup dialogs (Provider, Key) are rendered inline by render_chat.
             if let Some(dialog) = &state.active_dialog {
-                dialog.render(f, vert_chunks[0], &state.core);
-            } else {
-                dialogs::command_popup::render_command_popup(f, chat_area, &state.ui, &state.core);
+                if dialog.is_overlay() {
+                    dialog.render(f, vert_chunks[0], &state.core);
+                }
             }
         })?;
 

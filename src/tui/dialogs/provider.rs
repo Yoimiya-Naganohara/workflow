@@ -87,7 +87,7 @@ impl ProviderDialog {
             .collect()
     }
 
-    fn show_custom(&self) -> bool {
+    pub(crate) fn show_custom(&self) -> bool {
         self.search_query.is_empty()
             || self.search_query.to_lowercase().contains("custom")
             || self.search_query.to_lowercase().contains("add")
