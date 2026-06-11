@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 
 use crate::core::simd::cosine_similarity_768;
 use crate::core::types::EMBEDDING_DIM;
-use crate::llm::{ProviderProtocol, LlmProvider};
+use crate::llm::{LlmProvider, ProviderProtocol};
 
 // ============================================================================
 //  EmbeddingStrategy

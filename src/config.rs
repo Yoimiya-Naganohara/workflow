@@ -182,11 +182,8 @@ impl EnvConfigSource {
     }
 
     fn probe_tcp(addr: &str) -> bool {
-        std::net::TcpStream::connect_timeout(
-            &addr.parse().expect("static socket addr"),
-            Duration::from_millis(200),
-        )
-        .is_ok()
+        std::net::TcpStream::connect_timeout(&addr.parse().expect("static socket addr"), Duration::from_millis(200))
+            .is_ok()
     }
 }
 

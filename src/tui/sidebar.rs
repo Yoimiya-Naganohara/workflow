@@ -44,18 +44,21 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    let core = &state.core;
+    let ui = &state.ui;
+
     let mut lines: Vec<Line> = Vec::new();
 
     // ── Agent ──
     lines.push(Line::from(section_label("Agent")));
-    if let Some(agent_id) = state.responsible_agent_id {
+    if let Some(agent_id) = core.responsible_agent_id {
         let short_id = format!(
             "{:02x}{:02x}{:02x}{:02x}",
             agent_id[0], agent_id[1], agent_id[2], agent_id[3]
         );
         lines.push(kv("id", Span::styled(short_id, style::value_style())));
 
-        let agent_status = state
+        let agent_status = core
             .agents
             .iter()
             .find(|a| a.id == crate::agent::AgentPool::agent_id_str(&agent_id))
@@ -73,7 +76,7 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
         ));
         lines.push(kv(
             "agents",
-            Span::styled(format!("{} spawned", state.agents.len()), style::value_style()),
+            Span::styled(format!("{} spawned", core.agents.len()), style::value_style()),
         ));
     } else {
         lines.push(kv("id", Span::styled("—", style::hint_style())));
@@ -82,7 +85,7 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
 
     // ── Network ──
     lines.push(Line::from(section_label("Network")));
-    let configured = state.configured_providers.len();
+    let configured = core.configured_providers.len();
     lines.push(kv(
         "config",
         Span::styled(
@@ -96,7 +99,7 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
     ));
     lines.push(kv(
         "stream",
-        if state.active_chat_requests > 0 {
+        if ui.active_chat_requests > 0 {
             Span::styled(
                 "active",
                 Style::default().fg(style::WARNING).add_modifier(Modifier::SLOW_BLINK),
@@ -108,7 +111,7 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
 
     // ── Memory ──
     lines.push(Line::from(section_label("Memory")));
-    if let Some(runtime) = &state.runtime {
+    if let Some(runtime) = &core.runtime {
         if let Ok(rt) = runtime.try_read() {
             let exp_count = rt.experience_count();
             let bedrock = rt.bedrock_count();
@@ -118,7 +121,7 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
             lines.push(kv("bedrock", num_val(bedrock, true)));
             lines.push(kv("fluid", num_val(fluid, false)));
             lines.push(kv("suspend", num_val(pending, false)));
-            lines.push(kv("history", num_val(state.input_history.len(), true)));
+            lines.push(kv("history", num_val(ui.input_history.len(), true)));
         }
     }
 
@@ -126,16 +129,13 @@ pub(crate) fn render_sidebar(f: &mut Frame, area: Rect, state: &AppState) {
     lines.push(Line::from(section_label("Budget")));
     lines.push(kv(
         "used",
-        Span::styled(
-            format!("{}/{}", state.budget_used, state.budget_total),
-            style::value_style(),
-        ),
+        Span::styled(format!("{}/{}", ui.budget_used, ui.budget_total), style::value_style()),
     ));
     lines.push(kv(
         "permits",
         Span::styled(
-            format!("{}", state.permits_available),
-            Style::default().fg(if state.permits_available > 0 {
+            format!("{}", ui.permits_available),
+            Style::default().fg(if ui.permits_available > 0 {
                 style::SUCCESS
             } else {
                 style::ERROR

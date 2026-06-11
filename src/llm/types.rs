@@ -71,7 +71,10 @@ impl ProviderProtocol {
 
     /// Whether this protocol supports embeddings.
     pub fn supports_embeddings(&self) -> bool {
-        matches!(self, Self::OpenAi | Self::OpenAiCompatible | Self::Cohere | Self::Gemini | Self::Mistral)
+        matches!(
+            self,
+            Self::OpenAi | Self::OpenAiCompatible | Self::Cohere | Self::Gemini | Self::Mistral
+        )
     }
 
     /// Whether this protocol supports tool calling.

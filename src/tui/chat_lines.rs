@@ -4,9 +4,9 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use super::state::{AppState, MessageRole, MessageStatus};
+use super::state::{CoreState, MessageRole, MessageStatus};
 
-pub(crate) fn build_chat_lines(state: &AppState, width: usize) -> Vec<Line<'static>> {
+pub(crate) fn build_chat_lines(state: &CoreState, width: usize) -> Vec<Line<'static>> {
     let content_width = width.max(20);
     let body_width = content_width.saturating_sub(4).max(1);
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -47,9 +47,11 @@ pub(crate) fn build_chat_lines(state: &AppState, width: usize) -> Vec<Line<'stat
         for cl in content_lines {
             if is_user {
                 // Add subtle background for user messages
-                let styled_spans: Vec<Span> = cl.spans.into_iter().map(|s| {
-                    Span::styled(s.content, s.style.bg(Color::Rgb(20, 40, 55)))
-                }).collect();
+                let styled_spans: Vec<Span> = cl
+                    .spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content, s.style.bg(Color::Rgb(20, 40, 55))))
+                    .collect();
                 lines.push(Line::from(styled_spans));
             } else {
                 lines.push(cl);
@@ -100,20 +102,20 @@ fn message_header(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::C
     let state_indicator = match message.status {
         MessageStatus::Thinking => Span::styled(
             " \u{25cc}",
-            Style::default().fg(Color::Yellow).bg(bg).add_modifier(Modifier::SLOW_BLINK),
+            Style::default()
+                .fg(Color::Yellow)
+                .bg(bg)
+                .add_modifier(Modifier::SLOW_BLINK),
         ),
         MessageStatus::Streaming => Span::styled(
             " \u{25c9}",
-            Style::default().fg(Color::Cyan).bg(bg).add_modifier(Modifier::SLOW_BLINK),
+            Style::default()
+                .fg(Color::Cyan)
+                .bg(bg)
+                .add_modifier(Modifier::SLOW_BLINK),
         ),
-        MessageStatus::Completed => Span::styled(
-            " \u{2713}",
-            Style::default().fg(Color::Green).bg(bg),
-        ),
-        MessageStatus::Error => Span::styled(
-            " \u{2717}",
-            Style::default().fg(Color::Red).bg(bg),
-        ),
+        MessageStatus::Completed => Span::styled(" \u{2713}", Style::default().fg(Color::Green).bg(bg)),
+        MessageStatus::Error => Span::styled(" \u{2717}", Style::default().fg(Color::Red).bg(bg)),
     };
 
     lines.push(Line::from(vec![state_indicator]));
@@ -688,7 +690,11 @@ fn render_table_output(
     if !headers.is_empty() && headers.iter().any(|h| !h.is_empty()) {
         let mut cells = vec![Span::styled("  \u{2502} ", Style::default().fg(Color::DarkGray))];
         for ci in 0..effective_cols {
-            let cell_text = headers.first().and_then(|h| h.get(ci)).map(|s| s.as_str()).unwrap_or("");
+            let cell_text = headers
+                .first()
+                .and_then(|h| h.get(ci))
+                .map(|s| s.as_str())
+                .unwrap_or("");
             let w = col_widths.get(ci).copied().unwrap_or(0);
             let padded = if ci + 1 < effective_cols {
                 format!("{:<width$} \u{2502} ", cell_text, width = w)

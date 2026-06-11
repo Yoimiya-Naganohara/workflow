@@ -42,12 +42,12 @@ async fn run_tui() -> Result<()> {
     {
         let state_handle = state.clone();
         let mut state = state.write().await;
-        state.budget_total = DEFAULT_RUNTIME_BUDGET;
-        state.budget_used = 0;
-        state.permits_total = DEFAULT_MAX_AGENTS;
-        state.permits_available = DEFAULT_MAX_AGENTS;
-        state.runtime = Some(runtime);
-        state.tool_server = workflow::tools::create_agent_tool_server(state_handle);
+        state.ui.budget_total = DEFAULT_RUNTIME_BUDGET;
+        state.ui.budget_used = 0;
+        state.ui.permits_total = DEFAULT_MAX_AGENTS;
+        state.ui.permits_available = DEFAULT_MAX_AGENTS;
+        state.core.runtime = Some(runtime);
+        state.core.tool_server = workflow::tools::create_agent_tool_server(state_handle);
     }
 
     // Background task: periodic experience pool flush (every 30 seconds)
@@ -57,7 +57,7 @@ async fn run_tui() -> Result<()> {
         loop {
             interval.tick().await;
             let s = flush_state.read().await;
-            if let Some(runtime) = &s.runtime {
+            if let Some(runtime) = &s.core.runtime {
                 if let Ok(rt) = runtime.try_read() {
                     let _ = rt.flush_experience_pool();
                 }
@@ -73,7 +73,7 @@ async fn run_tui() -> Result<()> {
     // Flush experience pool on shutdown
     {
         let state = state.read().await;
-        if let Some(runtime) = &state.runtime {
+        if let Some(runtime) = &state.core.runtime {
             if let Ok(rt) = runtime.try_read() {
                 let _ = rt.flush_experience_pool();
             }

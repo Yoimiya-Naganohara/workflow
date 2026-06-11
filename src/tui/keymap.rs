@@ -23,6 +23,7 @@ pub enum Action {
     SwitchPanel,
 
     // Input
+    TabComplete,
     SendMessage,
     TypeChar(char),
     DeleteChar,
@@ -84,10 +85,7 @@ impl Default for Keymap {
             KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
             Action::CancelResponse,
         );
-        km.bind(
-            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
-            Action::ToggleStatusPanel,
-        );
+        km.bind(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), Action::TabComplete);
 
         // Navigation
         km.bind(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), Action::MoveUp);
@@ -167,6 +165,7 @@ pub fn format_action(action: &Action) -> String {
         Action::Confirm => "Confirm selection",
         Action::Cancel => "Cancel / Close dialog",
         Action::SwitchPanel => "Switch panel",
+        Action::TabComplete => "Complete command / Toggle sidebar",
         Action::SendMessage => "Send message",
         Action::TypeChar(_) => "Type character",
         Action::DeleteChar => "Delete character",

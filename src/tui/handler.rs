@@ -1,65 +1,55 @@
 //! Keyboard and mouse event handler.
 //!
-//! This file only handles input events and mutates UI-level state
-//! (cursor position, dialog visibility, scroll, selection).
-//! All business logic (provider config, chat, persistence, shell)
-//! is delegated to [`crate::tui::controller`].
+//! Handles input events and mutates UI-level state (cursor position,
+//! scroll, selection).  Dialog dispatch is handled by the event loop
+//! in [`mod.rs`] — handler only runs when NO dialog is active.
+//!
+//! Key events are resolved through [`keymap`] so changing a keybinding
+//! only requires editing `keymap.rs`.
+//! Business logic (provider config, shell, persistence) is delegated
+//! to [`crate::tui::controller`] and [`commands`].
 
-use crossterm::event::KeyCode;
-use futures::future::AbortHandle;
+use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::Tui;
-use super::state::{AppState, COMMANDS, ChatMessage, Focus, MessageRole, MessageStatus, SelectedModel};
-use crate::models::filter_providers;
+use super::commands;
+use super::keymap::Action;
+use super::state::{AppState, ChatMessage, Focus, MessageRole, MessageStatus};
 use crate::tui::chat_lines::char_idx_to_byte_idx;
-use crate::tui::controller;
+use crate::tui::effect::Effect;
 
 impl Tui {
+    /// Handle a key event when no dialog is active.
+    /// Returns `true` to continue the event loop, `false` to quit.
     pub(crate) fn handle_chat_keys(&self, state: &mut AppState, key: crossterm::event::KeyEvent) -> bool {
-        let code = key.code;
+        let ui = &mut state.ui;
+        let core = &mut state.core;
 
-        // ── Custom provider dialog ──
-        if state.show_custom_dialog {
-            return self.handle_custom_dialog(state, code);
+        // ── Alt+Enter: insert newline (special case not in keymap) ──
+        if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::ALT) {
+            let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
+            ui.input.insert(byte_idx, '\n');
+            ui.input_cursor += 1;
+            return true;
         }
 
-        // ── Key dialog ──
-        if state.show_key_dialog {
-            return self.handle_key_dialog(state, code, key);
-        }
-
-        // ── Model picker ──
-        if state.show_model_picker {
-            return self.handle_model_picker(state, code);
-        }
-
-        // ── Provider dialog ──
-        if state.show_provider_dialog {
-            return self.handle_provider_dialog(state, code);
-        }
-
-        match code {
-            KeyCode::Esc => {
-                state.focus = Focus::Input;
-                state.input.clear();
-                state.input_cursor = 0;
-                state.command_popup_selection = 0;
+        // ── Resolve through keymap ──
+        match state.keymap.resolve(key) {
+            Action::Cancel => {
+                ui.focus = Focus::Input;
+                ui.input.clear();
+                ui.input_cursor = 0;
+                ui.command_popup_selection = 0;
             }
-            KeyCode::Tab => {
-                if state.focus == Focus::Input && state.input.starts_with('/') {
-                    let prefix = state.input.trim().to_lowercase();
-                    let matches: Vec<_> = COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).collect();
-                    if !matches.is_empty() {
-                        state.command_popup_selection = (state.command_popup_selection + 1) % matches.len();
-                    }
-                } else {
-                    state.show_status_panel = !state.show_status_panel;
-                }
+
+            Action::ToggleStatusPanel => {
+                ui.show_status_panel = !ui.show_status_panel;
             }
-            KeyCode::Char('x') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                if let Some(abort) = state.active_chat_abort.take() {
+
+            Action::CancelResponse => {
+                if let Some(abort) = ui.active_chat_abort.take() {
                     abort.abort();
-                    state.messages.push(ChatMessage {
+                    core.messages.push(ChatMessage {
                         role: MessageRole::System,
                         content: "Stopped current response".to_string(),
                         timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
@@ -67,483 +57,148 @@ impl Tui {
                     });
                 }
             }
-            KeyCode::Down if state.focus == Focus::Chat => {
-                state.chat_scroll = state.chat_scroll.saturating_add(1);
+
+            Action::ScrollDown if ui.focus == Focus::Chat => {
+                ui.chat_scroll = ui.chat_scroll.saturating_add(1);
             }
-            KeyCode::Up if state.focus == Focus::Chat => {
-                state.chat_scroll = state.chat_scroll.saturating_sub(1);
-                state.auto_scroll = false; // manual scroll up = stop auto
+
+            Action::ScrollUp if ui.focus == Focus::Chat => {
+                ui.chat_scroll = ui.chat_scroll.saturating_sub(1);
+                ui.auto_scroll = false;
             }
-            KeyCode::Home if state.focus == Focus::Chat => {
-                state.chat_scroll = 0; // gg → top
-                state.auto_scroll = false;
+
+            Action::ScrollToTop if ui.focus == Focus::Chat => {
+                ui.chat_scroll = 0;
+                ui.auto_scroll = false;
             }
-            KeyCode::End if state.focus == Focus::Chat => {
-                state.chat_scroll = usize::MAX / 2; // G → bottom
-                state.auto_scroll = true;
+
+            Action::ScrollToBottom if ui.focus == Focus::Chat => {
+                ui.chat_scroll = usize::MAX / 2;
+                ui.auto_scroll = true;
             }
-            KeyCode::Enter if state.focus == Focus::Input => {
-                let is_alt = key.modifiers.contains(crossterm::event::KeyModifiers::ALT);
-                if is_alt {
-                    // Alt+Enter: insert newline
-                    let byte_idx = char_idx_to_byte_idx(&state.input, state.input_cursor);
-                    state.input.insert(byte_idx, '\n');
-                    state.input_cursor += 1;
-                } else {
-                    // Enter: submit
-                    return self.handle_input_submit(state);
-                }
+
+            Action::SendMessage if ui.focus == Focus::Input => {
+                return self.handle_input_submit(state);
             }
-            KeyCode::Up
-                if state.focus == Focus::Input && !state.input.starts_with('/') && !state.input_history.is_empty() =>
+
+            Action::HistoryPrev
+                if ui.focus == Focus::Input && !ui.input.starts_with('/') && !ui.input_history.is_empty() =>
             {
-                let idx = state.input_history_idx.unwrap_or(state.input_history.len());
+                let idx = ui.input_history_idx.unwrap_or(ui.input_history.len());
                 let new_idx = idx.saturating_sub(1);
-                state.input_history_idx = Some(new_idx);
-                state.input = state.input_history[new_idx].clone();
-                state.input_cursor = Self::char_count(&state.input);
+                ui.input_history_idx = Some(new_idx);
+                ui.input = ui.input_history[new_idx].clone();
+                ui.input_cursor = Self::char_count(&ui.input);
             }
-            KeyCode::Down if state.focus == Focus::Input && !state.input.starts_with('/') => {
-                if let Some(idx) = state.input_history_idx {
-                    if idx + 1 < state.input_history.len() {
-                        state.input_history_idx = Some(idx + 1);
-                        state.input = state.input_history[idx + 1].clone();
+
+            Action::HistoryNext if ui.focus == Focus::Input && !ui.input.starts_with('/') => {
+                if let Some(idx) = ui.input_history_idx {
+                    if idx + 1 < ui.input_history.len() {
+                        ui.input_history_idx = Some(idx + 1);
+                        ui.input = ui.input_history[idx + 1].clone();
                     } else {
-                        state.input_history_idx = None;
-                        state.input.clear();
+                        ui.input_history_idx = None;
+                        ui.input.clear();
                     }
-                    state.input_cursor = Self::char_count(&state.input);
+                    ui.input_cursor = Self::char_count(&ui.input);
                 }
             }
-            KeyCode::Up if state.focus == Focus::Input && state.input.starts_with('/') => {
-                let prefix = state.input.trim().to_lowercase();
-                let matches: Vec<_> = COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).collect();
+
+            Action::CommandPrev if ui.focus == Focus::Input && ui.input.starts_with('/') => {
+                let prefix = ui.input.trim().to_lowercase();
+                let matches: Vec<_> = commands::COMMANDS
+                    .iter()
+                    .filter(|(cmd, _)| cmd.starts_with(&prefix))
+                    .collect();
                 if !matches.is_empty() {
-                    state.command_popup_selection =
-                        (matches.len() + state.command_popup_selection).saturating_sub(1) % matches.len();
+                    ui.command_popup_selection =
+                        (matches.len() + ui.command_popup_selection).saturating_sub(1) % matches.len();
                 }
             }
-            KeyCode::Down if state.focus == Focus::Input && state.input.starts_with('/') => {
-                let prefix = state.input.trim().to_lowercase();
-                let matches: Vec<_> = COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).collect();
+
+            Action::CommandNext if ui.focus == Focus::Input && ui.input.starts_with('/') => {
+                let prefix = ui.input.trim().to_lowercase();
+                let matches: Vec<_> = commands::COMMANDS
+                    .iter()
+                    .filter(|(cmd, _)| cmd.starts_with(&prefix))
+                    .collect();
                 if !matches.is_empty() {
-                    state.command_popup_selection = (state.command_popup_selection + 1) % matches.len();
+                    ui.command_popup_selection = (ui.command_popup_selection + 1) % matches.len();
                 }
             }
-            KeyCode::Char(c)
-                if state.focus == Focus::Input
-                    && (key.modifiers.is_empty() || key.modifiers == crossterm::event::KeyModifiers::SHIFT) =>
-            {
-                let byte_idx = char_idx_to_byte_idx(&state.input, state.input_cursor);
-                state.input.insert(byte_idx, c);
-                state.input_cursor += 1;
-                state.input_history_idx = None;
-                if state.input.starts_with('/') {
-                    state.command_popup_selection = 0;
-                }
-            }
-            KeyCode::Backspace if state.focus == Focus::Input => {
-                if state.input_cursor > 0 {
-                    state.input_cursor -= 1;
-                    let byte_idx = char_idx_to_byte_idx(&state.input, state.input_cursor);
-                    state.input.remove(byte_idx);
-                    state.input_history_idx = None;
-                    if state.input.starts_with('/') {
-                        state.command_popup_selection = 0;
-                    }
-                }
-            }
-            KeyCode::Left if state.focus == Focus::Input => {
-                state.input_cursor = state.input_cursor.saturating_sub(1);
-            }
-            KeyCode::Right if state.focus == Focus::Input => {
-                if state.input_cursor < Self::char_count(&state.input) {
-                    state.input_cursor += 1;
-                }
-            }
-            _ => {}
-        }
-        true
-    }
 
-    // ── Dialog sub-handlers ──
-
-    fn handle_key_dialog(&self, state: &mut AppState, code: KeyCode, _key: crossterm::event::KeyEvent) -> bool {
-        match code {
-            KeyCode::Esc => {
-                state.show_key_dialog = false;
-                state.key_input.clear();
-                state.key_cursor = 0;
-            }
-            KeyCode::Char(c) => {
-                let byte_idx = char_idx_to_byte_idx(&state.key_input, state.key_cursor);
-                state.key_input.insert(byte_idx, c);
-                state.key_cursor += 1;
-            }
-            KeyCode::Backspace => {
-                if state.key_cursor > 0 {
-                    state.key_cursor -= 1;
-                    let byte_idx = char_idx_to_byte_idx(&state.key_input, state.key_cursor);
-                    state.key_input.remove(byte_idx);
-                }
-            }
-            KeyCode::Left => {
-                state.key_cursor = state.key_cursor.saturating_sub(1);
-            }
-            KeyCode::Right => {
-                if state.key_cursor < Self::char_count(&state.key_input) {
-                    state.key_cursor += 1;
-                }
-            }
-            KeyCode::Enter => {
-                if let Some(provider_id) = state.key_provider_id.clone()
-                    && let Some(provider) = state.models.providers().iter().find(|p| p.id == provider_id)
-                {
-                    let env_key = provider.env.first().cloned().unwrap_or_default();
-                    let provider_name = provider.name.clone();
-                    if !env_key.is_empty() && !state.key_input.is_empty() {
-                        state.api_keys.insert(env_key.clone(), state.key_input.clone());
-                        state.models.select_provider(&provider_id);
-                        if !state.configured_providers.contains(&provider_id) {
-                            state.configured_providers.push(provider_id.clone());
-                        }
-                        state.provider_clients.remove(&provider_id);
-                        let _ = controller::get_or_create_provider_client(state, &provider_id);
-                        let now = chrono::Local::now().format("%H:%M:%S").to_string();
-                        state.messages.push(ChatMessage {
-                            role: MessageRole::System,
-                            content: format!("{} key set for {}", env_key, provider_name),
-                            timestamp: now,
-                            status: MessageStatus::Completed,
-                        });
-                        if let Err(e) = controller::save_api_key(&provider_id, &env_key, &state.key_input) {
-                            state.messages.push(ChatMessage {
-                                role: MessageRole::System,
-                                content: format!("Failed to save config: {}", e),
-                                timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                                status: MessageStatus::Completed,
-                            });
-                        }
-                    }
-                }
-                let return_to_picker = state.return_to_model_picker;
-                state.show_key_dialog = false;
-                state.key_input.clear();
-                state.key_cursor = 0;
-                state.key_provider_id = None;
-                state.show_provider_dialog = false;
-                state.provider_search_query.clear();
-                state.provider_search_cursor = 0;
-                state.selected_provider_idx = 0;
-                if return_to_picker {
-                    state.show_model_picker = true;
-                    state.selected_model_picker_idx = 0;
-                    state.model_picker_search_query.clear();
-                    state.model_picker_search_cursor = 0;
-                    state.return_to_model_picker = false;
-                }
-            }
-            _ => {}
-        }
-        true
-    }
-
-    // ── Custom provider wizard ──
-
-    fn handle_custom_dialog(&self, state: &mut AppState, code: KeyCode) -> bool {
-        let step = state.custom_step;
-        match code {
-            KeyCode::Esc => {
-                state.show_custom_dialog = false;
-                state.custom_step = 0;
-                state.custom_name.clear();
-                state.custom_url.clear();
-                state.custom_key.clear();
-                state.custom_models.clear();
-                state.custom_input.clear();
-                state.custom_cursor = 0;
-            }
-            KeyCode::Char(c) => {
-                let byte_idx = char_idx_to_byte_idx(&state.custom_input, state.custom_cursor);
-                state.custom_input.insert(byte_idx, c);
-                state.custom_cursor += 1;
-            }
-            KeyCode::Backspace => {
-                if state.custom_cursor > 0 {
-                    state.custom_cursor -= 1;
-                    let byte_idx = char_idx_to_byte_idx(&state.custom_input, state.custom_cursor);
-                    state.custom_input.remove(byte_idx);
-                }
-            }
-            KeyCode::Left => {
-                state.custom_cursor = state.custom_cursor.saturating_sub(1);
-            }
-            KeyCode::Right => {
-                if state.custom_cursor < Self::char_count(&state.custom_input) {
-                    state.custom_cursor += 1;
-                }
-            }
-            KeyCode::Enter => {
-                let input = state.custom_input.trim().to_string();
-                match step {
-                    0 => {
-                        // Provider name
-                        if !input.is_empty() {
-                            state.custom_name = input;
-                            state.custom_step = 1;
-                            state.custom_input.clear();
-                            state.custom_cursor = 0;
-                        }
-                    }
-                    1 => {
-                        // API URL
-                        if !input.is_empty() {
-                            state.custom_url = input;
-                            state.custom_step = 2;
-                            state.custom_input.clear();
-                            state.custom_cursor = 0;
-                        }
-                    }
-                    2 => {
-                        // API key
-                        state.custom_key = input;
-                        state.custom_step = 3;
-                        state.custom_input.clear();
-                        state.custom_cursor = 0;
-                    }
-                    3 => {
-                        // Model IDs — save
-                        let name = state.custom_name.clone();
-                        let url = state.custom_url.clone();
-                        let key = state.custom_key.clone();
-                        let models = input;
-                        state.custom_models = models.clone();
-                        state.show_custom_dialog = false;
-                        state.custom_step = 0;
-                        state.custom_input.clear();
-                        state.custom_cursor = 0;
-                        state.custom_name.clear();
-                        state.custom_url.clear();
-                        state.custom_key.clear();
-                        state.custom_models.clear();
-                        controller::save_custom_provider(state, &name, &url, &key, &models);
-                    }
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-        true
-    }
-
-    fn handle_model_picker(&self, state: &mut AppState, code: KeyCode) -> bool {
-        // Only show models from configured providers.
-        let results = state
-            .models
-            .search_configured_models(&state.model_picker_search_query, &state.configured_providers);
-        match code {
-            KeyCode::Esc => {
-                state.show_model_picker = false;
-                state.model_picker_search_query.clear();
-                state.model_picker_search_cursor = 0;
-                state.selected_model_picker_idx = 0;
-            }
-            KeyCode::Down if !results.is_empty() => {
-                state.selected_model_picker_idx = (state.selected_model_picker_idx + 1).min(results.len() - 1);
-            }
-            KeyCode::Up => {
-                state.selected_model_picker_idx = state.selected_model_picker_idx.saturating_sub(1);
-            }
-            KeyCode::Char(c) => {
-                let byte_idx = char_idx_to_byte_idx(&state.model_picker_search_query, state.model_picker_search_cursor);
-                state.model_picker_search_query.insert(byte_idx, c);
-                state.model_picker_search_cursor += 1;
-                state.selected_model_picker_idx = 0;
-            }
-            KeyCode::Backspace => {
-                if state.model_picker_search_cursor > 0 {
-                    state.model_picker_search_cursor -= 1;
-                    let byte_idx =
-                        char_idx_to_byte_idx(&state.model_picker_search_query, state.model_picker_search_cursor);
-                    state.model_picker_search_query.remove(byte_idx);
-                    state.selected_model_picker_idx = 0;
-                }
-            }
-            KeyCode::Left => {
-                state.model_picker_search_cursor = state.model_picker_search_cursor.saturating_sub(1);
-            }
-            KeyCode::Right => {
-                if state.model_picker_search_cursor < Self::char_count(&state.model_picker_search_query) {
-                    state.model_picker_search_cursor += 1;
-                }
-            }
-            KeyCode::Enter => {
-                if let Some((provider, model)) = results.get(state.selected_model_picker_idx) {
-                    let provider_id = provider.id.clone();
-                    let model_id = model.id.clone();
-                    let provider_name = provider.name.clone();
-                    let model_name = model.name.clone();
-
-                    if let Some(pos) = state
-                        .selected_models
+            Action::TabComplete => {
+                if ui.focus == Focus::Input && ui.input.starts_with('/') {
+                    let prefix = ui.input.trim().to_lowercase();
+                    let matches: Vec<_> = commands::COMMANDS
                         .iter()
-                        .position(|sm| sm.provider_id == provider_id && sm.model_id == model_id)
-                    {
-                        state.selected_models.remove(pos);
-                        let now = chrono::Local::now().format("%H:%M:%S").to_string();
-                        state.messages.push(ChatMessage {
-                            role: MessageRole::System,
-                            content: format!("Removed: {} / {}", provider_name, model_name),
-                            timestamp: now,
-                            status: MessageStatus::Completed,
-                        });
-                    } else {
-                        let ctx = state.models.get_context_limit(&provider_id, &model_id);
-                        state.selected_models.push(SelectedModel {
-                            provider_id,
-                            model_id,
-                            provider_name: provider_name.clone(),
-                            model_name: model_name.clone(),
-                        });
-                        state.input.clear();
-                        state.input_cursor = 0;
-                        state.chat_scroll = 0;
-                        state.context_limit = ctx;
+                        .filter(|(cmd, _)| cmd.starts_with(&prefix))
+                        .collect();
+                    if !matches.is_empty() {
+                        ui.command_popup_selection = (ui.command_popup_selection + 1) % matches.len();
                     }
-                    if let Err(e) = controller::save_selected_models(&state.selected_models) {
-                        state.messages.push(ChatMessage {
-                            role: MessageRole::System,
-                            content: format!("Failed to save: {}", e),
-                            timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                            status: MessageStatus::Completed,
-                        });
+                } else {
+                    ui.show_status_panel = !ui.show_status_panel;
+                }
+            }
+
+            Action::TypeChar(c) if ui.focus == Focus::Input => {
+                let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
+                ui.input.insert(byte_idx, c);
+                ui.input_cursor += 1;
+                ui.input_history_idx = None;
+                if ui.input.starts_with('/') {
+                    ui.command_popup_selection = 0;
+                }
+            }
+
+            Action::DeleteChar if ui.focus == Focus::Input => {
+                if ui.input_cursor > 0 {
+                    ui.input_cursor -= 1;
+                    let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
+                    ui.input.remove(byte_idx);
+                    ui.input_history_idx = None;
+                    if ui.input.starts_with('/') {
+                        ui.command_popup_selection = 0;
                     }
                 }
             }
+
+            Action::MoveLeft if ui.focus == Focus::Input => {
+                ui.input_cursor = ui.input_cursor.saturating_sub(1);
+            }
+
+            Action::MoveRight if ui.focus == Focus::Input => {
+                if ui.input_cursor < Self::char_count(&ui.input) {
+                    ui.input_cursor += 1;
+                }
+            }
+
+            // Tab without command prefix — handled at top of call (keymap returns None for bare Tab)
+            // Fall through to default match below.
             _ => {}
         }
         true
-    }
-
-    fn handle_provider_dialog(&self, state: &mut AppState, code: KeyCode) -> bool {
-        // Build list: filtered providers + optional "Add Custom" entry at the end.
-        let filtered = filter_providers(state.models.providers(), &state.provider_search_query);
-        let custom_label = "Add Custom Provider";
-        let show_custom = self.matches_provider_search(&state.provider_search_query, custom_label);
-        let total = filtered.len() + if show_custom { 1 } else { 0 };
-
-        match code {
-            KeyCode::Esc => {
-                state.show_provider_dialog = false;
-                state.provider_search_query.clear();
-                state.provider_search_cursor = 0;
-                state.selected_provider_idx = 0;
-            }
-            KeyCode::Down if total > 0 => {
-                state.selected_provider_idx = (state.selected_provider_idx + 1).min(total - 1);
-            }
-            KeyCode::Up => {
-                state.selected_provider_idx = (total + state.selected_provider_idx).saturating_sub(1) % total;
-            }
-            KeyCode::Char(c) => {
-                let byte_idx = char_idx_to_byte_idx(&state.provider_search_query, state.provider_search_cursor);
-                state.provider_search_query.insert(byte_idx, c);
-                state.provider_search_cursor += 1;
-                state.selected_provider_idx = 0;
-            }
-            KeyCode::Backspace => {
-                if state.provider_search_cursor > 0 {
-                    state.provider_search_cursor -= 1;
-                    let byte_idx = char_idx_to_byte_idx(&state.provider_search_query, state.provider_search_cursor);
-                    state.provider_search_query.remove(byte_idx);
-                    state.selected_provider_idx = 0;
-                }
-            }
-            KeyCode::Left => {
-                state.provider_search_cursor = state.provider_search_cursor.saturating_sub(1);
-            }
-            KeyCode::Right => {
-                if state.provider_search_cursor < Self::char_count(&state.provider_search_query) {
-                    state.provider_search_cursor += 1;
-                }
-            }
-            KeyCode::Enter => {
-                if filtered.is_empty() && !show_custom {
-                    return true;
-                }
-                // Check if the "Add Custom" entry is selected (last position).
-                let is_custom_selected = show_custom && state.selected_provider_idx == filtered.len();
-                if is_custom_selected {
-                    // Open the custom provider wizard.
-                    state.show_provider_dialog = false;
-                    state.show_custom_dialog = true;
-                    state.custom_step = 0;
-                    state.custom_name.clear();
-                    state.custom_url.clear();
-                    state.custom_key.clear();
-                    state.custom_models.clear();
-                    state.custom_input.clear();
-                    state.custom_cursor = 0;
-                    state.provider_search_query.clear();
-                    state.provider_search_cursor = 0;
-                    state.selected_provider_idx = 0;
-                    return true;
-                }
-                if let Some(provider) = filtered.get(state.selected_provider_idx) {
-                    let provider_id = provider.id.clone();
-                    if controller::is_no_auth_provider(&provider_id) {
-                        state.show_provider_dialog = false;
-                        let return_to_picker = state.return_to_model_picker;
-                        state.provider_search_query.clear();
-                        state.provider_search_cursor = 0;
-                        state.selected_provider_idx = 0;
-                        controller::setup_no_auth_provider(state, &provider_id);
-                        if return_to_picker {
-                            state.show_model_picker = true;
-                            state.selected_model_picker_idx = 0;
-                            state.model_picker_search_query.clear();
-                            state.model_picker_search_cursor = 0;
-                            state.return_to_model_picker = false;
-                        }
-                    } else {
-                        state.show_provider_dialog = false;
-                        state.show_key_dialog = true;
-                        state.key_provider_id = Some(provider_id);
-                        state.key_input.clear();
-                        state.key_cursor = 0;
-                        state.provider_search_query.clear();
-                        state.provider_search_cursor = 0;
-                    }
-                }
-            }
-            _ => {}
-        }
-        true
-    }
-
-    /// Check if a provider search query matches a label (for custom entry filtering).
-    fn matches_provider_search(&self, query: &str, label: &str) -> bool {
-        if query.is_empty() {
-            return true;
-        }
-        let q = query.to_lowercase();
-        label.to_lowercase().contains(&q) || q.contains("custom") || q.contains("add")
     }
 
     // ── Input submit ──
 
     fn handle_input_submit(&self, state: &mut AppState) -> bool {
-        if state.input.starts_with('/') && !state.input.trim().is_empty() {
-            let prefix = state.input.trim().to_lowercase();
-            let matches: Vec<_> = COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).collect();
-            if let Some((cmd, _)) = matches.get(state.command_popup_selection.min(matches.len().saturating_sub(1))) {
-                state.input = cmd.to_string();
-                state.input_cursor = Self::char_count(&state.input);
-                state.command_popup_selection = 0;
+        // Auto-complete partial command from popup
+        if state.ui.input.starts_with('/') && !state.ui.input.trim().is_empty() {
+            let prefix = state.ui.input.trim().to_lowercase();
+            let matches: Vec<_> = commands::COMMANDS
+                .iter()
+                .filter(|(cmd, _)| cmd.starts_with(&prefix))
+                .collect();
+            if let Some((cmd, _)) = matches.get(state.ui.command_popup_selection.min(matches.len().saturating_sub(1))) {
+                state.ui.input = cmd.to_string();
+                state.ui.input_cursor = Self::char_count(&state.ui.input);
+                state.ui.command_popup_selection = 0;
             }
         }
 
-        let input = state.input.clone();
+        let input = state.ui.input.clone();
         if input.is_empty() {
             return true;
         }
@@ -551,259 +206,135 @@ impl Tui {
         let now = chrono::Local::now().format("%H:%M:%S").to_string();
         let trimmed = input.trim();
 
-        // ── Slash commands (UI state only; business logic delegated to controller) ──
-
-        if trimmed == "/connect" {
-            state.input.clear();
-            state.input_cursor = 0;
-            state.show_provider_dialog = true;
-            state.selected_provider_idx = 0;
-            state.provider_search_query.clear();
-            state.provider_search_cursor = 0;
-            tokio::spawn(controller::fetch_model_registry(self.state.clone()));
-            return true;
-        }
-
-        if trimmed == "/models" || trimmed == "/model" {
-            if state.configured_providers.is_empty() {
-                state.messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "No providers configured. Use `/connect` first.".to_string(),
-                    timestamp: now.clone(),
-                    status: MessageStatus::Completed,
-                });
-                state.input.clear();
-                state.input_cursor = 0;
-                return true;
-            }
-            state.show_model_picker = true;
-            state.selected_model_picker_idx = 0;
-            state.model_picker_search_query.clear();
-            state.model_picker_search_cursor = 0;
-            state.messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: "Select models to add to your pool".to_string(),
-                timestamp: now.clone(),
-                status: MessageStatus::Completed,
-            });
-            state.input.clear();
-            state.input_cursor = 0;
-            return true;
-        }
-
-        if trimmed == "/keymap" {
-            let bindings = state.keymap.all_bindings();
-            let mut lines = vec!["Keyboard Shortcuts:".to_string(), String::new()];
-            for (key, action) in &bindings {
-                lines.push(format!("  {:20} {}", key, crate::tui::keymap::format_action(action)));
-            }
-            state.messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: lines.join("\n"),
-                timestamp: now.clone(),
-                status: MessageStatus::Completed,
-            });
-            state.input.clear();
-            state.input_cursor = 0;
-            return true;
-        }
-
-        if trimmed == "/help" || trimmed == "/?" {
-            let help_text = [
-                "/connect        - Configure a provider (API key + custom)",
-                "/models         - Manage model pool (add/remove models)",
-                "/custom         - Add/list/remove custom providers",
-                "/clear          - Clear conversation",
-                "/sh <cmd>       - Run a shell command",
-                "/help           - Show this help",
-                "",
-                "Ctrl+X          - Stop current response",
-                "Ctrl+C          - Quit",
-            ]
-            .join("\n");
-            state.messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: help_text,
-                timestamp: now.clone(),
-                status: MessageStatus::Completed,
-            });
-            state.input.clear();
-            state.input_cursor = 0;
-            return true;
-        }
-
-        if trimmed == "/clear" || trimmed == "/new" {
-            state.messages.clear();
-            state.messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: "Workflow Agent — conversation cleared. Describe your goal and I'll help.".to_string(),
-                timestamp: now.clone(),
-                status: MessageStatus::Completed,
-            });
-            state.input.clear();
-            state.input_cursor = 0;
-            state.chat_scroll = 0;
-            state.responsible_agent_id = None;
-            return true;
-        }
-
-        if trimmed == "/sh" {
-            state.messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: "Usage: /sh <command>".to_string(),
-                timestamp: now.clone(),
-                status: MessageStatus::Completed,
-            });
-            state.input.clear();
-            state.input_cursor = 0;
-            return true;
-        }
-
-        if let Some(cmd) = trimmed.strip_prefix("/sh ") {
-            let arg = cmd.trim();
-            if !arg.is_empty() {
-                state.messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: format!("$ {}", arg),
-                    timestamp: now.clone(),
-                    status: MessageStatus::Completed,
-                });
-                controller::execute_shell(&self.state, arg);
-            }
-            state.input.clear();
-            state.input_cursor = 0;
-            state.chat_scroll = 0;
-            return true;
-        }
-
-        // ── Pool commands ──
-
-        if trimmed == "/pool" {
-            let help = [
-                "Pool commands:",
-                "  /pool stats      - Show experience pool statistics",
-                "  /pool flush      - Flush bedrock to disk",
-                "  /pool clear      - Clear both tracks",
-                "  /pool query <q>  - Query experiences by text similarity",
-                "  /pool export     - Export experiences as JSON",
-                "  /pool import     - Import experiences from JSON",
-            ]
-            .join("\n");
-            state.messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: help,
-                timestamp: now.clone(),
-                status: MessageStatus::Completed,
-            });
-            state.input.clear();
-            state.input_cursor = 0;
-            return true;
-        }
-
-        if let Some(arg) = trimmed.strip_prefix("/pool ") {
-            let arg = arg.trim();
-            controller::execute_pool_command(&self.state, arg, &now);
-            state.input.clear();
-            state.input_cursor = 0;
-            return true;
-        }
-
-        // ── Custom provider commands ──
-
-        if trimmed == "/custom" {
-            let help = [
-                "Custom Provider Commands:",
-                "  /custom add                              - Add a new custom provider (wizard)",
-                "  /custom list                             - List configured custom providers",
-                "  /custom remove <name>                    - Remove a custom provider",
-            ]
-            .join("\n");
-            state.messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: help,
-                timestamp: now.clone(),
-                status: MessageStatus::Completed,
-            });
-            state.input.clear();
-            state.input_cursor = 0;
-            return true;
-        }
-
-        if trimmed == "/custom add" {
-            state.show_custom_dialog = true;
-            state.custom_step = 0;
-            state.custom_name.clear();
-            state.custom_url.clear();
-            state.custom_key.clear();
-            state.custom_models.clear();
-            state.custom_input.clear();
-            state.custom_cursor = 0;
-            state.input.clear();
-            state.input_cursor = 0;
-            return true;
-        }
-
-        if trimmed == "/custom list" {
-            controller::list_custom_providers(&self.state, &now);
-            state.input.clear();
-            state.input_cursor = 0;
-            return true;
-        }
-
-        if let Some(arg) = trimmed.strip_prefix("/custom remove ") {
-            let name = arg.trim();
-            if !name.is_empty() {
-                controller::remove_custom_provider(&self.state, name, &now);
-            }
-            state.input.clear();
-            state.input_cursor = 0;
+        // ── Slash commands — delegated to commands module ──
+        if trimmed.starts_with('/') && commands::dispatch(trimmed, state, &self.state, &now) {
             return true;
         }
 
         // ── Regular chat message ──
+        let core = &mut state.core;
+        let ui = &mut state.ui;
 
-        if state.active_chat_requests > 0 {
-            state.messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: "Already processing a request. Wait or press Ctrl+X to cancel.".to_string(),
-                timestamp: now.clone(),
-                status: MessageStatus::Completed,
-            });
+        if ui.active_chat_requests > 0 {
+            core.messages.push(ChatMessage::system(
+                "Already processing a request. Wait or press Ctrl+X to cancel.",
+            ));
+            ui.input.clear();
+            ui.input_cursor = 0;
             return true;
         }
 
-        state.auto_scroll = true;
-        state.input_history.push(input.clone());
-        state.input_history_idx = None;
+        ui.auto_scroll = true;
+        ui.input_history.push(input.clone());
+        ui.input_history_idx = None;
 
-        state.messages.push(ChatMessage {
+        core.messages.push(ChatMessage {
             role: MessageRole::User,
             content: input.clone(),
             timestamp: now.clone(),
             status: MessageStatus::Completed,
         });
 
-        let response_index = state.messages.len();
-        state.messages.push(ChatMessage {
+        let response_index = core.messages.len();
+        core.messages.push(ChatMessage {
             role: MessageRole::Agent,
             content: String::new(),
             timestamp: now.clone(),
             status: MessageStatus::Thinking,
         });
 
-        let request_id = state.active_chat_request_id.wrapping_add(1);
-        state.active_chat_request_id = request_id;
-        state.active_chat_requests = 1;
-        let abort_handle: AbortHandle = controller::submit_chat(&self.state, &input, response_index, request_id);
-        state.active_chat_abort = Some(abort_handle);
+        let request_id = ui.active_chat_request_id.wrapping_add(1);
+        ui.active_chat_request_id = request_id;
+        ui.active_chat_requests = 1;
 
-        state.input.clear();
-        state.input_cursor = 0;
-        state.chat_scroll = 0;
+        // Collect data for the chat effect
+        let default_tool_prompt = concat!(
+            "You are a helpful assistant with access to tools. ",
+            "You can read/write files, execute shell commands, and list directories. ",
+            "Always use the appropriate tool when asked. ",
+            "Produce a concrete result."
+        );
+        let (provider, model_id, system_prompt) = {
+            // Try to get an initial agent and configure the provider
+            let agent_id = crate::tui::controller::ensure_initial_agent_sync(core, &input);
+            let provider = core
+                .runtime
+                .as_ref()
+                .and_then(|rt| rt.try_read().ok().and_then(|r| r.provider.clone()));
+            let mid = provider
+                .as_ref()
+                .and_then(|_| {
+                    core.runtime
+                        .as_ref()
+                        .and_then(|rt| rt.try_read().ok().map(|r| r.model_id.clone()))
+                })
+                .unwrap_or_default();
+            let agent_prompt = agent_id
+                .as_ref()
+                .and_then(|aid| {
+                    let pool = core.agent_pool.try_read().ok()?;
+                    pool.get_agent(aid).map(|a| a.config.system_prompt.clone())
+                })
+                .unwrap_or_else(|| default_tool_prompt.to_string());
+            let sp = format!(
+                "{}\n\nYou are the workflow agent. Chat with the user, clarify the goal, and delegate tasks by calling the `spawn_agent` tool (roles: planner, developer, tester, reviewer, worker, etc.). You are fully responsible for all spawned agents.\n\nYou have access to tools: read_file, write_file, sh, list_dir, and spawn_agent.",
+                agent_prompt
+            );
+            (provider, mid, sp)
+        };
+
+        let (abort_handle, abort_registration) = futures::future::AbortHandle::new_pair();
+        ui.active_chat_abort = Some(abort_handle);
+
+        // Build conversation history (exclude current turn's messages)
+        let history = {
+            let mut hist: Vec<(String, String)> = Vec::new();
+            for (i, msg) in core.messages.iter().enumerate() {
+                if i >= response_index.saturating_sub(1) {
+                    break;
+                }
+                match msg.role {
+                    crate::tui::state::MessageRole::User => {
+                        hist.push(("user".to_string(), msg.content.clone()));
+                    }
+                    crate::tui::state::MessageRole::Agent => {
+                        hist.push(("assistant".to_string(), msg.content.clone()));
+                    }
+                    _ => {}
+                }
+            }
+            hist
+        };
+
+        if let Some(provider) = provider {
+            state.effects.push(Effect::StartChat {
+                input: input.clone(),
+                response_index,
+                request_id,
+                model_id,
+                system_prompt,
+                history,
+                tool_server: core.tool_server.clone(),
+                provider,
+                runtime: core.runtime.clone(),
+                abort_registration,
+            });
+        } else {
+            if let Some(msg) = core.messages.get_mut(response_index) {
+                msg.content = "No LLM provider configured".to_string();
+                msg.status = MessageStatus::Error;
+            }
+            ui.active_chat_requests = 0;
+            ui.active_chat_abort = None;
+        }
+
+        ui.input.clear();
+        ui.input_cursor = 0;
+        ui.chat_scroll = 0;
         true
     }
 
-    // ── Utility — kept here because they're purely string-manipulation ──
+    // ── Utility ──
 
     fn char_count(s: &str) -> usize {
         s.chars().count()

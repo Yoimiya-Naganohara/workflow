@@ -12,23 +12,16 @@ use ratatui::{
 use crate::models::filter_providers;
 use crate::tui::chat_lines::char_idx_to_byte_idx;
 
-use super::{style, AppState, CoreState, DialogTransition, UiState};
+use crate::tui::style;
 
-#[derive(Clone, Debug)]
+use super::DialogTransition;
+use crate::tui::state::{ChatMessage, CoreState, MessageRole, MessageStatus};
+
+#[derive(Clone, Debug, Default)]
 pub struct ProviderDialog {
     pub search_query: String,
     pub search_cursor: usize,
     pub selected_idx: usize,
-}
-
-impl Default for ProviderDialog {
-    fn default() -> Self {
-        Self {
-            search_query: String::new(),
-            search_cursor: 0,
-            selected_idx: 0,
-        }
-    }
 }
 
 impl ProviderDialog {
@@ -87,7 +80,7 @@ impl ProviderDialog {
         }
     }
 
-    fn filtered(&self, state: &CoreState) -> Vec<(usize, &crate::models::Provider)> {
+    fn filtered<'a>(&self, state: &'a CoreState) -> Vec<(usize, &'a crate::models::Provider)> {
         filter_providers(state.models.providers(), &self.search_query)
             .into_iter()
             .enumerate()
@@ -107,7 +100,6 @@ impl ProviderDialog {
 
     fn select(&mut self, state: &mut CoreState) -> DialogTransition {
         let filtered = self.filtered(state);
-        let total = self.total_items(state);
         if filtered.is_empty() && !self.show_custom() {
             return DialogTransition::None;
         }
@@ -115,7 +107,7 @@ impl ProviderDialog {
         let is_custom = self.show_custom() && self.selected_idx == filtered.len();
         if is_custom {
             return DialogTransition::Switch(super::ActiveDialog::CustomWizard(
-                super::CustomWizard::new(),
+                crate::tui::dialogs::custom_wizard::CustomWizard::new(),
             ));
         }
 
@@ -126,7 +118,7 @@ impl ProviderDialog {
                 return DialogTransition::Close;
             } else {
                 return DialogTransition::Switch(super::ActiveDialog::Key(
-                    super::KeyDialog::for_provider(provider_id),
+                    crate::tui::dialogs::key::KeyDialog::for_provider(provider_id),
                 ));
             }
         }
@@ -148,11 +140,11 @@ impl ProviderDialog {
             .map(|p| p.name.as_str())
             .unwrap_or(provider_id);
         let now = chrono::Local::now().format("%H:%M:%S").to_string();
-        state.messages.push(super::ChatMessage {
-            role: super::MessageRole::System,
+        state.messages.push(ChatMessage {
+            role: MessageRole::System,
             content: format!("{} configured (no API key required)", provider_name),
             timestamp: now,
-            status: super::MessageStatus::Completed,
+            status: MessageStatus::Completed,
         });
     }
 

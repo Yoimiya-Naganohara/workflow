@@ -61,10 +61,8 @@ impl ProviderClient {
     pub fn mark_success(&self) {
         self.healthy.store(true, Ordering::Relaxed);
         self.error_count.store(0, Ordering::Relaxed);
-        self.last_used.store(
-            Instant::now().elapsed().as_nanos() as u64,
-            Ordering::Relaxed,
-        );
+        self.last_used
+            .store(Instant::now().elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
 
     /// Mark a failed call. Marks unhealthy after 3 consecutive failures.

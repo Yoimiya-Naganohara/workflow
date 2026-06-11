@@ -154,12 +154,18 @@ mod tests {
         assert_eq!(ProviderProtocol::from_id("llamafile"), ProviderProtocol::Llamafile);
         assert_eq!(ProviderProtocol::from_id("azure"), ProviderProtocol::Azure);
         assert_eq!(ProviderProtocol::from_id("github-copilot"), ProviderProtocol::Copilot);
-        assert_eq!(ProviderProtocol::from_id("custom-myapi"), ProviderProtocol::OpenAiCompatible);
+        assert_eq!(
+            ProviderProtocol::from_id("custom-myapi"),
+            ProviderProtocol::OpenAiCompatible
+        );
     }
 
     #[test]
     fn test_unknown_provider_falls_back_to_openai_compatible() {
-        assert_eq!(ProviderProtocol::from_id("some-new-provider"), ProviderProtocol::OpenAiCompatible);
+        assert_eq!(
+            ProviderProtocol::from_id("some-new-provider"),
+            ProviderProtocol::OpenAiCompatible
+        );
     }
 
     #[test]

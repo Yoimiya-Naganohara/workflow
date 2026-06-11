@@ -1,11 +1,15 @@
+pub mod chat;
 pub mod chat_lines;
+pub mod commands;
 pub mod controller;
 pub mod dialogs;
+pub mod effect;
 pub mod handler;
 pub mod keymap;
 pub mod render;
 pub mod sidebar;
 pub mod state;
+pub mod status;
 pub mod style;
 
 use anyhow::Result;
@@ -23,6 +27,7 @@ use tokio::sync::RwLock;
 
 pub use self::state::AppState;
 use self::state::Panel;
+use crate::tui::dialogs::DialogTransition;
 
 pub struct Tui {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
@@ -30,6 +35,10 @@ pub struct Tui {
     chat_lines_cache: Vec<Line<'static>>,
     chat_cache_msg_count: usize,
     chat_cache_width: usize,
+    /// Sender for async effect results.
+    app_event_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::effect::AppEvent>,
+    /// Receiver for async effect results.
+    app_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::tui::effect::AppEvent>,
 }
 
 impl Tui {
@@ -45,12 +54,15 @@ impl Tui {
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
 
+        let (app_event_tx, app_event_rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(Self {
             terminal,
             state,
             chat_lines_cache: Vec::new(),
             chat_cache_msg_count: 0,
             chat_cache_width: 0,
+            app_event_tx,
+            app_event_rx,
         })
     }
 
@@ -65,6 +77,7 @@ impl Tui {
 
         loop {
             tokio::select! {
+                // ── Input events ──
                 maybe_event = event_stream.next() => {
                     match maybe_event {
                         Some(Ok(event)) => {
@@ -72,57 +85,63 @@ impl Tui {
                                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                                     let mut state = self.state.write().await;
 
-                                    // Global keys
+                                    // Global: Ctrl+C → quit
                                     if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
                                         && key.code == KeyCode::Char('c')
                                     {
                                         return Ok(());
                                     }
 
-                                    // Panel-specific keys
-                                    match state.panel {
-                                        Panel::Chat => {
-                                            if !self.handle_chat_keys(&mut state, key) {
-                                                return Ok(());
+                                    // Dialog dispatch
+                                    if let Some(mut dialog) = state.active_dialog.take() {
+                                        let transition = dialog.handle_key(&mut state.core, key);
+                                        match transition {
+                                            DialogTransition::None => {
+                                                state.active_dialog = Some(dialog);
+                                            }
+                                            DialogTransition::Switch(new) => {
+                                                state.active_dialog = Some(new);
+                                            }
+                                            DialogTransition::Close => {}
+                                        }
+                                    } else {
+                                        match state.ui.panel {
+                                            Panel::Chat => {
+                                                if !self.handle_chat_keys(&mut state, key) {
+                                                    return Ok(());
+                                                }
                                             }
                                         }
+                                    }
+
+                                    // Drain effects queued by handler → spawn immediately
+                                    let effects = std::mem::take(&mut state.effects);
+                                    drop(state);
+                                    for effect in effects {
+                                        let tx = self.app_event_tx.clone();
+                                        tokio::spawn(async move {
+                                            crate::tui::effect::execute_effect(effect, &tx).await;
+                                        });
                                     }
                                 }
                                 Event::Mouse(mouse) => {
                                     let mut state = self.state.write().await;
                                     match mouse.kind {
                                         MouseEventKind::ScrollDown => {
-                                            if state.show_custom_dialog {
-                                                // no scrolling in custom dialog (simple form)
-                                            } else if state.show_model_picker {
-                                                let results = state.models.search_configured_models(&state.model_picker_search_query, &state.configured_providers);
-                                                if !results.is_empty() {
-                                                    state.selected_model_picker_idx =
-                                                        (state.selected_model_picker_idx + 1).min(results.len() - 1);
-                                                }
-                                            } else if state.show_provider_dialog {
-                                                let providers = crate::models::filter_providers(
-                                                    state.models.providers(),
-                                                    &state.provider_search_query,
-                                                );
-                                                if !providers.is_empty() {
-                                                    state.selected_provider_idx =
-                                                        (state.selected_provider_idx + 1).min(providers.len() - 1);
-                                                }
+                                            if let Some(mut dialog) = state.active_dialog.take() {
+                                                dialog.scroll_down(&state.core);
+                                                state.active_dialog = Some(dialog);
                                             } else {
-                                                state.chat_scroll = state.chat_scroll.saturating_add(1);
+                                                state.ui.chat_scroll = state.ui.chat_scroll.saturating_add(1);
                                             }
                                         }
                                         MouseEventKind::ScrollUp => {
-                                            if state.show_custom_dialog {
-                                                // no scrolling in custom dialog (simple form)
-                                            } else if state.show_model_picker {
-                                                state.selected_model_picker_idx = state.selected_model_picker_idx.saturating_sub(1);
-                                            } else if state.show_provider_dialog {
-                                                state.selected_provider_idx = state.selected_provider_idx.saturating_sub(1);
+                                            if let Some(mut dialog) = state.active_dialog.take() {
+                                                dialog.scroll_up(&state.core);
+                                                state.active_dialog = Some(dialog);
                                             } else {
-                                                state.chat_scroll = state.chat_scroll.saturating_sub(1);
-                                                state.auto_scroll = false;
+                                                state.ui.chat_scroll = state.ui.chat_scroll.saturating_sub(1);
+                                                state.ui.auto_scroll = false;
                                             }
                                         }
                                         _ => {}
@@ -138,9 +157,15 @@ impl Tui {
                     }
                 }
 
-                _ = interval.tick() => {
-                    // Timer tick — draw below regardless of events.
+                // ── Async results (processed immediately — no tick alignment) ──
+                Some(app_event) = self.app_event_rx.recv() => {
+                    let mut state = self.state.write().await;
+                    state.handle_event(app_event);
+                    drop(state);
                 }
+
+                // ── Idle tick — animations only ──
+                _ = interval.tick() => {}
             }
 
             self.draw().await?;

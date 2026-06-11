@@ -42,7 +42,11 @@ impl KeyStore {
     pub fn deobfuscate(obfuscated: &str) -> Option<String> {
         let bytes = hex_decode(obfuscated)?;
         let machine_id = Self::machine_id();
-        let result: Vec<u8> = bytes.into_iter().zip(machine_id.bytes().cycle()).map(|(b, m)| b ^ m).collect();
+        let result: Vec<u8> = bytes
+            .into_iter()
+            .zip(machine_id.bytes().cycle())
+            .map(|(b, m)| b ^ m)
+            .collect();
         String::from_utf8(result).ok()
     }
 
@@ -63,9 +67,10 @@ fn hex_decode(hex: &str) -> Option<Vec<u8>> {
     if hex.len() % 2 != 0 {
         return None;
     }
-    (0..hex.len()).step_by(2).map(|i| {
-        u8::from_str_radix(&hex[i..i + 2], 16).ok()
-    }).collect()
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+        .collect()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -100,28 +105,26 @@ pub fn load() -> PersistedState {
         Ok(path) => {
             if path.exists() {
                 match std::fs::read_to_string(&path) {
-                    Ok(text) => {
-                        match serde_json::from_str::<PersistedState>(&text) {
-                            Ok(mut state) => {
-                                if state.keys_obfuscated {
-                                    let deobfuscated: HashMap<String, String> = state
-                                        .api_keys
-                                        .iter()
-                                        .filter_map(|(k, v)| {
-                                            KeyStore::deobfuscate(v).map(|decrypted| (k.clone(), decrypted))
-                                        })
-                                        .collect();
-                                    state.api_keys = deobfuscated;
-                                }
-                                state.key_store_mode = KeyStore::MemoryOnly;
-                                state
+                    Ok(text) => match serde_json::from_str::<PersistedState>(&text) {
+                        Ok(mut state) => {
+                            if state.keys_obfuscated {
+                                let deobfuscated: HashMap<String, String> = state
+                                    .api_keys
+                                    .iter()
+                                    .filter_map(|(k, v)| {
+                                        KeyStore::deobfuscate(v).map(|decrypted| (k.clone(), decrypted))
+                                    })
+                                    .collect();
+                                state.api_keys = deobfuscated;
                             }
-                            Err(e) => {
-                                tracing::error!("Failed to parse config: {}", e);
-                                PersistedState::default()
-                            }
+                            state.key_store_mode = KeyStore::MemoryOnly;
+                            state
                         }
-                    }
+                        Err(e) => {
+                            tracing::error!("Failed to parse config: {}", e);
+                            PersistedState::default()
+                        }
+                    },
                     Err(e) => {
                         tracing::error!("Failed to read config: {}", e);
                         PersistedState::default()

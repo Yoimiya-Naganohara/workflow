@@ -120,13 +120,15 @@ impl Tool for SpawnAgent {
         let (runtime, agent_pool, parent_id) = {
             let s = self.state.read().await;
             let runtime = s
+                .core
                 .runtime
                 .clone()
                 .ok_or_else(|| ToolCallError("Runtime not initialized".to_string()))?;
             let parent_id = s
+                .core
                 .responsible_agent_id
                 .ok_or_else(|| ToolCallError("No responsible parent agent is active".to_string()))?;
-            (runtime, s.agent_pool.clone(), parent_id)
+            (runtime, s.core.agent_pool.clone(), parent_id)
         };
 
         let child_id = match runtime
