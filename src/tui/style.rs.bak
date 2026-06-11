@@ -84,29 +84,6 @@ pub fn panel<'a>(title: &str) -> Block<'a> {
         .title(Span::styled(format!(" {} ", title), title_style()))
 }
 
-/// A search / input box with an optional label, styled with unified colors.
-/// `active` controls whether the border is cyan (focused) or dark gray.
-pub fn input_box<'a>(active: bool) -> Block<'a> {
-    let border_color = if active { ACTIVE } else { INACTIVE };
-    Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
-        .border_style(Style::default().fg(border_color))
-}
-
-/// Input bar — plain border with an `Input` label, matching the preview.
-pub fn input_bar<'a>(active: bool) -> Block<'a> {
-    let border_color = if active { ACTIVE } else { INACTIVE };
-    Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
-        .border_style(Style::default().fg(border_color))
-        .title(Span::styled(
-            " Input ",
-            Style::default().fg(border_color).add_modifier(Modifier::BOLD),
-        ))
-}
-
 /// Chat panel border — plain/straight corners (`[]` style).
 pub fn panel_chat<'a>(title: &str) -> Block<'a> {
     Block::default()
@@ -125,17 +102,27 @@ pub fn panel_proposal<'a>(title: &str) -> Block<'a> {
         .title(Span::styled(format!(" {} ", title), title_style()))
 }
 
-/// Width of the proposal / context panel on the right.
-pub const PROPOSAL_WIDTH: u16 = 36;
-
-/// Style for diff additions (`+ abcd`).
-pub fn diff_add_style() -> Style {
-    Style::default().fg(SUCCESS)
+/// A search / input box with an optional label, styled with unified colors.
+/// `active` controls whether the border is cyan (focused) or dark gray.
+pub fn input_box<'a>(active: bool) -> Block<'a> {
+    let border_color = if active { ACTIVE } else { INACTIVE };
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .border_style(Style::default().fg(border_color))
 }
 
-/// Style for diff deletions (`- abc`).
-pub fn diff_del_style() -> Style {
-    Style::default().fg(ERROR)
+/// Input bar — plain border styled like `[Input` / `[/` in the mockup.
+pub fn input_bar<'a>(active: bool) -> Block<'a> {
+    let border_color = if active { ACTIVE } else { INACTIVE };
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .border_style(Style::default().fg(border_color))
+        .title(Span::styled(
+            " Input ",
+            Style::default().fg(border_color).add_modifier(Modifier::BOLD),
+        ))
 }
 
 /// Render a hint/instruction line at the bottom of a dialog or panel.
@@ -152,4 +139,17 @@ pub fn render_separator(f: &mut Frame, area: Rect) {
             area,
         );
     }
+}
+
+/// Width of the proposal / context panel on the right.
+pub const PROPOSAL_WIDTH: u16 = 36;
+
+/// Style for diff additions (`+ abcd`).
+pub fn diff_add_style() -> Style {
+    Style::default().fg(SUCCESS)
+}
+
+/// Style for diff deletions (`- abc`).
+pub fn diff_del_style() -> Style {
+    Style::default().fg(ERROR)
 }
