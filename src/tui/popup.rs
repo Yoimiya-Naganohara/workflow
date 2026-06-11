@@ -38,7 +38,7 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
         let count = COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).count();
         (count.min(6) as u16 + 2).min(8)
     } else if let Some(dialog) = &state.active_dialog {
-        if dialog.is_popup() {
+        if !dialog.is_overlay() {
             use crate::tui::dialogs::ActiveDialog::*;
             match dialog {
                 Provider(d) => {
@@ -72,7 +72,7 @@ pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
     if has_command_popup(state) {
         render_command_popup(f, area, state);
     } else if let Some(dialog) = &state.active_dialog {
-        if dialog.is_popup() {
+        if !dialog.is_overlay() {
             match dialog {
                 ActiveDialog::Provider(d) => render_provider_popup(f, area, state, d),
                 ActiveDialog::Key(d) => render_key_popup(f, area, state, d),

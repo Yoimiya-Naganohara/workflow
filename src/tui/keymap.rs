@@ -32,6 +32,10 @@ pub enum Action {
     CommandPrev,
     CommandNext,
 
+    // Global actions
+    OpenProviderPicker,
+    OpenCommandPicker,
+
     // No match
     None,
 }
@@ -111,6 +115,10 @@ impl Default for Keymap {
             Action::DeleteChar,
         );
 
+        // Provider / command picker
+        km.bind(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL), Action::OpenProviderPicker);
+        km.bind(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL), Action::OpenCommandPicker);
+
         // Chat input
         km.bind(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), Action::SendMessage);
 
@@ -175,6 +183,8 @@ pub fn format_action(action: &Action) -> String {
         Action::HistoryNext => "Next input history",
         Action::CommandPrev => "Previous command",
         Action::CommandNext => "Next command",
+        Action::OpenProviderPicker => "Open provider picker",
+        Action::OpenCommandPicker => "Open command picker",
         Action::None => "",
     }
     .to_string()

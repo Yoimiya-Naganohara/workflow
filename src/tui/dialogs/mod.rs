@@ -3,7 +3,6 @@
 //! `ActiveDialog` is the single enum dispatched by the event loop.
 //! `DialogTransition` controls dialog lifecycle (close, switch, stay).
 
-pub mod command_popup;
 pub mod custom_wizard;
 pub mod key;
 pub mod model_picker;
@@ -76,19 +75,12 @@ impl ActiveDialog {
         }
     }
 
-    /// Whether the dialog expects rendered as a centered overlay (true) or
+    /// Whether the dialog renders as a centered overlay (true) or
     /// as an inline popup above the input box (false).
     /// Provider and Key dialogs render inline; ModelPicker and CustomWizard
     /// use the full-screen overlay.
     pub fn is_overlay(&self) -> bool {
         matches!(self, Self::ModelPicker(_) | Self::CustomWizard(_))
-    }
-
-    /// Whether the dialog should be rendered as an inline popup (the
-    /// complement of `is_overlay`).  Inline popups sit between the chat
-    /// messages and the input box.
-    pub fn is_popup(&self) -> bool {
-        !self.is_overlay()
     }
 }
 

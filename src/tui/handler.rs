@@ -1,8 +1,9 @@
 //! Keyboard and mouse event handler.
 //!
 //! Handles input events and mutates UI-level state (cursor position,
-//! scroll, selection).  Dialog dispatch is handled by the event loop
-//! in [`mod.rs`] — handler only runs when NO dialog is active.
+//! scroll, selection, dialog opens).  Dialog dispatch is handled by
+//! the event loop in [`mod.rs`] — handler only runs when NO dialog
+//! is active.
 //!
 //! Key events are resolved through [`keymap`] so changing a keybinding
 //! only requires editing `keymap.rs`.
@@ -16,6 +17,7 @@ use super::commands;
 use super::keymap::Action;
 use super::state::{AppState, ChatMessage, Focus, MessageRole, MessageStatus};
 use crate::tui::chat_lines::char_idx_to_byte_idx;
+use crate::tui::dialogs::ActiveDialog;
 use crate::tui::effect::Effect;
 
 impl Tui {
@@ -79,6 +81,24 @@ impl Tui {
 
             Action::SendMessage if ui.focus == Focus::Input => {
                 return self.handle_input_submit(state);
+            }
+
+            Action::OpenProviderPicker => {
+                use crate::tui::dialogs::provider::ProviderDialog;
+                core.messages.push(ChatMessage::system(
+                    "Select a provider to configure",
+                ));
+                state.active_dialog = Some(ActiveDialog::Provider(ProviderDialog::new()));
+                state.effects.push(Effect::FetchModelRegistry);
+                ui.input.clear();
+                ui.input_cursor = 0;
+            }
+
+            Action::OpenCommandPicker => {
+                ui.focus = Focus::Input;
+                ui.input = "/".to_string();
+                ui.input_cursor = 1;
+                ui.command_popup_selection = 0;
             }
 
             Action::HistoryPrev
