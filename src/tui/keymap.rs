@@ -102,7 +102,9 @@ impl Default for Keymap {
         );
 
         // Dialog
-        km.bind(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), Action::Confirm);
+        // Note: Enter is intentionally NOT bound here — dialogs handle Enter
+        // in their own handle_key().  The keymap-level Confirm would shadow
+        // SendMessage (bound below) because resolve() returns the first match.
         km.bind(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), Action::Cancel);
         km.bind(
             KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),

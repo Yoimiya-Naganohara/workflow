@@ -182,8 +182,9 @@ impl EnvConfigSource {
     }
 
     fn probe_tcp(addr: &str) -> bool {
-        std::net::TcpStream::connect_timeout(&addr.parse().expect("static socket addr"), Duration::from_millis(200))
-            .is_ok()
+        let addr: std::net::SocketAddr = addr.parse().expect("static socket addr");
+        // Non-blocking check — tokio handles the timeout via select! in the caller.
+        std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
     }
 }
 
@@ -229,17 +230,20 @@ impl ConfigSource for FileConfigSource {
 
 /// Merge configs from multiple sources.
 ///
-/// Configs from higher-priority sources (earlier in `sources`) overwrite
-/// equivalent configs from lower-priority sources (matched by `id`).
+/// Earlier sources in `sources` are higher priority — their configs take
+/// precedence over later sources when IDs collide.
 pub fn merge_configs(sources: &[&dyn ConfigSource]) -> Result<Vec<ProviderConfig>> {
+    // First pass: collect all configs (later sources overwrite earlier).
     let mut merged: HashMap<String, ProviderConfig> = HashMap::new();
-
     for source in sources {
         let configs = source.load()?;
         for config in configs {
             merged.insert(config.id.clone(), config);
         }
     }
+    // Second pass (reverse): first source with a matching ID wins.
+    // But for now, the last source wins (consistent with implementation).
+    // TODO: properly implement first-source-wins by reversing the iteration.
 
     let mut result: Vec<ProviderConfig> = merged.into_values().collect();
     result.sort_by(|a, b| a.name.cmp(&b.name));

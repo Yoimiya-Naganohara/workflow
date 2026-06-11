@@ -63,13 +63,19 @@ impl Cluster {
         self.sum_weights = new_weight;
 
         // Weighted Welford update for the centroid.
-        let weight_ratio = entry.weight as f64 / new_weight;
-        for i in 0..EMBEDDING_DIM {
-            let delta = entry.embedding[i] as f64 - self.centroid[i] as f64;
-            self.centroid[i] += (delta * weight_ratio) as f32;
+        // Guard against division by zero when all weights are 0.
+        if new_weight > 0.0_f64 {
+            let weight_ratio = entry.weight as f64 / new_weight;
+            for i in 0..EMBEDDING_DIM {
+                let delta = entry.embedding[i] as f64 - self.centroid[i] as f64;
+                self.centroid[i] += (delta * weight_ratio) as f32;
 
-            let delta2 = entry.embedding[i] as f64 - self.centroid[i] as f64;
-            self.m2 += old_weight * delta * delta2 / new_weight;
+                // Weighted Welford: M2 += w_new * delta * delta2
+                // where delta = x - mean_old, delta2 = x - mean_new.
+                // This simplifies to w_old * w_new / (w_old + w_new) * delta^2.
+                let delta2 = entry.embedding[i] as f64 - self.centroid[i] as f64;
+                self.m2 += entry.weight as f64 * delta * delta2;
+            }
         }
 
         self.tool_bitmap |= entry.tool_bitmap;

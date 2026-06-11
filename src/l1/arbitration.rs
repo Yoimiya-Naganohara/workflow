@@ -123,4 +123,72 @@ mod tests {
             _ => panic!("Expected Override"),
         }
     }
+
+    #[test]
+    fn test_identical_embeddings_agent_b_wins() {
+        let arbitrator = L1Arbitrator::new(-0.6);
+
+        let mut a = [0.0f32; EMBEDDING_DIM];
+        a[0] = 1.0;
+        let mut b = [0.0f32; EMBEDDING_DIM];
+        b[0] = 1.0;
+
+        let manifest = arbitrator.create_conflict_manifest([1u8; 16], [2u8; 16], a, b, [0u8; 16]);
+
+        // BUG: when sim=1.0, priority_a = 1.0 - 1.0 = 0.0, priority_b = 1.0
+        // Agent B always wins with identical embeddings
+        match arbitrator.arbitrate_by_priority(&manifest) {
+            L1ArbitrationResult::Override { winner, .. } => {
+                assert_eq!(
+                    winner, [2u8; 16],
+                    "BUG: identical embeddings should not deterministically favor B"
+                );
+            }
+            _ => panic!("Expected Override"),
+        }
+    }
+
+    #[test]
+    fn test_priority_inversion_higher_sim_lower_priority() {
+        let arbitrator = L1Arbitrator::new(-0.6);
+
+        let mut a = [0.0f32; EMBEDDING_DIM];
+        a[0] = 1.0;
+        let mut b = [0.0f32; EMBEDDING_DIM];
+        b[0] = 0.5; // Less similar to query than a
+
+        let manifest = arbitrator.create_conflict_manifest([1u8; 16], [2u8; 16], a, b, [0u8; 16]);
+
+        // BUG: priority_a = 1.0 - sim, priority_b = sim
+        // Higher similarity means LOWER priority_a — inversion!
+        // Agent A (more similar) gets lower priority than B (less similar)
+        match arbitrator.arbitrate_by_priority(&manifest) {
+            L1ArbitrationResult::Override { winner, .. } => {
+                // With sim ~= 0.87, priority_a = 0.13, priority_b = 0.87
+                // B wins despite being less similar
+                assert_eq!(
+                    winner, [2u8; 16],
+                    "BUG: less similar agent wins due to priority inversion"
+                );
+            }
+            _ => panic!("Expected Override"),
+        }
+    }
+
+    #[test]
+    fn test_arbitrate_empty_agents() {
+        let arbitrator = L1Arbitrator::new(-0.6);
+
+        let manifest = ConflictManifest {
+            conflict_id: [0u8; 16],
+            conflict_type: ConflictType::ActionContradiction,
+            contending_agents: SmallVec::new(),
+            trace_id: [0u8; 16],
+            context_embeddings: SmallVec::new(),
+            dynamic_priority_scores: SmallVec::new(),
+        };
+
+        let result = arbitrator.arbitrate_by_priority(&manifest);
+        assert!(matches!(result, L1ArbitrationResult::NoConflict));
+    }
 }

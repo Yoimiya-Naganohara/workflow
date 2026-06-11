@@ -33,8 +33,7 @@ pub struct Tui {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     state: Arc<RwLock<AppState>>,
     chat_lines_cache: Vec<Line<'static>>,
-    chat_cache_msg_count: usize,
-    chat_cache_width: usize,
+    chat_cache_key: (usize, usize, bool, usize),
     /// Sender for async effect results.
     app_event_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::effect::AppEvent>,
     /// Receiver for async effect results.
@@ -59,8 +58,7 @@ impl Tui {
             terminal,
             state,
             chat_lines_cache: Vec::new(),
-            chat_cache_msg_count: 0,
-            chat_cache_width: 0,
+            chat_cache_key: (0, 0, false, 0),
             app_event_tx,
             app_event_rx,
         })

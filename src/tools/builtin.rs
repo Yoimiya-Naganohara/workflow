@@ -62,23 +62,31 @@ impl Tool for ReadFile {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let content = std::fs::read_to_string(&args.path).map_err(|e| ToolCallError(e.to_string()))?;
-        let total_bytes = content.len();
+        let bytes_len = content.len();
         let total_lines = content.lines().count();
-        let start = args.start.unwrap_or(0);
-        let end = args.end.unwrap_or(total_lines);
-        let preview = if total_bytes > 10000 {
+        let lines: Vec<&str> = content.lines().collect();
+        // start/end are 1-indexed line numbers (default: entire file).
+        let start_idx = args
+            .start
+            .unwrap_or(1)
+            .saturating_sub(1)
+            .min(total_lines.saturating_sub(1));
+        let end_idx = args.end.unwrap_or(total_lines).min(total_lines);
+        let preview = if bytes_len > 10000 {
+            let selected = lines[start_idx..end_idx].join("\n");
             format!(
-                "{}\n\n... [truncated, {} total bytes, {} lines]",
-                &content[start..end],
-                total_bytes - (end - start),
-                end - start
+                "{}\n\n... [truncated, {} total lines, showing {}--{}]",
+                selected,
+                total_lines,
+                start_idx + 1,
+                end_idx
             )
         } else {
-            content
+            content.clone()
         };
         Ok(format!(
             "(file: {}, {} lines, {} bytes)\n\n{}",
-            args.path, total_lines, total_bytes, preview
+            args.path, total_lines, bytes_len, preview
         ))
     }
 }
@@ -189,10 +197,11 @@ impl Tool for Shell {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let output = std::process::Command::new("sh")
+        let output = tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&args.command)
             .output()
+            .await
             .map_err(|e| ToolCallError(e.to_string()))?;
 
         let code = output.status.code().unwrap_or(-1);
@@ -278,3 +287,161 @@ impl Tool for ListDir {
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub struct ToolCallError(pub String);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[tokio::test]
+    async fn test_read_file_basic() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "line1\nline2\nline3").unwrap();
+        let result = ReadFile
+            .call(ReadFileArgs {
+                path: f.path().to_str().unwrap().to_string(),
+                start: None,
+                end: None,
+            })
+            .await
+            .unwrap();
+        assert!(result.contains("line1"));
+        assert!(result.contains("3 lines"));
+    }
+
+    #[tokio::test]
+    async fn test_read_file_multibyte_panics() {
+        let mut f = NamedTempFile::new().unwrap();
+        // CJK characters: each is 3 bytes in UTF-8
+        // Need >10KB to trigger the truncation path where byte-slicing happens
+        let cjk_line = "你好世界测试内容这是多字节字符测试";
+        for _ in 0..500 {
+            writeln!(f, "{}", cjk_line).unwrap();
+        }
+        let path = f.path().to_str().unwrap().to_string();
+        // start=2, end=4 are treated as byte indices but described as line numbers
+        // This should panic because byte index 2 splits a multi-byte character
+        let result = std::panic::catch_unwind(|| {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                ReadFile
+                    .call(ReadFileArgs {
+                        path,
+                        start: Some(2),
+                        end: Some(4),
+                    })
+                    .await
+            })
+        });
+        // Current code panics on multi-byte UTF-8 with byte slicing
+        assert!(result.is_err(), "ReadFile should panic on multi-byte UTF-8 byte-slice");
+    }
+
+    #[tokio::test]
+    async fn test_read_file_large_truncation() {
+        let mut f = NamedTempFile::new().unwrap();
+        // Write >10KB to trigger truncation path
+        let content = "x".repeat(15000);
+        write!(f, "{}", content).unwrap();
+        let result = ReadFile
+            .call(ReadFileArgs {
+                path: f.path().to_str().unwrap().to_string(),
+                start: None,
+                end: None,
+            })
+            .await
+            .unwrap();
+        assert!(result.contains("truncated"));
+    }
+
+    #[tokio::test]
+    async fn test_write_file_short_content_panics() {
+        let f = NamedTempFile::new().unwrap();
+        let path = f.path().to_str().unwrap().to_string();
+        // content is 5 bytes, start=10 is out of bounds
+        let result = std::panic::catch_unwind(|| {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                WriteFile
+                    .call(WriteFileArgs {
+                        path,
+                        content: "hello".to_string(),
+                        start: Some(10),
+                        end: Some(200),
+                    })
+                    .await
+            })
+        });
+        assert!(result.is_err(), "WriteFile should panic with out-of-bounds start");
+    }
+
+    #[tokio::test]
+    async fn test_write_file_preview_panics_on_short_content() {
+        let f = NamedTempFile::new().unwrap();
+        let path = f.path().to_str().unwrap().to_string();
+        // content is 10 bytes, start=5, start+200=205 > 10
+        let _result = std::panic::catch_unwind(|| {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                WriteFile
+                    .call(WriteFileArgs {
+                        path,
+                        content: "short".to_string(),
+                        start: Some(0),
+                        end: Some(5),
+                    })
+                    .await
+            })
+        });
+        // This one may or may not panic depending on the preview logic
+    }
+
+    #[tokio::test]
+    async fn test_shell_basic() {
+        let result = Shell
+            .call(ShellArgs {
+                command: "echo hello".to_string(),
+            })
+            .await
+            .unwrap();
+        assert!(result.contains("hello"));
+        assert!(result.contains("exit code: 0"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_stderr() {
+        let result = Shell
+            .call(ShellArgs {
+                command: "echo error >&2".to_string(),
+            })
+            .await
+            .unwrap();
+        assert!(result.contains("stderr"));
+        assert!(result.contains("error"));
+    }
+
+    #[tokio::test]
+    async fn test_list_dir_basic() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("test.txt"), "content").unwrap();
+        std::fs::create_dir(dir.path().join("subdir")).unwrap();
+        let result = ListDir
+            .call(ListDirArgs {
+                path: dir.path().to_str().unwrap().to_string(),
+            })
+            .await
+            .unwrap();
+        assert!(result.contains("test.txt"));
+        assert!(result.contains("subdir/"));
+        assert!(result.contains("1 files"));
+        assert!(result.contains("1 dirs"));
+    }
+
+    #[tokio::test]
+    async fn test_list_dir_nonexistent() {
+        let result = ListDir
+            .call(ListDirArgs {
+                path: "/nonexistent/path/12345".to_string(),
+            })
+            .await;
+        assert!(result.is_err());
+    }
+}

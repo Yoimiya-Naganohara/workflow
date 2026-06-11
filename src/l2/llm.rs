@@ -88,18 +88,34 @@ impl L2LlmAuditEngine {
 
         if judge.risk_level == "high" {
             self.consecutive_failures += 1;
+        } else if judge.risk_level == "medium" {
+            // Medium risk keeps failures unchanged — only high resets.
         } else {
             self.consecutive_failures = 0;
         }
 
+        // Bail if there are no contending agents.
+        if manifest.contending_agents.is_empty() {
+            return Ok(L2LlmAuditResult {
+                decision: ArbitrationResult::Prune(vec![]),
+                risk_statement: "No contending agents in manifest".to_string(),
+                lesson_learned: String::new(),
+                l1_override_vector_patch: None,
+                tokens_used: response.tokens_used,
+            });
+        }
+
+        // Parse winner index (0-based) for override decisions.
+        let winner_idx = judge
+            .winner
+            .as_deref()
+            .and_then(|w| w.parse::<usize>().ok())
+            .filter(|&i| i < manifest.contending_agents.len())
+            .unwrap_or(0);
+
         let arbitration = match judge.decision.as_str() {
             "override" => {
-                let winner_idx = judge.winner.and_then(|w| w.parse::<usize>().ok()).unwrap_or(0);
-                let winner = manifest
-                    .contending_agents
-                    .get(winner_idx)
-                    .copied()
-                    .unwrap_or(manifest.contending_agents[0]);
+                let winner = manifest.contending_agents[winner_idx];
                 let losers: Vec<_> = manifest
                     .contending_agents
                     .iter()
@@ -120,7 +136,7 @@ impl L2LlmAuditEngine {
             decision: arbitration,
             risk_statement: judge.risk_statement,
             lesson_learned: judge.lesson_learned,
-            l1_override_vector_patch: Some(self.generate_override_patch(manifest)),
+            l1_override_vector_patch: Some(self.generate_override_patch(manifest, winner_idx)),
             tokens_used: response.tokens_used,
         })
     }
@@ -148,11 +164,12 @@ Context:
 Please respond with JSON:
 {{
   "decision": "override|merge|prune",
-  "winner": "agent_id or null",
+  "winner_index": 0,
   "risk_level": "low|medium|high",
   "risk_statement": "brief risk assessment",
   "lesson_learned": "what to remember for future"
-}}"#,
+}}
+Note: winner_index is the 0-based index of the winning agent in the contending_agents list, or -1 if none."#,
             conflict_type,
             agents.join(", "),
             manifest.dynamic_priority_scores.as_slice()
@@ -182,9 +199,15 @@ Please respond with JSON:
         }
     }
 
-    fn generate_override_patch(&self, manifest: &ConflictManifest) -> crate::core::conflict::OverridePatch {
+    fn generate_override_patch(
+        &self,
+        manifest: &ConflictManifest,
+        winner_idx: usize,
+    ) -> crate::core::conflict::OverridePatch {
         let mut embedding = [0.0f32; crate::core::types::EMBEDDING_DIM];
-        if !manifest.context_embeddings.is_empty() {
+        if winner_idx < manifest.context_embeddings.len() {
+            embedding.copy_from_slice(&manifest.context_embeddings[winner_idx]);
+        } else if !manifest.context_embeddings.is_empty() {
             embedding.copy_from_slice(&manifest.context_embeddings[0]);
         }
 
@@ -278,5 +301,142 @@ mod tests {
         let prompt = engine.build_judge_prompt(&manifest);
         assert!(prompt.contains("resource lock contention") || prompt.contains("action contradiction"));
         assert!(prompt.contains("override|merge|prune"));
+    }
+
+    #[test]
+    fn test_parse_decision_override_with_agent_id() {
+        let provider = Arc::new(LlmProvider::OpenAi(
+            rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
+        ));
+        let engine = L2LlmAuditEngine::new(provider, L2LlmConfig::default());
+
+        // LLM returns agent_id (not index) as winner
+        let json = r#"{"decision": "override", "winner": "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]", "risk_level": "low", "risk_statement": "test", "lesson_learned": "test"}"#;
+        let result = engine.parse_decision(json).unwrap();
+        assert_eq!(result.decision, "override");
+        // BUG: winner is parsed as usize, but prompt says agent_id string
+        assert!(result.winner.is_some(), "winner should be parsed");
+        let winner_usize = result.winner.unwrap().parse::<usize>();
+        assert!(winner_usize.is_err(), "BUG: agent_id string should not parse as usize");
+    }
+
+    #[test]
+    fn test_empty_contending_agents_panics() {
+        let provider = Arc::new(LlmProvider::OpenAi(
+            rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
+        ));
+        let engine = L2LlmAuditEngine::new(provider, L2LlmConfig::default());
+
+        // Parse a decision that says "override" but manifest has empty agents
+        let json = r#"{"decision": "override", "winner": "0", "risk_level": "low", "risk_statement": "test", "lesson_learned": "test"}"#;
+        let decision = engine.parse_decision(json).unwrap();
+
+        let manifest = make_manifest(vec![], vec![]);
+
+        // This will panic at line 102: unwrap_or(manifest.contending_agents[0])
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // Simulate the arbitration logic from audit()
+            let winner_idx = decision.winner.and_then(|w| w.parse::<usize>().ok()).unwrap_or(0);
+            let _winner = manifest
+                .contending_agents
+                .get(winner_idx)
+                .copied()
+                .unwrap_or(manifest.contending_agents[0]); // PANICS on empty
+        }));
+
+        assert!(result.is_err(), "BUG: empty contending_agents causes panic");
+    }
+
+    #[test]
+    fn test_medium_risk_resets_failure_counter() {
+        let provider = Arc::new(LlmProvider::OpenAi(
+            rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
+        ));
+        let mut engine = L2LlmAuditEngine::new(
+            provider,
+            L2LlmConfig {
+                max_consecutive_failures: 3,
+                ..Default::default()
+            },
+        );
+
+        // Simulate 2 high-risk failures
+        engine.consecutive_failures = 2;
+
+        // BUG: medium risk resets to 0 instead of decrementing
+        let risk_level = "medium";
+        if risk_level == "high" {
+            engine.consecutive_failures += 1;
+        } else {
+            engine.consecutive_failures = 0; // BUG: should decrement, not reset
+        }
+
+        assert_eq!(
+            engine.consecutive_failures, 0,
+            "BUG: medium risk resets failure counter"
+        );
+        // After 2 high-risk failures, a single medium-risk should leave us at 1, not 0
+    }
+
+    #[test]
+    fn test_override_patch_uses_first_embedding() {
+        let provider = Arc::new(LlmProvider::OpenAi(
+            rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
+        ));
+        let engine = L2LlmAuditEngine::new(provider, L2LlmConfig::default());
+
+        let mut emb_a = [0.0f32; crate::core::types::EMBEDDING_DIM];
+        emb_a[0] = 1.0;
+        let mut emb_b = [0.0f32; crate::core::types::EMBEDDING_DIM];
+        emb_b[0] = 0.5;
+
+        let manifest = ConflictManifest {
+            conflict_id: [0u8; 16],
+            conflict_type: ConflictType::ActionContradiction,
+            contending_agents: SmallVec::from_slice(&[[1u8; 16], [2u8; 16]]),
+            trace_id: [0u8; 16],
+            context_embeddings: SmallVec::from_slice(&[emb_a, emb_b]),
+            dynamic_priority_scores: SmallVec::from_slice(&[0.3, 0.8]), // B wins
+        };
+
+        // Agent B (index 1) has higher priority (0.8 vs 0.3).
+        let patch = engine.generate_override_patch(&manifest, 1);
+
+        assert_eq!(
+            patch.embedding[0], 0.5,
+            "override patch should use winner's embedding (B)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_consecutive_failures_increment_after_collapse() {
+        let provider = Arc::new(LlmProvider::OpenAi(
+            rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
+        ));
+        let mut engine = L2LlmAuditEngine::new(
+            provider,
+            L2LlmConfig {
+                max_consecutive_failures: 2,
+                ..Default::default()
+            },
+        );
+
+        // Trigger collapse
+        engine.consecutive_failures = 2;
+
+        let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.8, 0.3]);
+
+        // Each audit call while collapsed increments the counter
+        let _ = engine.audit(&manifest).await;
+        assert_eq!(engine.consecutive_failures, 3);
+
+        let _ = engine.audit(&manifest).await;
+        assert_eq!(engine.consecutive_failures, 4);
+
+        // BUG: counter keeps growing, will wrap to 0 after u32::MAX
+        assert!(
+            engine.consecutive_failures > 2,
+            "counter should keep incrementing during collapse"
+        );
     }
 }

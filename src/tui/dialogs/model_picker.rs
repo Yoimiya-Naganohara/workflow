@@ -5,8 +5,8 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
-    text::{Line, Span},
-    widgets::{List, ListItem, ListState, Paragraph},
+    text::Span,
+    widgets::{Paragraph, Row, Table, TableState},
 };
 
 use crate::tui::chat_lines::{char_idx_to_byte_idx, display_width_up_to};
@@ -183,8 +183,8 @@ impl ModelPicker {
 
         style::render_separator(f, chunks[1]);
 
-        // Build list items
-        let items: Vec<ListItem> = results
+        // Build table rows
+        let rows: Vec<Row> = results
             .iter()
             .map(|(p, m)| {
                 let badge = m.capability_badge();
@@ -192,30 +192,43 @@ impl ModelPicker {
                     .selected_models
                     .iter()
                     .any(|sm| sm.provider_id == p.id && sm.model_id == m.id);
-                ListItem::new(Line::from(vec![
+                Row::new(vec![
                     if is_selected {
-                        Span::styled("✓ ", Style::default().fg(style::SUCCESS))
+                        Span::styled("✓", Style::default().fg(style::SUCCESS))
                     } else {
-                        Span::raw("  ")
+                        Span::raw("")
                     },
                     Span::styled(&m.name, style::value_style()),
-                    Span::raw(" "),
                     Span::styled(badge, style::hint_style().italic()),
-                    Span::raw(" "),
                     Span::styled(&p.name, style::hint_style()),
-                ]))
+                ])
             })
             .collect();
 
-        let mut list_state = ListState::default();
-        list_state.select(Some(self.selected_idx.min(results.len().saturating_sub(1))));
+        // Compute column widths from content.
+        let max_name = results.iter().map(|(_, m)| m.name.len()).max().unwrap_or(0);
+        let max_badge = results
+            .iter()
+            .map(|(_, m)| m.capability_badge().len())
+            .max()
+            .unwrap_or(0);
+        let max_provider = results.iter().map(|(p, _)| p.name.len()).max().unwrap_or(0);
+
+        let mut table_state = TableState::default();
+        table_state.select(Some(self.selected_idx.min(results.len().saturating_sub(1))));
         f.render_stateful_widget(
-            List::new(items)
-                .highlight_style(style::highlight_fg())
-                .highlight_style(style::highlight_bg())
-                .highlight_symbol("▸ "),
+            Table::new(
+                rows,
+                [
+                    Constraint::Length(1),                    // checkmark
+                    Constraint::Length(max_name as u16 + 1),  // model name
+                    Constraint::Length(max_badge as u16 + 1), // badge
+                    Constraint::Length(max_provider as u16),  // provider
+                ],
+            )
+            .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
             chunks[2],
-            &mut list_state,
+            &mut table_state,
         );
     }
 }

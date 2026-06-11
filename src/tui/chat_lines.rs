@@ -560,7 +560,6 @@ fn render_table<'a, I>(
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut current_cell_parts: Vec<String> = Vec::new();
     let mut in_head = false;
-    let mut in_row = false;
     let mut table_depth = 1u32;
 
     loop {
@@ -568,42 +567,27 @@ fn render_table<'a, I>(
             Some(Event::Start(Tag::TableHead)) => in_head = true,
             Some(Event::End(TagEnd::TableHead)) => in_head = false,
             Some(Event::Start(Tag::TableRow)) => {
-                in_row = true;
                 current_cell_parts.clear();
+                // Start a new row for data rows (not header).
+                if !in_head {
+                    rows.push(Vec::new());
+                }
             }
             Some(Event::End(TagEnd::TableRow)) => {
-                if !current_cell_parts.is_empty() {
-                    if in_head {
-                        headers.push(current_cell_parts.clone());
-                    } else {
-                        let joined = current_cell_parts.join("");
-                        if rows.is_empty() {
-                            rows.push(vec![joined]);
-                        } else {
-                            rows.last_mut().unwrap().push(joined);
-                        }
-                    }
-                }
                 current_cell_parts.clear();
-                in_row = false;
             }
             Some(Event::Start(Tag::TableCell)) => {
                 current_cell_parts.clear();
             }
             Some(Event::End(TagEnd::TableCell)) => {
-                let joined = current_cell_parts.join("");
+                let cell_text = current_cell_parts.join("");
                 if in_head {
-                    headers.push(vec![joined]);
-                } else if in_row {
-                    let idx = if rows.is_empty() { 0 } else { rows.len() - 1 };
-                    if rows.is_empty() || !rows[idx].is_empty() {
-                        let cell_text = current_cell_parts.join("");
-                        if rows.is_empty() {
-                            rows.push(vec![cell_text]);
-                        } else {
-                            rows[idx].push(cell_text);
-                        }
+                    if headers.is_empty() {
+                        headers.push(Vec::new());
                     }
+                    headers[0].push(cell_text);
+                } else if let Some(last) = rows.last_mut() {
+                    last.push(cell_text);
                 }
                 current_cell_parts.clear();
             }
@@ -798,18 +782,45 @@ fn make_spans_for_range(all: &[Span<'static>], start: usize, end: usize) -> Vec<
             break;
         }
 
-        let seg_start = start.saturating_sub(span_start);
-        let seg_end = if end < span_end { end - span_start } else { span_len };
+        // Ensure we're on a valid char boundary before slicing.
+        let byte_start = start.saturating_sub(span_start);
+        let byte_end = if end < span_end { end - span_start } else { span_len };
 
-        if seg_start < seg_end {
-            let seg_text: String = s.content.chars().skip(seg_start).take(seg_end - seg_start).collect();
-            result.push(Span::styled(seg_text, s.style));
+        if byte_start < byte_end {
+            // Clamp to valid char boundaries to avoid UTF-8 split panics.
+            let safe_start = char_boundary_clamp(&s.content, byte_start);
+            let safe_end = if byte_end <= s.content.len() {
+                char_boundary_clamp(&s.content, byte_end)
+            } else {
+                s.content.len()
+            };
+            if safe_start < safe_end {
+                let segment = &s.content[safe_start..safe_end];
+                result.push(Span::styled(segment.to_string(), s.style));
+            }
         }
 
         pos = span_end;
     }
 
     result
+}
+
+/// Return the nearest valid UTF-8 char boundary at or before `byte_pos`.
+fn char_boundary_clamp(s: &str, byte_pos: usize) -> usize {
+    if byte_pos >= s.len() {
+        return s.len();
+    }
+    // Check if byte_pos is already a boundary.
+    if s.is_char_boundary(byte_pos) {
+        return byte_pos;
+    }
+    // Walk backwards to find the boundary.
+    s.char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i < byte_pos)
+        .last()
+        .unwrap_or(0)
 }
 
 fn spans_for_line(spans: &[Span<'static>], line_text: &str) -> Vec<Span<'static>> {

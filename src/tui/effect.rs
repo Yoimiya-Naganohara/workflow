@@ -85,16 +85,19 @@ pub enum AppEvent {
     },
     ChatCompleted {
         response_index: usize,
+        request_id: u64,
         full_response: String,
         input: String,
         runtime: Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
     },
     ChatError {
         response_index: usize,
+        request_id: u64,
         error: String,
     },
     ChatCancelled {
         response_index: usize,
+        request_id: u64,
     },
 }
 
@@ -210,7 +213,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
         Effect::StartChat {
             input,
             response_index,
-            request_id: _,
+            request_id,
             model_id,
             system_prompt,
             history,
@@ -227,6 +230,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                 Err(e) => {
                     let _ = tx.send(AppEvent::ChatError {
                         response_index,
+                        request_id,
                         error: e.to_string(),
                     });
                     return;
@@ -265,6 +269,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                 Ok(()) => {
                     let _ = tx.send(AppEvent::ChatCompleted {
                         response_index,
+                        request_id,
                         full_response: full_response.clone(),
                         input: input.clone(),
                         runtime: runtime.clone(),
@@ -272,7 +277,10 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                 }
                 Err(_) => {
                     // Cancelled via Ctrl+X
-                    let _ = tx.send(AppEvent::ChatCancelled { response_index });
+                    let _ = tx.send(AppEvent::ChatCancelled {
+                        response_index,
+                        request_id,
+                    });
                 }
             }
 
@@ -316,7 +324,9 @@ fn format_tool_args(args: &serde_json::Value) -> String {
                     let val = match v {
                         serde_json::Value::String(s) => {
                             if s.len() > 60 {
-                                format!("\"{}…\"", &s[..57])
+                                // Safe char-boundary truncation at 57 chars.
+                                let end = s.char_indices().nth(57).map(|(i, _)| i).unwrap_or(s.len());
+                                format!("\"{}…\"", &s[..end])
                             } else {
                                 format!("\"{}\"", s)
                             }

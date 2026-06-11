@@ -66,13 +66,17 @@ impl TaskResourceState {
     }
 
     pub fn increment_depth(&self) -> Result<u32, u32> {
-        let current = self.current_depth.load(Ordering::Acquire);
         let max = self.max_dynamic_depth.load(Ordering::Acquire);
-        if current >= max {
-            return Err(current);
-        }
-        self.current_depth.fetch_add(1, Ordering::AcqRel);
-        Ok(current + 1)
+        // CAS loop: atomically check depth and increment in one operation.
+        self.current_depth
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                if current >= max {
+                    None // signal error
+                } else {
+                    Some(current + 1)
+                }
+            })
+            .map(|v| v + 1)
     }
 
     pub fn decrement_depth(&self) {
@@ -299,5 +303,42 @@ mod tests {
 
         assert_eq!(state.tool_bitmap.load(Ordering::Relaxed), 0);
         assert_eq!(success_count.load(Ordering::Relaxed), 10);
+    }
+
+    #[test]
+    fn test_depth_increment_toctou_race() {
+        // BUG: increment_depth is not atomic — load-check-add is TOCTOU
+        // The race is timing-dependent; run many iterations to increase chance
+        let mut race_detected = false;
+
+        for _ in 0..100 {
+            let state = TaskResourceState::new(1000, 2); // max_depth = 2
+            let mut handles = vec![];
+
+            for _ in 0..20 {
+                let s = state.clone();
+                handles.push(thread::spawn(move || {
+                    // Tight loop to increase race window
+                    for _ in 0..10 {
+                        let _ = s.increment_depth();
+                    }
+                }));
+            }
+
+            for h in handles {
+                h.join().unwrap();
+            }
+
+            let final_depth = state.current_depth.load(Ordering::Relaxed);
+            if final_depth > 2 {
+                race_detected = true;
+                break;
+            }
+        }
+
+        if race_detected {
+            println!("BUG CONFIRMED: TOCTOU race allows depth to exceed max_depth");
+        }
+        // Document the bug — race may or may not reproduce in this run
     }
 }

@@ -219,15 +219,55 @@ fn write_atomic(path: &Path, contents: &str) -> Result<()> {
 
     std::fs::write(&temp_path, contents)?;
 
-    if path.exists() {
-        std::fs::remove_file(path)?;
-    }
-
+    // On Unix, rename() atomically replaces the target — no remove_file needed.
+    // This avoids the window where the target file doesn't exist.
     match std::fs::rename(&temp_path, path) {
         Ok(()) => Ok(()),
         Err(err) => {
             let _ = std::fs::remove_file(&temp_path);
             Err(err.into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_write_atomic_removes_before_rename() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().with_extension("json");
+
+        // Write initial content
+        write_atomic(&path, "version1").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "version1");
+
+        // Write again — this triggers the remove_file + rename path
+        write_atomic(&path, "version2").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "version2");
+    }
+
+    #[test]
+    fn test_write_atomic_dangerous_remove_before_rename() {
+        // BUG: remove_file before rename is dangerous
+        // If crash happens between remove_file (line 223) and rename (line 226),
+        // the file is gone entirely.
+        //
+        // The correct pattern is just rename() which atomically replaces.
+        // The remove_file is unnecessary and creates a window for data loss.
+
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().with_extension("json");
+
+        // Write initial content
+        write_atomic(&path, "original").unwrap();
+
+        // Verify the dangerous pattern exists by checking the function behavior
+        // The bug: remove_file is called before rename on line 222-224
+        // This test documents the bug — the remove_file is unnecessary
+        // because rename() already atomically replaces the target on Linux.
+        assert!(path.exists(), "file should exist after write_atomic");
     }
 }

@@ -41,22 +41,26 @@ pub(crate) fn render_chat(f: &mut Frame, area: Rect, state: &AppState, visible_l
         style::hint_style()
     };
     let placeholder = "Type a message or /command… (Alt+Enter newline)";
-    let input_display = if state.ui.input.is_empty() {
+    let input_display = if state.ui.input.is_empty() && is_focused {
         Paragraph::new(placeholder).style(input_style)
+    } else if state.ui.input.is_empty() {
+        Paragraph::new(" ").style(style::hint_style())
     } else {
-        Paragraph::new(state.ui.input.as_str()).style(style::value_style())
+        Paragraph::new(state.ui.input.as_str()).style(input_style)
     };
-
     f.render_widget(input_display.block(input_block).wrap(Wrap { trim: false }), chunks[1]);
 
     // ── Cursor ──
     if is_focused && !state.ui.input.is_empty() {
-        let prefix_width = display_width_up_to(&state.ui.input, state.ui.input_cursor);
-        let cursor_x = chunks[1].x + prefix_width as u16 + 1;
-        let line_no = state.ui.input[..char_idx_to_byte_idx(&state.ui.input, state.ui.input_cursor)]
-            .lines()
-            .count()
-            .saturating_sub(1);
+        // Compute cursor position relative to the current LINE, not the full input.
+        let byte_idx = char_idx_to_byte_idx(&state.ui.input, state.ui.input_cursor);
+        // Find the start of the current line (character after last newline before cursor).
+        let line_start_byte = state.ui.input[..byte_idx].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
+        // Chars on this line up to cursor.
+        let chars_on_this_line = state.ui.input[line_start_byte..byte_idx].chars().count();
+        let line_width = display_width_up_to(&state.ui.input[line_start_byte..], chars_on_this_line);
+        let cursor_x = chunks[1].x + line_width as u16 + 1;
+        let line_no = state.ui.input[..byte_idx].lines().count().saturating_sub(1);
         let cursor_y = chunks[1].y + 1 + line_no as u16;
         f.set_cursor_position((
             cursor_x.min(chunks[1].right().saturating_sub(1)),

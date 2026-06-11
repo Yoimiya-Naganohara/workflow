@@ -5,10 +5,10 @@
 
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Rect},
     style::Style,
-    text::{Line, Span},
-    widgets::{List, ListItem, ListState},
+    text::Span,
+    widgets::{Row, Table, TableState},
 };
 
 use crate::tui::commands::COMMANDS;
@@ -30,32 +30,40 @@ pub fn render_command_popup(f: &mut Frame, chat_area: Rect, ui: &UiState, _core:
     if matches.is_empty() {
         return;
     }
-
-    let items: Vec<ListItem> = matches
+    // Use a Table with column constraints (Length + Min) instead of manual
+    // string padding — the layout engine handles alignment.
+    let max_cmd_len = matches.iter().map(|(cmd, _)| cmd.len()).max().unwrap_or(10);
+    let rows: Vec<Row> = matches
         .iter()
         .map(|(cmd, desc)| {
-            ListItem::new(Line::from(vec![
+            Row::new(vec![
                 Span::styled(*cmd, Style::default().fg(style::ACTIVE)),
-                Span::raw("  "),
-                Span::styled(format!("— {}", desc), style::hint_style()),
-            ]))
+                Span::styled(*desc, style::hint_style()),
+            ])
         })
         .collect();
 
     let popup_h = (matches.len() as u16).clamp(3, 6) + 2;
-    let popup_w = 50u16.min(chat_area.width.saturating_sub(4));
+    // Compute width from content (command + gap + description), capped to chat area.
+    let content_max = matches
+        .iter()
+        .map(|(cmd, desc)| cmd.len() + 4 + desc.len())
+        .max()
+        .unwrap_or(50);
+    let popup_w = (content_max as u16).min(chat_area.width.saturating_sub(4));
     let x = chat_area.x;
-    let y = chat_area.y + chat_area.height.saturating_sub(popup_h + 3);
+    // Position the popup just above the input box (not at chat_area bottom).
+    let input_height = ui.input.lines().count().clamp(1, 5) as u16 + 2;
+    let input_top = chat_area.y + chat_area.height - input_height;
+    let y = input_top.saturating_sub(popup_h + 1);
 
-    let mut list_state = ListState::default();
-    list_state.select(Some(ui.command_popup_selection.min(matches.len().saturating_sub(1))));
+    let mut table_state = TableState::default();
+    table_state.select(Some(ui.command_popup_selection.min(matches.len().saturating_sub(1))));
     f.render_stateful_widget(
-        List::new(items)
+        Table::new(rows, [Constraint::Length(max_cmd_len as u16), Constraint::Min(0)])
             .block(style::panel("Commands"))
-            .highlight_style(style::highlight_fg())
-            .highlight_style(style::highlight_bg())
-            .highlight_symbol("▸ "),
+            .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
         Rect::new(x, y, popup_w, popup_h),
-        &mut list_state,
+        &mut table_state,
     );
 }

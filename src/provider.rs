@@ -61,8 +61,14 @@ impl ProviderClient {
     pub fn mark_success(&self) {
         self.healthy.store(true, Ordering::Relaxed);
         self.error_count.store(0, Ordering::Relaxed);
-        self.last_used
-            .store(Instant::now().elapsed().as_nanos() as u64, Ordering::Relaxed);
+        // Store current epoch nanoseconds — NOT Instant::now().elapsed() which is always ~0.
+        self.last_used.store(
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64,
+            Ordering::Relaxed,
+        );
     }
 
     /// Mark a failed call. Marks unhealthy after 3 consecutive failures.
@@ -142,12 +148,11 @@ impl ClientPool {
     /// If unhealthy but still within TTL, attempts to rebuild.
     /// If TTL expired, rebuilds the client.
     pub async fn get_or_create(&self, config: &ProviderConfig) -> Result<Arc<ProviderClient>> {
-        // Fast path — existing healthy client
+        // Fast path — existing healthy client (no mark_success — that's for actual API calls only).
         {
             let clients = self.clients.read().await;
             if let Some(entry) = clients.get(&config.id) {
                 if entry.client.is_healthy() {
-                    entry.client.mark_success();
                     return Ok(entry.client.clone());
                 }
             }
@@ -159,7 +164,6 @@ impl ClientPool {
         // Re-check after acquiring write lock
         if let Some(entry) = clients.get(&config.id) {
             if entry.client.is_healthy() {
-                entry.client.mark_success();
                 return Ok(entry.client.clone());
             }
             // Unhealthy — remove and recreate below
@@ -197,8 +201,8 @@ impl ClientPool {
         let mut clients = self.clients.write().await;
         let before = clients.len();
         clients.retain(|_, entry| {
-            // Keep if within TTL or unhealthy
-            entry.created_at.elapsed() < self.ttl || !entry.client.is_healthy()
+            // Keep only healthy clients within TTL (unhealthy clients are evicted).
+            entry.created_at.elapsed() < self.ttl && entry.client.is_healthy()
         });
         before - clients.len()
     }

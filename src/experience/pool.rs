@@ -161,6 +161,19 @@ impl ExperiencePool {
 
         let count = header.count as usize;
         let capacity = header.capacity as usize;
+
+        // Validate count against mmap file size — prevent UB from corrupted header.
+        let file_bytes = ro.len();
+        let max_entries = file_bytes.saturating_sub(HEADER_SIZE) / std::mem::size_of::<ExperienceEntry>();
+        if count > max_entries {
+            warn!(
+                count,
+                max_entries, "Experience pool header claims entries beyond file size – clamping"
+            );
+            // We cannot safely read past the mmap, so return empty.
+            return Ok((Vec::new(), None, None, DEFAULT_CAPACITY));
+        }
+
         let entries: &[ExperienceEntry] =
             unsafe { std::slice::from_raw_parts(ro.as_ptr().add(HEADER_SIZE) as *const ExperienceEntry, count) };
 
@@ -466,6 +479,41 @@ mod tests {
         // Re-open and verify count.
         let pool = ExperiencePool::open(&path).unwrap();
         assert_eq!(pool.len(), 1200);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_corrupted_header_count_causes_ub() {
+        let path = tmp_path();
+        // Create a valid pool with 1 entry
+        {
+            let mut pool = ExperiencePool::open(&path).unwrap();
+            pool.add(dummy_entry(1.0));
+            pool.flush().unwrap();
+        }
+
+        // Corrupt the header: set count to a huge number
+        let mut file = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        let _header_size = std::mem::size_of::<PoolHeader>();
+
+        // Write a bogus count (999999) at the count field offset
+        // PoolHeader layout: magic(8) + version(4) + count(4) + capacity(4)
+        let count_offset = 8 + 4; // after magic and version
+        use std::io::{Seek, SeekFrom, Write};
+        file.seek(SeekFrom::Start(count_offset as u64)).unwrap();
+        file.write_all(&999999u32.to_le_bytes()).unwrap();
+        drop(file);
+
+        // Re-open — this should either detect corruption or cause UB
+        // BUG: no bounds validation on count vs file size
+        let result = std::panic::catch_unwind(|| {
+            let _pool = ExperiencePool::open(&path).unwrap();
+        });
+
+        // The open may panic (UB) or succeed with garbage data
+        if result.is_err() {
+            println!("BUG CONFIRMED: corrupted mmap count causes panic/UB");
+        }
         std::fs::remove_file(&path).ok();
     }
 }

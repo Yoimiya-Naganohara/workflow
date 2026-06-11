@@ -159,7 +159,7 @@ impl KeyDialog {
         f.render_widget(input_display, chunks[0]);
 
         // Cursor
-        let cursor_x = chunks[0].x + self.input.len() as u16 + 1;
+        let cursor_x = chunks[0].x + self.input.chars().count() as u16 + 1;
         let cursor_y = chunks[0].y + 1;
         f.set_cursor_position((cursor_x.min(chunks[0].right().saturating_sub(2)), cursor_y));
 

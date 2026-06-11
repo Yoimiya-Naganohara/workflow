@@ -27,6 +27,15 @@ impl L2RuleAuditEngine {
             };
         }
 
+        if manifest.contending_agents.is_empty() {
+            return L2RuleAuditResult {
+                decision: ArbitrationResult::Prune(vec![]),
+                risk_statement: "No contending agents".to_string(),
+                lesson_learned: String::new(),
+                l1_override_vector_patch: None,
+            };
+        }
+
         let risk = self.assess_risk(manifest);
         let decision = if risk.is_high {
             self.consecutive_failures += 1;

@@ -24,6 +24,7 @@ impl Tui {
 
         let msg_count = state.core.messages.len();
         let is_streaming = state.ui.active_chat_requests > 0;
+        let last_content_len = state.core.messages.last().map(|m| m.content.len()).unwrap_or(0);
         let input_lines = state.ui.input.lines().count().clamp(1, 5) as u16;
         let sidebar_offset = if state.ui.show_status_panel {
             crate::core::types::SIDEBAR_WIDTH as usize
@@ -32,11 +33,14 @@ impl Tui {
         };
         let chat_width = (term_size.width.saturating_sub(sidebar_offset as u16 + 4)).max(1) as usize;
 
-        // Rebuild cache when messages or streaming state change.
-        if is_streaming || msg_count != self.chat_cache_msg_count || chat_width != self.chat_cache_width {
+        // Content-hash cache key: msg count + last msg content length + streaming + width.
+        // This catches the case where streaming completes (msg_count unchanged but content
+        // length is now final) — otherwise the final message would be invisible until
+        // the next user message.
+        let cache_key = (msg_count, last_content_len, is_streaming, chat_width);
+        if cache_key != self.chat_cache_key {
             self.chat_lines_cache = build_chat_lines(&state.core, chat_width);
-            self.chat_cache_msg_count = msg_count;
-            self.chat_cache_width = chat_width;
+            self.chat_cache_key = cache_key;
         }
 
         let visible_height = (term_size.height.saturating_sub(input_lines + 5)).max(1) as usize;

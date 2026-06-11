@@ -5,8 +5,8 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
-    text::{Line, Span},
-    widgets::{List, ListItem, ListState, Paragraph},
+    text::Span,
+    widgets::{Paragraph, Row, Table, TableState},
 };
 
 use crate::models::filter_providers;
@@ -208,40 +208,53 @@ impl ProviderDialog {
 
         style::render_separator(f, chunks[1]);
 
-        let mut items: Vec<ListItem> = filtered
+        let mut rows: Vec<Row> = filtered
             .iter()
             .map(|p| {
                 let count = p.models.len();
                 let is_configured = state.configured_providers.iter().any(|id| id == &p.id);
-                ListItem::new(Line::from(vec![
+                Row::new(vec![
                     if is_configured {
-                        Span::styled("✓ ", Style::default().fg(style::SUCCESS))
+                        Span::styled("✓", Style::default().fg(style::SUCCESS))
                     } else {
-                        Span::raw("  ")
+                        Span::raw("")
                     },
                     Span::styled(&p.name, style::value_style()),
-                    Span::raw("  "),
                     Span::styled(format!("{} models", count), style::hint_style()),
-                ]))
+                ])
             })
             .collect();
 
         if show_custom {
-            items.push(ListItem::new(Line::from(vec![
-                Span::raw("  "),
-                Span::styled("➕ Add Custom Provider", Style::default().fg(style::ACTIVE)),
-            ])));
+            rows.push(Row::new(vec![
+                Span::raw(""),
+                Span::styled("Add Custom Provider", Style::default().fg(style::ACTIVE)),
+                Span::raw(""),
+            ]));
         }
 
-        let mut list_state = ListState::default();
-        list_state.select(Some(self.selected_idx.min(total_items.saturating_sub(1))));
+        // Compute column widths from content.
+        let max_name = filtered.iter().map(|p| p.name.len()).max().unwrap_or(0);
+        let max_count = filtered
+            .iter()
+            .map(|p| format!("{} models", p.models.len()).len())
+            .max()
+            .unwrap_or(8);
+
+        let mut table_state = TableState::default();
+        table_state.select(Some(self.selected_idx.min(total_items.saturating_sub(1))));
         f.render_stateful_widget(
-            List::new(items)
-                .highlight_style(style::highlight_fg())
-                .highlight_style(style::highlight_bg())
-                .highlight_symbol("▸ "),
+            Table::new(
+                rows,
+                [
+                    Constraint::Length(1),                   // checkmark
+                    Constraint::Length(max_name as u16 + 1), // provider name
+                    Constraint::Length(max_count as u16),    // model count
+                ],
+            )
+            .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
             chunks[2],
-            &mut list_state,
+            &mut table_state,
         );
     }
 }

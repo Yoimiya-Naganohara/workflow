@@ -402,9 +402,14 @@ impl Plan {
             if let Some(pos) = line.find(&pattern) {
                 let after_role = line[pos + pattern.len()..].trim();
                 let goal_start = after_role.find('"').or_else(|| after_role.find('\u{201c}'))?;
-                let quote_char = after_role.as_bytes()[goal_start];
-                let closing = if quote_char == b'"' { '"' } else { '\u{201d}' };
-                let after_open = &after_role[goal_start + 1..];
+                // Use char-based advance — the found quote may be multi-byte UTF-8.
+                let quote = after_role[goal_start..].chars().next().unwrap();
+                let closing = match quote {
+                    '"' => '"',
+                    '\u{201c}' => '\u{201d}',
+                    _ => return None,
+                };
+                let after_open = &after_role[goal_start + quote.len_utf8()..];
                 let goal_end = after_open.find(closing)?;
                 let goal = after_open[..goal_end].to_string();
                 if !goal.is_empty() {
@@ -521,7 +526,16 @@ impl Plan {
             }
         }
 
-        Ok(())
+        // Return the last error if any task failed.
+        if plan
+            .tasks
+            .iter()
+            .any(|t| t.status == crate::agent::plan::TaskStatus::Failed)
+        {
+            Err(anyhow::anyhow!("One or more plan tasks failed"))
+        } else {
+            Ok(())
+        }
     }
 
     pub fn summary(&self) -> String {

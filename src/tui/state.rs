@@ -221,7 +221,7 @@ impl AppState {
                 }
             }
             AppEvent::ChatToolCall {
-                response_index,
+                response_index: _,
                 name,
                 args,
                 timestamp,
@@ -233,13 +233,10 @@ impl AppState {
                     timestamp,
                     status: MessageStatus::Completed,
                 });
-                // Shift future response indices — we inserted a message
-                if response_index >= self.core.messages.len() {
-                    // message was pushed, not inserted before response_index
-                }
             }
             AppEvent::ChatCompleted {
                 response_index,
+                request_id: _,
                 full_response,
                 input: _,
                 runtime: _,
@@ -256,7 +253,11 @@ impl AppState {
                 }
                 self.ui.active_chat_abort = None;
             }
-            AppEvent::ChatError { response_index, error } => {
+            AppEvent::ChatError {
+                response_index,
+                request_id: _,
+                error,
+            } => {
                 let slot = find_streaming_slot_response(&self.core.messages, response_index);
                 if let Some(msg) = self.core.messages.get_mut(slot) {
                     msg.content = error;
@@ -265,7 +266,10 @@ impl AppState {
                 self.ui.active_chat_requests = 0;
                 self.ui.active_chat_abort = None;
             }
-            AppEvent::ChatCancelled { response_index } => {
+            AppEvent::ChatCancelled {
+                response_index,
+                request_id: _,
+            } => {
                 let slot = find_streaming_slot_response(&self.core.messages, response_index);
                 if let Some(msg) = self.core.messages.get_mut(slot) {
                     msg.content += " (cancelled)";

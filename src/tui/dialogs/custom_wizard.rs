@@ -157,7 +157,14 @@ impl CustomWizard {
         }
         if !self.url.is_empty() {
             let url_display = if self.url.len() > 40 {
-                format!("{}…", &self.url[..37])
+                // Safely truncate at char boundary — avoid splitting multi-byte UTF-8.
+                let end = self
+                    .url
+                    .char_indices()
+                    .nth(37)
+                    .map(|(i, _)| i)
+                    .unwrap_or(self.url.len());
+                format!("{}…", &self.url[..end])
             } else {
                 self.url.clone()
             };

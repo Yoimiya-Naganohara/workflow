@@ -282,6 +282,15 @@ impl DualTrackMemory {
                 "Consolidating fluid → bedrock"
             );
             self.bedrock.extend(representatives);
+        } else {
+            // No clusters qualified — reinstate fluid entries to avoid data loss.
+            trace!(
+                from_fluid = fluid_entries.len(),
+                "No qualifying clusters — reinstating fluid"
+            );
+            for entry in fluid_entries {
+                self.fluid.add(entry);
+            }
         }
     }
 
@@ -617,6 +626,31 @@ mod tests {
 
         // First fluid entry should now be the one with 2.0.
         assert!((mem.fluid.entries()[0].embedding[0] - 2.0).abs() < 1e-6);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_consolidate_reinstates_fluid_when_no_cluster_qualifies() {
+        let path = tmp_path();
+        // min_cluster_size=10 means no cluster of 3 entries will qualify
+        let mut mem = DualTrackMemory::open(&path, 100, 0.5)
+            .unwrap()
+            .with_min_cluster_size(10)
+            .with_auto_consolidate_at(usize::MAX);
+
+        // Add 3 entries
+        mem.add_experience(make_entry(1.0, 1.0));
+        mem.add_experience(make_entry(1.05, 1.0));
+        mem.add_experience(make_entry(1.1, 1.0));
+        assert_eq!(mem.fluid_len(), 3);
+
+        // Manually trigger consolidate — no cluster qualifies, so fluid is reinstated
+        mem.consolidate();
+
+        // Fixed: fluid entries are reinstated when no cluster qualifies
+        assert_eq!(mem.fluid_len(), 3, "fluid is reinstated after failed consolidation");
+        assert_eq!(mem.bedrock_len(), 0, "bedrock has no new entries");
+        assert_eq!(mem.total_count(), 3, "no data lost on failed consolidation");
         std::fs::remove_file(&path).ok();
     }
 }

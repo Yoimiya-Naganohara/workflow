@@ -255,8 +255,26 @@ impl Tui {
             "Produce a concrete result."
         );
         let (provider, model_id, system_prompt) = {
-            // Try to get an initial agent and configure the provider
+            // ── Configure runtime provider from selected model ──
+            let selected_model = core.selected_models.first().cloned();
+            if let Some(ref sel) = selected_model {
+                let pid = sel.provider_id.clone();
+                if core.configured_providers.iter().any(|id| id == &pid) {
+                    if let Ok(client) = crate::tui::controller::get_or_create_provider_client(core, &pid) {
+                        if let Some(rt) = &core.runtime {
+                            if let Ok(mut rt_guard) = rt.try_write() {
+                                rt_guard.set_provider_from_state(client);
+                                rt_guard.set_default_model(&sel.model_id);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Try to get an initial agent
             let agent_id = crate::tui::controller::ensure_initial_agent_sync(core, &input);
+
+            // Read provider + model from the (now-configured) runtime
             let provider = core
                 .runtime
                 .as_ref()
@@ -269,6 +287,7 @@ impl Tui {
                         .and_then(|rt| rt.try_read().ok().map(|r| r.model_id.clone()))
                 })
                 .unwrap_or_default();
+
             let agent_prompt = agent_id
                 .as_ref()
                 .and_then(|aid| {
@@ -276,6 +295,7 @@ impl Tui {
                     pool.get_agent(aid).map(|a| a.config.system_prompt.clone())
                 })
                 .unwrap_or_else(|| default_tool_prompt.to_string());
+
             let sp = format!(
                 "{}\n\nYou are the workflow agent. Chat with the user, clarify the goal, and delegate tasks by calling the `spawn_agent` tool (roles: planner, developer, tester, reviewer, worker, etc.). You are fully responsible for all spawned agents.\n\nYou have access to tools: read_file, write_file, sh, list_dir, and spawn_agent.",
                 agent_prompt
@@ -330,7 +350,7 @@ impl Tui {
 
         ui.input.clear();
         ui.input_cursor = 0;
-        ui.chat_scroll = 0;
+        // Don't reset chat_scroll — auto_scroll = true already pins to bottom.
         true
     }
 

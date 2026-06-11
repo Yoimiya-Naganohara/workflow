@@ -56,7 +56,12 @@ impl SuspendQueue {
 
         let pos = self
             .queue
-            .binary_search_by(|r| priority.partial_cmp(&r.priority).unwrap_or(std::cmp::Ordering::Equal))
+            .binary_search_by(|r| {
+                priority
+                    .partial_cmp(&r.priority)
+                    // NaN: map to Less so NaN-priority requests go first.
+                    .unwrap_or(std::cmp::Ordering::Less)
+            })
             .unwrap_or_else(|p| p);
         self.queue.insert(pos, entry);
         self.notify.notify_one();

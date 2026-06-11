@@ -354,7 +354,7 @@ impl AgentRuntime {
     ) -> Result<SpawnDecision> {
         let task_emb = self.pipeline.embedding().embed(task_description).await?;
         let role_emb = self.pipeline.embedding().embed(role_description).await?;
-        let value_emb = self.pipeline.embedding().embed("default").await?;
+        let value_emb = self.pipeline.embedding().embed(_value_statement).await?;
 
         let request = SpawnRequest {
             trace_id: rand::random(),
@@ -616,10 +616,15 @@ impl AgentRuntime {
         let mut chain = responsibility_chain.to_vec();
         chain.push(agent_id);
 
+        // Derive parent_span_id from the first agent in the responsibility chain.
+        let parent_span_id: u64 = responsibility_chain
+            .first()
+            .and_then(|id| Some(u64::from_le_bytes(id[0..8].try_into().ok()?)))
+            .unwrap_or(0);
         let request = SpawnRequest {
             trace_id: rand::random(),
             span_id: rand::random(),
-            parent_span_id: 0,
+            parent_span_id,
             task_description_embedding: task_emb,
             role_description_embedding: role_emb,
             value_statement_embedding: value_emb,
