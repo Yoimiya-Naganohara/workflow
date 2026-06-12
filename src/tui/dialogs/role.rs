@@ -25,6 +25,9 @@ pub struct RoleWizard {
     pub system_prompt: String,
     pub editing: bool,
     pub editing_id: u32,
+    pub min_experiences: usize,
+    pub version: u32,
+    pub created_at: u64,
     pub input: String,
     pub cursor: usize,
 }
@@ -44,6 +47,9 @@ impl RoleWizard {
             system_prompt: template.system_prompt,
             editing: true,
             editing_id: template.template_id,
+            min_experiences: template.min_experiences,
+            version: template.version,
+            created_at: template.created_at,
             input: String::new(),
             cursor: 0,
         }
@@ -119,6 +125,10 @@ impl RoleWizard {
                         self.system_prompt = prompt_text;
 
                         // Save via runtime
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
                         let tpl = RoleTemplate {
                             role: self.role_name.clone(),
                             label: if self.label.is_empty() {
@@ -128,6 +138,10 @@ impl RoleWizard {
                             },
                             system_prompt: self.system_prompt.clone(),
                             template_id: self.editing_id,
+                            min_experiences: self.min_experiences,
+                            version: if self.editing { self.version } else { 0 },
+                            created_at: if self.editing { self.created_at } else { now },
+                            updated_at: now,
                             embedding: None,
                             ..Default::default()
                         };
@@ -284,6 +298,9 @@ impl Default for RoleWizard {
             system_prompt: String::new(),
             editing: false,
             editing_id: 0,
+            min_experiences: 5,
+            version: 0,
+            created_at: 0,
             input: String::new(),
             cursor: 0,
         }

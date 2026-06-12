@@ -285,9 +285,25 @@ impl AppState {
                 summary,
                 stats: _,
             } => {
+                // Auto-apply: update system_prompt, increment version, recompute embedding.
+                if let Some(runtime) = &self.core.runtime {
+                    if let Ok(rt) = runtime.try_read() {
+                        if let Some(mut tpl) = rt.get_role_template(&role_name) {
+                            tpl.system_prompt = improved.clone();
+                            tpl.version += 1;
+                            tpl.updated_at = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            rt.save_role_template(tpl);
+                            // Recompute embedding in background.
+                            rt.compute_role_embeddings_async();
+                        }
+                    }
+                }
                 self.core.messages.push(ChatMessage::system(format!(
-                    "Role '{}' optimization complete.\n\n{}  \n\nProposed new prompt:\n{}\n\nTo apply: /role edit {} and paste the new prompt.",
-                    role_name, summary, improved, role_name
+                    "Role '{}' optimization complete.\n\n{}  \n\nNew prompt applied (version ++).",
+                    role_name, summary
                 )));
             }
             AppEvent::OptimizationError { role_name, error } => {

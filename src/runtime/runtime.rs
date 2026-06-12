@@ -239,6 +239,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 4,
             embedding: None,
+            min_experiences: 3,
             ..Default::default()
             },
             RoleTemplate {
@@ -248,6 +249,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 5,
             embedding: None,
+            min_experiences: 3,
             ..Default::default()
             },
             RoleTemplate {
@@ -257,6 +259,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 6,
             embedding: None,
+            min_experiences: 3,
             ..Default::default()
             },
             RoleTemplate {
