@@ -128,6 +128,7 @@ impl RoleWizard {
                             },
                             system_prompt: self.system_prompt.clone(),
                             template_id: self.editing_id,
+                            initial_confidence: 0.6,
                             embedding: None,
                         };
 

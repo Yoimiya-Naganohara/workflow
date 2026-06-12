@@ -49,9 +49,15 @@ pub struct RoleTemplate {
     pub label: String,
     pub system_prompt: String,
     pub template_id: u32,
+    /// Baseline confidence for this role (0.0–1.0).
+    /// Used by L1 as a floor when experience data is sparse.
+    #[serde(default = "default_initial_confidence")]
+    pub initial_confidence: f32,
     #[serde(with = "opt_big_array_384")]
     pub embedding: Option<[f32; crate::core::types::EMBEDDING_DIM]>,
 }
+
+fn default_initial_confidence() -> f32 { 0.6 }
 
 /// Serde helpers for `Option<[f32; EMBEDDING_DIM]>`.
 ///

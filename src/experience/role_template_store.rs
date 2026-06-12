@@ -158,6 +158,7 @@ mod tests {
                 label: "Senior Architect".into(),
                 system_prompt: "You are a senior architect.".into(),
                 template_id: 0,
+                initial_confidence: 0.6,
                 embedding: None,
             },
             RoleTemplate {
@@ -165,6 +166,7 @@ mod tests {
                 label: "QA Engineer".into(),
                 system_prompt: "You are a QA engineer.".into(),
                 template_id: 1,
+                initial_confidence: 0.6,
                 embedding: None,
             },
         ]
@@ -198,6 +200,7 @@ mod tests {
             label: "Extra".into(),
             system_prompt: "extra".into(),
             template_id: 99,
+            initial_confidence: 0.6,
             embedding: None,
         }]);
         assert_eq!(store.all().len(), 2);
@@ -246,6 +249,7 @@ mod tests {
                 label: "Alpha".into(),
                 system_prompt: "alpha prompt".into(),
                 template_id: 10,
+                initial_confidence: 0.6,
                 embedding: Some(emb_a),
             },
             RoleTemplate {
@@ -253,6 +257,7 @@ mod tests {
                 label: "Beta".into(),
                 system_prompt: "beta prompt".into(),
                 template_id: 11,
+                initial_confidence: 0.6,
                 embedding: Some(emb_b),
             },
         ]);
@@ -282,6 +287,7 @@ mod tests {
             label: "Alpha".into(),
             system_prompt: "original".into(),
             template_id: 10,
+            initial_confidence: 0.6,
             embedding: None,
         };
 

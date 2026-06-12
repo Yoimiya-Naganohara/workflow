@@ -48,6 +48,7 @@ impl L1Retriever {
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
         _role_template_id: Option<u32>,
+        initial_confidence: Option<f32>,
     ) -> Result<L1Assessment, SpawnRejection> {
         if self.experiences.is_empty() {
             // Cold start: pool is empty — allow spawn with a reasonable baseline
@@ -66,6 +67,8 @@ impl L1Retriever {
         let role_score = role_matches.first().map(|(_, s)| *s).unwrap_or(0.0);
 
         let combined = (task_score + role_score) / 2.0;
+        // Floor: never below the role's inherent confidence.
+        let combined = combined.max(initial_confidence.unwrap_or(0.0));
 
         if combined >= self.confidence_threshold {
             let recommended_tools = self.infer_tools(&task_matches);
@@ -125,6 +128,7 @@ pub trait ExperienceRetrieval: Send + Sync {
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
         role_template_id: Option<u32>,
+        initial_confidence: Option<f32>,
     ) -> Result<L1Assessment, SpawnRejection>;
     fn add_experience(&mut self, entry: ExperienceEntry);
     fn experience_count(&self) -> usize;
@@ -172,8 +176,9 @@ impl ExperienceRetrieval for L1Retriever {
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
         role_template_id: Option<u32>,
+        initial_confidence: Option<f32>,
     ) -> Result<L1Assessment, SpawnRejection> {
-        self.check_confidence(task_embedding, role_embedding, role_template_id)
+        self.check_confidence(task_embedding, role_embedding, role_template_id, initial_confidence)
     }
 
     fn add_experience(&mut self, entry: ExperienceEntry) {
@@ -232,7 +237,7 @@ mod tests {
         let mut query = [0.0f32; EMBEDDING_DIM];
         query[0] = 1.0;
 
-        let result = retriever.check_confidence(&query, &query, None);
+        let result = retriever.check_confidence(&query, &query, None, None);
         assert!(result.is_ok());
     }
 }

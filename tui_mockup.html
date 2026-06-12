@@ -5,44 +5,54 @@
 <title>Workflow TUI</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0e0e14;--fg:#c8c8d4;--fg2:#7777a0;--fg3:#44446a;--blue:#7aa2f7;--green:#9ece6a;--red:#f7768e;--yellow:#e0af68;--purple:#bb9af7;--cyan:#7dcfff;--border:#222236}
-body{font-family:'SF Mono','JetBrains Mono','Fira Code',monospace;background:var(--bg);color:var(--fg);font-size:13px;line-height:1.6;display:flex;justify-content:center;min-height:100vh;padding:32px 16px}
+:root{
+  --base:#1e1e2e;--mantle:#181825;--crust:#11111b;
+  --surface0:#313244;--surface1:#45475a;
+  --overlay0:#6c7086;--overlay1:#7f849c;
+  --subtext0:#a6adc8;--text:#cdd6f4;
+  --blue:#89b4fa;--mauve:#cba6f7;--peach:#fab387;
+  --red:#f38ba8;--green:#a6e3a1;--yellow:#f9e2af;
+  --sky:#89dceb;--pink:#f5c2e7;--teal:#94e2d5;
+  --sapphire:#74c7ec;--lavender:#b4befe;
+  --diff-add:#478247;--diff-add-bg:#303A30;
+  --diff-del:#7C4444;--diff-del-bg:#3A3030;
+}
+body{font-family:'SF Mono','JetBrains Mono','Fira Code',monospace;background:var(--crust);color:var(--text);font-size:13px;line-height:1.6;display:flex;justify-content:center;min-height:100vh;padding:24px 16px}
 .term{width:100%;max-width:840px}
 
 /* messages */
-.msg{margin-bottom:20px;display:flex;gap:0}
-.msg .bar{width:3px;flex-shrink:0;border-radius:2px;margin-right:12px;align-self:stretch}
+.msg{margin-bottom:18px;display:flex;gap:0}
+.msg .bar{width:3px;flex-shrink:0;border-radius:2px;margin-right:10px;align-self:stretch}
 .msg.user .bar{background:var(--green)}
 .msg.assistant .bar{background:var(--blue)}
-.msg.tool .bar{background:var(--fg3)}
-.msg .body{flex:1;min-width:0;color:var(--fg)}
-.msg.user .body{color:var(--fg)}
+.msg.tool .bar{background:var(--surface0)}
+.msg .body{flex:1;min-width:0}
 
 /* tool call */
-.tool-header{display:flex;align-items:center;gap:6px;margin-bottom:4px}
-.tool-name{color:var(--fg2);font-size:12px}
-.tool-params{color:var(--fg3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tool-result{margin-top:6px;padding:8px 12px;background:rgba(34,34,54,.6);border-radius:4px;font-size:12px;color:var(--fg2);border-left:2px solid var(--fg3)}
-.tool-result.err{border-left-color:var(--red);color:var(--red)}
-
-/* code in tool result */
-.tool-result pre{font-family:inherit;font-size:12px;line-height:1.5;color:var(--fg);margin-top:4px}
+.tool-line{display:flex;align-items:center;gap:6px}
+.tool-label{color:var(--overlay1);font-size:12px}
+.tool-params{color:var(--overlay0);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-result{margin-top:6px;padding:8px 12px;background:var(--base);border-radius:4px;font-size:12px;border-left:2px solid var(--surface0)}
+.tool-result pre{font-family:inherit;font-size:12px;line-height:1.5;color:var(--text)}
+.tool-result.err{border-left-color:var(--red)}
+.tool-result.err pre{color:var(--red)}
 
 /* diff */
-.diff{margin-top:6px;font-size:12px}
-.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .ctx{color:var(--fg3)}
+.diff{margin-top:6px;font-size:12px;border-radius:4px;overflow:hidden}
+.diff .ln{padding:1px 12px;font-family:inherit}
+.diff .ln.a{background:var(--diff-add-bg);color:var(--diff-add)}
+.diff .ln.d{background:var(--diff-del-bg);color:var(--diff-del)}
+.diff .ln .p{display:inline-block;width:12px;font-weight:bold}
 
-/* inline code */
-code{background:rgba(34,34,54,.8);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--purple)}
-
-/* blockquote */
-.bq{border-left:2px solid var(--fg3);padding-left:12px;color:var(--fg3);margin:8px 0;font-style:italic}
-
-/* list */
+/* markdown */
+code{background:var(--surface0);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--green)}
+pre code{background:none;padding:0;color:var(--text)}
+.bq{border-left:2px solid var(--yellow);padding-left:12px;color:var(--yellow);margin:8px 0;font-style:italic}
 ul{padding-left:18px;margin:6px 0}
-li{margin:3px 0;color:var(--fg2)}
-li::marker{color:var(--fg3)}
-strong{color:var(--fg);font-weight:600}
+li{margin:3px 0;color:var(--subtext0)}
+li::marker{color:var(--blue)}
+strong{color:var(--peach);font-weight:bold}
+em{color:var(--yellow);font-style:italic}
 
 /* thinking */
 .think{color:var(--yellow);font-size:12px;display:flex;align-items:center;gap:6px}
@@ -50,126 +60,95 @@ strong{color:var(--fg);font-weight:600}
 @keyframes d{0%{content:"⠋"}11%{content:"⠙"}22%{content:"⠹"}33%{content:"⠸"}44%{content:"⠼"}55%{content:"⠴"}66%{content:"⠦"}77%{content:"⠧"}88%{content:"⠇"}}
 
 /* input */
-.input{border-top:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:8px}
+.input{border-top:1px solid var(--surface0);padding:10px 16px;display:flex;align-items:center;gap:8px}
 .input .pr{color:var(--blue);font-weight:bold;font-size:14px}
-.input .tx{flex:1;color:var(--fg)}
+.input .tx{flex:1;color:var(--text)}
 .input .cu{display:inline-block;width:7px;height:15px;background:var(--blue);border-radius:1px;animation:blink 1s step-end infinite;vertical-align:middle}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 
 /* status */
-.status{display:flex;align-items:center;justify-content:space-between;padding:5px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--fg3)}
+.status{display:flex;align-items:center;justify-content:space-between;padding:5px 16px;border-top:1px solid var(--surface0);font-size:11px;color:var(--overlay0)}
 .status .l{display:flex;gap:12px;align-items:center}
 .status .model{color:var(--blue);font-weight:600}
 .status .r{display:flex;gap:12px}
-.status kbd{background:var(--border);padding:1px 4px;border-radius:2px;font-family:inherit;font-size:10px}
-
-/* separator */
-.sep{border:none;border-top:1px solid var(--border);margin:12px 0;opacity:.5}
+.status kbd{background:var(--surface0);padding:1px 4px;border-radius:2px;font-family:inherit;font-size:10px;color:var(--subtext0)}
 </style>
 </head>
 <body>
 <div class="term">
 
-  <!-- User message -->
   <div class="msg user">
     <div class="bar"></div>
     <div class="body">Implement auth middleware and rate limiter for the user service.</div>
   </div>
 
-  <!-- Tool call: view -->
   <div class="msg tool">
     <div class="bar"></div>
     <div class="body">
-      <div class="tool-header">
-        <span class="tool-name">View:</span>
-        <span class="tool-params">src/models/user.rs</span>
-      </div>
-      <div class="tool-result">
-        <pre><span style="color:var(--purple)">pub struct</span> <span style="color:var(--yellow)">User</span> {
-    <span style="color:var(--fg)">id</span>: <span style="color:var(--yellow)">Uuid</span>,
-    <span style="color:var(--fg)">email</span>: <span style="color:var(--yellow)">String</span>,
-    <span style="color:var(--fg)">password_hash</span>: <span style="color:var(--yellow)">String</span>,
-    <span style="color:var(--fg)">created_at</span>: <span style="color:var(--yellow)">NaiveDateTime</span>,
-}</pre>
-      </div>
+      <div class="tool-line"><span class="tool-label">View:</span><span class="tool-params">src/models/user.rs</span></div>
+      <div class="tool-result"><pre><span style="color:var(--mauve)">pub struct</span> <span style="color:var(--sky)">User</span> {
+    <span style="color:var(--text)">id</span>: <span style="color:var(--sky)">Uuid</span>,
+    <span style="color:var(--text)">email</span>: <span style="color:var(--sky)">String</span>,
+    <span style="color:var(--text)">password_hash</span>: <span style="color:var(--sky)">String</span>,
+    <span style="color:var(--text)">created_at</span>: <span style="color:var(--sky)">NaiveDateTime</span>,
+}</pre></div>
     </div>
   </div>
 
-  <!-- Tool call: bash -->
   <div class="msg tool">
     <div class="bar"></div>
     <div class="body">
-      <div class="tool-header">
-        <span class="tool-name">Bash:</span>
-        <span class="tool-params">cargo check 2>&amp;1 | head -5</span>
-      </div>
-      <div class="tool-result">
-        <pre><span style="color:var(--green)">Finished</span> dev profile [unoptimized + debuginfo] in 0.42s
-<span style="color:var(--yellow)">warning</span>: unused variable `config`</pre>
-      </div>
+      <div class="tool-line"><span class="tool-label">Bash:</span><span class="tool-params">cargo check 2>&amp;1 | head -5</span></div>
+      <div class="tool-result"><pre><span style="color:var(--green)">Finished</span> dev profile [unoptimized + debuginfo] in 0.42s
+<span style="color:var(--yellow)">warning</span>: unused variable `config`</pre></div>
     </div>
   </div>
 
-  <!-- Assistant message -->
   <div class="msg assistant">
     <div class="bar"></div>
     <div class="body">
       Here's the auth middleware:
+      <div class="tool-result"><pre><span style="color:var(--pink)">use</span> <span style="color:var(--green)">axum</span>::{Extract, Request, Next};
 
-      <div class="tool-result" style="border-left-color:var(--fg3)">
-        <pre><span style="color:var(--purple)">use</span> <span style="color:var(--yellow)">axum</span>::{Extract, Request, Next};
-
-<span style="color:var(--purple)">pub async fn</span> <span style="color:var(--blue)">auth_middleware</span>(
-    <span style="color:var(--purple)">mut</span> <span style="color:var(--fg)">req</span>: <span style="color:var(--yellow)">Request</span>,
-    <span style="color:var(--fg)">next</span>: <span style="color:var(--yellow)">Next</span>,
-) <span style="color:var(--purple)">-&gt;</span> <span style="color:var(--yellow)">Result</span>&lt;<span style="color:var(--yellow)">Response</span>, <span style="color:var(--yellow)">StatusCode</span>&gt; {
-    <span style="color:var(--purple)">let</span> <span style="color:var(--fg)">token</span> = req.<span style="color:var(--blue)">headers</span>()
-        .<span style="color:var(--blue)">get</span>(<span style="color:var(--green)">"Authorization"</span>)
-        .<span style="color:var(--blue)">and_then</span>(|v| v.<span style="color:var(--blue)">to_str</span>().<span style="color:var(--blue)">ok</span>())
-        .<span style="color:var(--blue)">and_then</span>(|s| s.<span style="color:var(--blue)">strip_prefix</span>(<span style="color:var(--green)">"Bearer "</span>))
-        .<span style="color:var(--blue)">ok_or</span>(<span style="color:var(--yellow)">StatusCode</span>::<span style="color:var(--red)">UNAUTHORIZED</span>)?;
-    <span style="color:var(--fg3)">// verify &amp; inject claims</span>
-    <span style="color:var(--yellow)">Ok</span>(next.<span style="color:var(--blue)">run</span>(req).<span style="color:var(--blue)">await</span>)
-}</pre>
-      </div>
+<span style="color:var(--pink)">pub async fn</span> <span style="color:var(--green)">auth_middleware</span>(
+    <span style="color:var(--pink)">mut</span> <span style="color:var(--text)">req</span>: <span style="color:var(--sky)">Request</span>,
+    <span style="color:var(--text)">next</span>: <span style="color:var(--sky)">Next</span>,
+) <span style="color:var(--pink)">-&gt;</span> <span style="color:var(--sky)">Result</span>&lt;<span style="color:var(--sky)">Response</span>, <span style="color:var(--sky)">StatusCode</span>&gt; {
+    <span style="color:var(--pink)">let</span> <span style="color:var(--text)">token</span> = req.<span style="color:var(--green)">headers</span>()
+        .<span style="color:var(--green)">get</span>(<span style="color:var(--yellow)">"Authorization"</span>)
+        .<span style="color:var(--green)">and_then</span>(|v| v.<span style="color:var(--green)">to_str</span>().<span style="color:var(--green)">ok</span>())
+        .<span style="color:var(--green)">and_then</span>(|s| s.<span style="color:var(--green)">strip_prefix</span>(<span style="color:var(--yellow)">"Bearer "</span>))
+        .<span style="color:var(--green)">ok_or</span>(<span style="color:var(--sky)">StatusCode</span>::<span style="color:var(--red)">UNAUTHORIZED</span>)?;
+    <span style="color:var(--overlay1)">// verify &amp; inject claims</span>
+    <span style="color:var(--sky)">Ok</span>(next.<span style="color:var(--green)">run</span>(req).<span style="color:var(--green)">await</span>)
+}</pre></div>
     </div>
   </div>
 
-  <!-- Tool call: write -->
   <div class="msg tool">
     <div class="bar"></div>
     <div class="body">
-      <div class="tool-header">
-        <span class="tool-name">Write:</span>
-        <span class="tool-params">src/middleware/auth.rs</span>
-      </div>
+      <div class="tool-line"><span class="tool-label">Write:</span><span class="tool-params">src/middleware/auth.rs</span></div>
       <div class="diff">
-        <div class="add">+ use axum::{Extract, Request, Next};</div>
-        <div class="add">+ pub async fn auth_middleware(</div>
-        <div class="add">+     mut req: Request,</div>
-        <div class="add">+ ) -&gt; Result&lt;Response, StatusCode&gt; {</div>
-        <div class="add">+     // ...</div>
-        <div class="add">+ }</div>
+        <div class="ln a"><span class="p">+</span><span style="color:var(--pink)">use</span> <span style="color:var(--green)">axum</span>::{Extract, Request, Next};</div>
+        <div class="ln a"><span class="p">+</span><span style="color:var(--pink)">pub async fn</span> <span style="color:var(--green)">auth_middleware</span>(</div>
+        <div class="ln a"><span class="p">+</span>    <span style="color:var(--pink)">mut</span> req: <span style="color:var(--sky)">Request</span>,</div>
+        <div class="ln a"><span class="p">+</span>) <span style="color:var(--pink)">-&gt;</span> <span style="color:var(--sky)">Result</span>&lt;<span style="color:var(--sky)">Response</span>, <span style="color:var(--sky)">StatusCode</span>&gt; {</div>
+        <div class="ln a"><span class="p">+</span>    <span style="color:var(--overlay1)">// ...</span></div>
       </div>
     </div>
   </div>
 
-  <!-- Assistant follow-up -->
   <div class="msg assistant">
     <div class="bar"></div>
     <div class="body">
       Now the rate limiter:
-
-      <div class="tool-result" style="border-left-color:var(--fg3)">
-        <pre><span style="color:var(--purple)">pub struct</span> <span style="color:var(--yellow)">RateLimiter</span> {
-    <span style="color:var(--fg)">window</span>: <span style="color:var(--yellow)">Duration</span>,
-    <span style="color:var(--fg)">max_requests</span>: <span style="color:var(--yellow)">u32</span>,
-    <span style="color:var(--fg)">clients</span>: <span style="color:var(--yellow)">RwLock</span>&lt;<span style="color:var(--yellow)">HashMap</span>&lt;<span style="color:var(--yellow)">String</span>, <span style="color:var(--yellow)">ClientState</span>&gt;&gt;,
-}</pre>
-      </div>
-
-      <div class="bq">Both middleware done. Sliding window with RwLock.</div>
-
+      <div class="tool-result"><pre><span style="color:var(--pink)">pub struct</span> <span style="color:var(--sky)">RateLimiter</span> {
+    <span style="color:var(--text)">window</span>: <span style="color:var(--sky)">Duration</span>,
+    <span style="color:var(--text)">max_requests</span>: <span style="color:var(--sky)">u32</span>,
+    <span style="color:var(--text)">clients</span>: <span style="color:var(--sky)">RwLock</span>&lt;<span style="color:var(--sky)">HashMap</span>&lt;<span style="color:var(--sky)">String</span>, <span style="color:var(--sky)">ClientState</span>&gt;&gt;,
+}</pre></div>
+      <div class="bq">Both done. Sliding window with RwLock.</div>
       <ul>
         <li>Claims via request extensions</li>
         <li>Per-client rate tracking</li>
@@ -177,27 +156,20 @@ strong{color:var(--fg);font-weight:600}
     </div>
   </div>
 
-  <!-- Thinking -->
   <div class="msg assistant">
     <div class="bar"></div>
-    <div class="body">
-      <div class="think">thinking...</div>
-    </div>
+    <div class="body"><div class="think">thinking...</div></div>
   </div>
 
-  <!-- Input -->
   <div class="input">
     <span class="pr">&gt;</span>
     <span class="tx">Add integration tests for both middleware<span class="cu"></span></span>
   </div>
 
-  <!-- Status -->
   <div class="status">
     <div class="l">
       <span class="model">claude-sonnet-4-20250514</span>
-      <span>↑2.1k</span>
-      <span>↓3.4k</span>
-      <span>pool:128</span>
+      <span>↑2.1k</span><span>↓3.4k</span><span>pool:128</span>
       <span style="color:var(--green)">72%</span>
     </div>
     <div class="r">

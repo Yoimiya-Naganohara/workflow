@@ -202,7 +202,8 @@ impl AgentRuntime {
                 "
                     .to_string(),
                 template_id: 0,
-                embedding: None,
+                initial_confidence: 0.6,
+            embedding: None,
             },
             RoleTemplate {
                 role: "tester".to_string(),
@@ -210,7 +211,8 @@ impl AgentRuntime {
                 system_prompt: "You are a QA engineer. Write and execute tests. Decompose testing work into sub-goals and assign @tester sub-agents if needed."
                     .to_string(),
                 template_id: 1,
-                embedding: None,
+                initial_confidence: 0.6,
+            embedding: None,
             },
             RoleTemplate {
                 role: "developer".to_string(),
@@ -218,7 +220,8 @@ impl AgentRuntime {
                 system_prompt: "You are a developer. Implement features from specifications. Decompose implementation into sub-goals and assign @developer sub-agents if needed."
                     .to_string(),
                 template_id: 2,
-                embedding: None,
+                initial_confidence: 0.6,
+            embedding: None,
             },
             RoleTemplate {
                 role: "reviewer".to_string(),
@@ -226,7 +229,8 @@ impl AgentRuntime {
                 system_prompt: "You are a code reviewer. Review code for correctness, security, and style. Decompose review work into sub-goals and assign @reviewer sub-agents if needed."
                     .to_string(),
                 template_id: 3,
-                embedding: None,
+                initial_confidence: 0.6,
+            embedding: None,
             },
             RoleTemplate {
                 role: "planner".to_string(),
@@ -234,7 +238,8 @@ impl AgentRuntime {
                 system_prompt: "You are a strategic planner. Your role is to decompose complex goals into concrete, actionable plans.\n\n## Workflow\n1. Understand the user\'s goal thoroughly — ask clarifying questions if needed.\n2. Break the goal into independent, sequential tasks.\n3. Assign each task to the appropriate role (developer, tester, reviewer, etc.).\n4. Define task dependencies and expected outputs.\n5. Present the plan in a clear, structured format.\n\nAlways produce a plan that can be directly executed by task agents."
                     .to_string(),
                 template_id: 4,
-                embedding: None,
+                initial_confidence: 0.6,
+            embedding: None,
             },
             RoleTemplate {
                 role: "security_auditor".to_string(),
@@ -242,7 +247,8 @@ impl AgentRuntime {
                 system_prompt: "You are a security auditor specializing in code and infrastructure security review.\n\n## Focus Areas\n1. Authentication & Authorization: session management, password policies, RBAC/ABAC.\n2. Data Validation: input sanitization, SQL injection, XSS, CSRF protection.\n3. Cryptography: proper use of TLS, encryption at rest, key management.\n4. Infrastructure: network segmentation, least privilege, secret management.\n\n## Methodology\n- Assume a threat actor with network access.\n- For each finding, classify severity: Critical / High / Medium / Low.\n- Provide both the vulnerability description and the remediation.\n\nOutput findings as a structured report with clear remediation steps."
                     .to_string(),
                 template_id: 5,
-                embedding: None,
+                initial_confidence: 0.6,
+            embedding: None,
             },
             RoleTemplate {
                 role: "researcher".to_string(),
@@ -250,7 +256,8 @@ impl AgentRuntime {
                 system_prompt: "You are a technical researcher skilled at gathering, analyzing, and synthesizing information.\n\n## Approach\n1. Scope: Clearly define what you\'re researching and why.\n2. Sources: Prioritize primary sources (documentation, specs, papers).\n3. Analysis: Compare approaches, note trade-offs, identify gaps.\n4. Synthesis: Present findings with actionable recommendations.\n\nBe thorough but concise. Focus on practical, actionable information."
                     .to_string(),
                 template_id: 6,
-                embedding: None,
+                initial_confidence: 0.6,
+            embedding: None,
             },
             RoleTemplate {
                 role: "devops".to_string(),
@@ -258,7 +265,8 @@ impl AgentRuntime {
                 system_prompt: "You are a DevOps engineer responsible for infrastructure, deployment, and operations.\n\n## Skills\n1. Infrastructure as Code (Terraform, Pulumi, CloudFormation).\n2. Containerization (Docker, Kubernetes).\n3. CI/CD pipeline design (GitHub Actions, GitLab CI).\n4. Monitoring, logging, and alerting.\n5. Cloud services (AWS, GCP, Azure).\n\n## Approach\n- Design for reliability, scalability, and cost-efficiency.\n- Follow infrastructure-as-code principles — no manual changes.\n- Document all infrastructure decisions and trade-offs.\n- Include disaster recovery and backup strategies.\n\nOutput infrastructure plans with specific resource configurations."
                     .to_string(),
                 template_id: 7,
-                embedding: None,
+                initial_confidence: 0.6,
+            embedding: None,
             },
         ]);
 
@@ -292,7 +300,7 @@ impl AgentRuntime {
 
     /// Run a [`SpawnRequest`] through the decision pipeline.
     pub async fn process_request(&self, request: SpawnRequest, role_template_id: Option<u32>) -> Result<SpawnDecision> {
-        self.pipeline.process_request(request, role_template_id).await
+        self.pipeline.process_request(request, role_template_id, None).await
     }
 
     /// Embed text and run through the decision pipeline.
@@ -322,7 +330,7 @@ impl AgentRuntime {
             raw_text_ref: None,
         };
 
-        self.pipeline.process_request(request, role_template_id).await
+        self.pipeline.process_request(request, role_template_id, None).await
     }
 
     // ── Budget guard ──
@@ -509,6 +517,7 @@ impl AgentRuntime {
             label: role.to_string(),
             system_prompt: format!("You are a {}. Execute the given goal.", role),
             template_id: 0,
+            initial_confidence: 0.6,
             embedding: None,
         });
 
@@ -548,7 +557,8 @@ impl AgentRuntime {
                 label: role.to_string(),
                 system_prompt: format!("You are a {}. Execute the given goal.", role),
                 template_id: 0,
-                embedding: None,
+                initial_confidence: 0.6,
+            embedding: None,
             });
 
         let agent_id: AgentId = rand::random();
@@ -570,7 +580,8 @@ impl AgentRuntime {
         };
 
         let role_tpl_id = Some(role_tpl.template_id);
-        let decision = self.pipeline.process_request(request, role_tpl_id).await?;
+        let role_init_conf = Some(role_tpl.initial_confidence);
+        let decision = self.pipeline.process_request(request, role_tpl_id, role_init_conf).await?;
         match decision {
             SpawnDecision::Approved(config) => {
                 // Attach budget guard to the agent (ownership transferred).
@@ -623,7 +634,8 @@ impl AgentRuntime {
                 label: role.to_string(),
                 system_prompt: format!("You are a {}. Execute the given goal.", role),
                 template_id: 0,
-                embedding: None,
+                initial_confidence: 0.6,
+            embedding: None,
             });
 
         let agent_id: AgentId = rand::random();
@@ -652,7 +664,8 @@ impl AgentRuntime {
         };
 
         let role_tpl_id = Some(role_tpl.template_id);
-        let decision = self.pipeline.process_request(request, role_tpl_id).await?;
+        let role_init_conf = Some(role_tpl.initial_confidence);
+        let decision = self.pipeline.process_request(request, role_tpl_id, role_init_conf).await?;
         match decision {
             SpawnDecision::Approved(config) => {
                 // Attach budget guard to the child agent.
