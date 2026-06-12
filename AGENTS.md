@@ -226,10 +226,13 @@ Build a holographic self-evolving multi-agent system in Rust with layered decisi
 - Add memmap2 rescue/repair on file corruption
 - **P1: 角色 embedding 自动计算**（启动时 + `/role embed`）
 - **P2: Prompt 优化引擎**（LLM 分析经验 → 改进提示词 → TUI 触发）
-- **P3: 副作用与反馈**（工具使用记录 + L2 反馈）
+- **P3: 副作用与反馈**（工具使用记录 + 优化频率控制）
 
 ### Completed
 - **P0: 角色与经验连接**（Agent 带 role_template_id → 经验记录 → 按角色搜索 → Cluster 角色跟踪 → `/role` TUI 命令）
+- **P1: 角色 embedding 自动计算**（启动时 + `/role embed` 自动）
+- **P2: Prompt 优化引擎**（LLM 分析经验 → 改进提示词 → `/role optimize`）
+- **P3: 反馈闭环**（工具 bitmap 记录 + OptimizationTracker 频率控制）
 
 ### Relevant Files
 - /home/user/Code/workflow/AGENTS.md: instruction file

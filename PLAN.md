@@ -15,7 +15,7 @@
 | P0-5 `/role` TUI 命令 (list/show/create/edit/delete) | ✅ 已完成 | `f4c27e3` |
 | P1 角色 embedding 自动计算 | ⏳ 待实现 | -
 | P2 Prompt 优化引擎 | ✅ 已完成 | `7e80a40` |
-| P3 副作用与反馈 | ⏳ 待实现 | -
+| P3 副作用与反馈 | ✅ 已完成 | `afcf857` |
 
 ---
 
