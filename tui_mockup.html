@@ -6,36 +6,40 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --base:#1e1e2e;--mantle:#181825;--crust:#11111b;
-  --surface0:#313244;--surface1:#45475a;
-  --overlay0:#6c7086;--overlay1:#7f849c;
-  --subtext0:#a6adc8;--text:#cdd6f4;
+  --bg:#212121;--bg2:#2c2c2c;--bg3:#181818;
+  --text:#cdd6f4;--text2:#a6adc8;--text3:#7f849c;
+  --border:#4b4c5c;--border-f:#89b4fa;--border-d:#313244;
   --blue:#89b4fa;--mauve:#cba6f7;--peach:#fab387;
   --red:#f38ba8;--green:#a6e3a1;--yellow:#f9e2af;
-  --sky:#89dceb;--pink:#f5c2e7;--teal:#94e2d5;
+  --pink:#f5c2e7;--sky:#89dceb;--teal:#94e2d5;
   --sapphire:#74c7ec;--lavender:#b4befe;
+  --overlay0:#6c7086;--overlay1:#7f849c;
   --diff-add:#478247;--diff-add-bg:#303A30;
   --diff-del:#7C4444;--diff-del-bg:#3A3030;
 }
-body{font-family:'SF Mono','JetBrains Mono','Fira Code',monospace;background:var(--crust);color:var(--text);font-size:13px;line-height:1.6;display:flex;justify-content:center;min-height:100vh;padding:24px 16px}
-.term{width:100%;max-width:840px}
+body{font-family:'SF Mono','JetBrains Mono','Fira Code',monospace;background:var(--bg3);color:var(--text);font-size:13px;line-height:1.5;display:flex;justify-content:center;min-height:100vh;padding:0}
+.term{width:100%;max-width:860px;background:var(--bg);display:flex;flex-direction:column;min-height:100vh}
 
-/* messages */
-.msg{margin-bottom:18px;display:flex;gap:0}
-.msg .bar{width:3px;flex-shrink:0;border-radius:2px;margin-right:10px;align-self:stretch}
+/* messages area */
+.messages{flex:1;padding:12px 16px;overflow-y:auto;max-height:calc(100vh - 80px)}
+
+/* message with thick left border */
+.msg{margin-bottom:16px;display:flex;gap:0}
+.msg .bar{width:3px;flex-shrink:0;border-radius:1px;margin-right:10px;align-self:stretch}
 .msg.user .bar{background:var(--green)}
 .msg.assistant .bar{background:var(--blue)}
-.msg.tool .bar{background:var(--surface0)}
 .msg .body{flex:1;min-width:0}
 
 /* tool call */
+.tool{margin-bottom:16px;display:flex;gap:0}
+.tool .bar{width:3px;flex-shrink:0;border-radius:1px;margin-right:10px;align-self:stretch;background:var(--overlay0)}
+.tool .body{flex:1;min-width:0}
 .tool-line{display:flex;align-items:center;gap:6px}
 .tool-label{color:var(--overlay1);font-size:12px}
 .tool-params{color:var(--overlay0);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tool-result{margin-top:6px;padding:8px 12px;background:var(--base);border-radius:4px;font-size:12px;border-left:2px solid var(--surface0)}
+.tool-result{margin-top:6px;padding:8px 12px;background:var(--bg3);border-radius:4px;font-size:12px;border-left:2px solid var(--overlay0)}
 .tool-result pre{font-family:inherit;font-size:12px;line-height:1.5;color:var(--text)}
 .tool-result.err{border-left-color:var(--red)}
-.tool-result.err pre{color:var(--red)}
 
 /* diff */
 .diff{margin-top:6px;font-size:12px;border-radius:4px;overflow:hidden}
@@ -45,70 +49,74 @@ body{font-family:'SF Mono','JetBrains Mono','Fira Code',monospace;background:var
 .diff .ln .p{display:inline-block;width:12px;font-weight:bold}
 
 /* markdown */
-code{background:var(--surface0);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--green)}
+code{background:var(--surface0,#313244);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--green)}
 pre code{background:none;padding:0;color:var(--text)}
 .bq{border-left:2px solid var(--yellow);padding-left:12px;color:var(--yellow);margin:8px 0;font-style:italic}
 ul{padding-left:18px;margin:6px 0}
-li{margin:3px 0;color:var(--subtext0)}
+li{margin:3px 0;color:var(--text2)}
 li::marker{color:var(--blue)}
 strong{color:var(--peach);font-weight:bold}
 em{color:var(--yellow);font-style:italic}
 
 /* thinking */
-.think{color:var(--yellow);font-size:12px;display:flex;align-items:center;gap:6px}
-.think::before{content:"⠋";animation:d 1.2s steps(1) infinite}
-@keyframes d{0%{content:"⠋"}11%{content:"⠙"}22%{content:"⠹"}33%{content:"⠸"}44%{content:"⠼"}55%{content:"⠴"}66%{content:"⠦"}77%{content:"⠧"}88%{content:"⠇"}}
+.think{color:var(--blue);font-size:12px;display:flex;align-items:center;gap:6px}
+.think::before{content:"⟳";animation:spin 1s linear infinite}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 
-/* input */
-.input{border-top:1px solid var(--surface0);padding:10px 16px;display:flex;align-items:center;gap:8px}
-.input .pr{color:var(--blue);font-weight:bold;font-size:14px}
-.input .tx{flex:1;color:var(--text)}
-.input .cu{display:inline-block;width:7px;height:15px;background:var(--blue);border-radius:1px;animation:blink 1s step-end infinite;vertical-align:middle}
+/* editor */
+.editor{border-top:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:8px}
+.editor .pr{color:var(--blue);font-weight:bold;font-size:14px}
+.editor .tx{flex:1;color:var(--text)}
+.editor .cu{display:inline-block;width:7px;height:15px;background:var(--blue);border-radius:1px;animation:blink 1s step-end infinite;vertical-align:middle}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 
-/* status */
-.status{display:flex;align-items:center;justify-content:space-between;padding:5px 16px;border-top:1px solid var(--surface0);font-size:11px;color:var(--overlay0)}
-.status .l{display:flex;gap:12px;align-items:center}
-.status .model{color:var(--blue);font-weight:600}
-.status .r{display:flex;gap:12px}
-.status kbd{background:var(--surface0);padding:1px 4px;border-radius:2px;font-family:inherit;font-size:10px;color:var(--subtext0)}
+/* status bar */
+.status{display:flex;align-items:center;font-size:11px;height:24px}
+.status .help{background:var(--text2);color:var(--bg3);padding:0 8px;font-weight:bold;height:100%;display:flex;align-items:center}
+.status .tokens{background:var(--text);color:var(--bg2);padding:0 8px;height:100%;display:flex;align-items:center;white-space:nowrap}
+.status .tokens.warn{background:var(--yellow)}
+.status .spacer{background:var(--bg2);flex:1;height:100%}
+.status .diagnostics{background:var(--bg3);padding:0 8px;height:100%;display:flex;align-items:center;gap:6px;color:var(--text3)}
+.status .diagnostics .err{color:var(--red)}.status .diagnostics .warn{color:var(--yellow)}
+.status .model{background:var(--mauve);color:var(--bg3);padding:0 8px;font-weight:bold;height:100%;display:flex;align-items:center}
 </style>
 </head>
 <body>
 <div class="term">
+  <div class="messages">
 
-  <div class="msg user">
-    <div class="bar"></div>
-    <div class="body">Implement auth middleware and rate limiter for the user service.</div>
-  </div>
+    <div class="msg user">
+      <div class="bar"></div>
+      <div class="body">Implement auth middleware and rate limiter for the user service.</div>
+    </div>
 
-  <div class="msg tool">
-    <div class="bar"></div>
-    <div class="body">
-      <div class="tool-line"><span class="tool-label">View:</span><span class="tool-params">src/models/user.rs</span></div>
-      <div class="tool-result"><pre><span style="color:var(--mauve)">pub struct</span> <span style="color:var(--sky)">User</span> {
+    <div class="tool">
+      <div class="bar"></div>
+      <div class="body">
+        <div class="tool-line"><span class="tool-label">View:</span><span class="tool-params">src/models/user.rs</span></div>
+        <div class="tool-result"><pre><span style="color:var(--mauve)">pub struct</span> <span style="color:var(--sky)">User</span> {
     <span style="color:var(--text)">id</span>: <span style="color:var(--sky)">Uuid</span>,
     <span style="color:var(--text)">email</span>: <span style="color:var(--sky)">String</span>,
     <span style="color:var(--text)">password_hash</span>: <span style="color:var(--sky)">String</span>,
     <span style="color:var(--text)">created_at</span>: <span style="color:var(--sky)">NaiveDateTime</span>,
 }</pre></div>
+      </div>
     </div>
-  </div>
 
-  <div class="msg tool">
-    <div class="bar"></div>
-    <div class="body">
-      <div class="tool-line"><span class="tool-label">Bash:</span><span class="tool-params">cargo check 2>&amp;1 | head -5</span></div>
-      <div class="tool-result"><pre><span style="color:var(--green)">Finished</span> dev profile [unoptimized + debuginfo] in 0.42s
+    <div class="tool">
+      <div class="bar"></div>
+      <div class="body">
+        <div class="tool-line"><span class="tool-label">Bash:</span><span class="tool-params">cargo check 2>&amp;1 | head -5</span></div>
+        <div class="tool-result"><pre><span style="color:var(--green)">Finished</span> dev profile [unoptimized + debuginfo] in 0.42s
 <span style="color:var(--yellow)">warning</span>: unused variable `config`</pre></div>
+      </div>
     </div>
-  </div>
 
-  <div class="msg assistant">
-    <div class="bar"></div>
-    <div class="body">
-      Here's the auth middleware:
-      <div class="tool-result"><pre><span style="color:var(--pink)">use</span> <span style="color:var(--green)">axum</span>::{Extract, Request, Next};
+    <div class="msg assistant">
+      <div class="bar"></div>
+      <div class="body">
+        Here's the auth middleware:
+        <div class="tool-result"><pre><span style="color:var(--pink)">use</span> <span style="color:var(--green)">axum</span>::{Extract, Request, Next};
 
 <span style="color:var(--pink)">pub async fn</span> <span style="color:var(--green)">auth_middleware</span>(
     <span style="color:var(--pink)">mut</span> <span style="color:var(--text)">req</span>: <span style="color:var(--sky)">Request</span>,
@@ -122,60 +130,61 @@ em{color:var(--yellow);font-style:italic}
     <span style="color:var(--overlay1)">// verify &amp; inject claims</span>
     <span style="color:var(--sky)">Ok</span>(next.<span style="color:var(--green)">run</span>(req).<span style="color:var(--green)">await</span>)
 }</pre></div>
-    </div>
-  </div>
-
-  <div class="msg tool">
-    <div class="bar"></div>
-    <div class="body">
-      <div class="tool-line"><span class="tool-label">Write:</span><span class="tool-params">src/middleware/auth.rs</span></div>
-      <div class="diff">
-        <div class="ln a"><span class="p">+</span><span style="color:var(--pink)">use</span> <span style="color:var(--green)">axum</span>::{Extract, Request, Next};</div>
-        <div class="ln a"><span class="p">+</span><span style="color:var(--pink)">pub async fn</span> <span style="color:var(--green)">auth_middleware</span>(</div>
-        <div class="ln a"><span class="p">+</span>    <span style="color:var(--pink)">mut</span> req: <span style="color:var(--sky)">Request</span>,</div>
-        <div class="ln a"><span class="p">+</span>) <span style="color:var(--pink)">-&gt;</span> <span style="color:var(--sky)">Result</span>&lt;<span style="color:var(--sky)">Response</span>, <span style="color:var(--sky)">StatusCode</span>&gt; {</div>
-        <div class="ln a"><span class="p">+</span>    <span style="color:var(--overlay1)">// ...</span></div>
       </div>
     </div>
-  </div>
 
-  <div class="msg assistant">
-    <div class="bar"></div>
-    <div class="body">
-      Now the rate limiter:
-      <div class="tool-result"><pre><span style="color:var(--pink)">pub struct</span> <span style="color:var(--sky)">RateLimiter</span> {
+    <div class="tool">
+      <div class="bar"></div>
+      <div class="body">
+        <div class="tool-line"><span class="tool-label">Write:</span><span class="tool-params">src/middleware/auth.rs</span></div>
+        <div class="diff">
+          <div class="ln a"><span class="p">+</span><span style="color:var(--pink)">use</span> <span style="color:var(--green)">axum</span>::{Extract, Request, Next};</div>
+          <div class="ln a"><span class="p">+</span><span style="color:var(--pink)">pub async fn</span> <span style="color:var(--green)">auth_middleware</span>(</div>
+          <div class="ln a"><span class="p">+</span>    <span style="color:var(--pink)">mut</span> req: <span style="color:var(--sky)">Request</span>,</div>
+          <div class="ln a"><span class="p">+</span>) <span style="color:var(--pink)">-&gt;</span> <span style="color:var(--sky)">Result</span>&lt;<span style="color:var(--sky)">Response</span>, <span style="color:var(--sky)">StatusCode</span>&gt; {</div>
+          <div class="ln a"><span class="p">+</span>    <span style="color:var(--overlay1)">// ...</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="msg assistant">
+      <div class="bar"></div>
+      <div class="body">
+        Now the rate limiter:
+        <div class="tool-result"><pre><span style="color:var(--pink)">pub struct</span> <span style="color:var(--sky)">RateLimiter</span> {
     <span style="color:var(--text)">window</span>: <span style="color:var(--sky)">Duration</span>,
     <span style="color:var(--text)">max_requests</span>: <span style="color:var(--sky)">u32</span>,
     <span style="color:var(--text)">clients</span>: <span style="color:var(--sky)">RwLock</span>&lt;<span style="color:var(--sky)">HashMap</span>&lt;<span style="color:var(--sky)">String</span>, <span style="color:var(--sky)">ClientState</span>&gt;&gt;,
 }</pre></div>
-      <div class="bq">Both done. Sliding window with RwLock.</div>
-      <ul>
-        <li>Claims via request extensions</li>
-        <li>Per-client rate tracking</li>
-      </ul>
+        <div class="bq">Both done. Sliding window with RwLock.</div>
+        <ul>
+          <li>Claims via request extensions</li>
+          <li>Per-client rate tracking</li>
+        </ul>
+      </div>
     </div>
+
+    <div class="msg assistant">
+      <div class="bar"></div>
+      <div class="body"><div class="think">Generating...</div></div>
+    </div>
+
   </div>
 
-  <div class="msg assistant">
-    <div class="bar"></div>
-    <div class="body"><div class="think">thinking...</div></div>
-  </div>
-
-  <div class="input">
+  <div class="editor">
     <span class="pr">&gt;</span>
     <span class="tx">Add integration tests for both middleware<span class="cu"></span></span>
   </div>
 
   <div class="status">
-    <div class="l">
-      <span class="model">claude-sonnet-4-20250514</span>
-      <span>↑2.1k</span><span>↓3.4k</span><span>pool:128</span>
-      <span style="color:var(--green)">72%</span>
+    <div class="help">ctrl+? help</div>
+    <div class="tokens">Context: 5.5K, Cost: $0.12</div>
+    <div class="spacer"></div>
+    <div class="diagnostics">
+      <span class="err">✖ 2</span>
+      <span class="warn">⚠ 3</span>
     </div>
-    <div class="r">
-      <span><kbd>i</kbd> edit</span>
-      <span><kbd>Ctrl+X</kbd> stop</span>
-    </div>
+    <div class="model">Claude Sonnet 4</div>
   </div>
 </div>
 </body>

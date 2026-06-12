@@ -1001,4 +1001,60 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn test_multi_spawn_sequential() {
+        let rt = AgentRuntime::new(AgentRuntimeConfig::default(), dummy_embedding());
+
+        let mut emb = [0.0f32; EMBEDDING_DIM];
+        emb[0] = 1.0;
+        rt.add_experience(ExperienceEntry {
+            embedding: emb,
+            applicability_vector: [0.0f32; 128],
+            tool_bitmap: 0,
+            role_template_id: None,
+            weight: 1.0,
+            domain_version: 0,
+            timestamp: 0,
+            l2_override_weight: 0.0,
+            l2_override_created_at: 0,
+        });
+
+        let task = "Implement feature X";
+        let role = "developer";
+        let value = "Write quality code";
+
+        for i in 0..5 {
+            let decision = rt.process_with_text(task, role, value, 200, 0, None).await.unwrap();
+
+            match &decision {
+                SpawnDecision::Approved(config) => {
+                    assert!(config.allocated_budget > 0, "iteration {}: budget > 0", i);
+                }
+                SpawnDecision::Rejected(rejection) => {
+                    panic!("Iteration {}: unexpected rejection: {:?}", i, rejection);
+                }
+            }
+
+            let mut exp_emb = [0.0f32; EMBEDDING_DIM];
+            exp_emb[0] = 1.0 - (i as f32) * 0.05;
+            rt.add_experience(ExperienceEntry {
+                embedding: exp_emb,
+                applicability_vector: [0.0f32; 128],
+                tool_bitmap: 0b1 << i.min(5),
+                role_template_id: None,
+                weight: 0.7 + (i as f32) * 0.05,
+                domain_version: 0,
+                timestamp: 0,
+                l2_override_weight: 0.0,
+                l2_override_created_at: 0,
+            });
+
+            assert_eq!(rt.experience_count(), 2 + i, "iteration {}: pool count", i);
+        }
+
+
+        assert_eq!(rt.experience_count(), 6);
+        assert!(rt.remaining_budget() < crate::core::types::DEFAULT_RUNTIME_BUDGET as i64);
+    }
 }
