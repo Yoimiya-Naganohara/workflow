@@ -31,6 +31,8 @@ pub struct Cluster {
     pub latest_timestamp: u64,
     /// Max L2 override weight seen.
     pub max_l2_weight: f32,
+    /// Role template IDs seen in this cluster (deduplicated).
+    pub role_template_ids: Vec<u32>,
 }
 
 impl Cluster {
@@ -44,6 +46,7 @@ impl Cluster {
             domain_version: entry.domain_version,
             latest_timestamp: entry.timestamp,
             max_l2_weight: entry.l2_override_weight,
+            role_template_ids: entry.role_template_id.map(|id| vec![id]).unwrap_or_default(),
         }
     }
 
@@ -82,6 +85,13 @@ impl Cluster {
         self.domain_version = self.domain_version.max(entry.domain_version);
         self.latest_timestamp = self.latest_timestamp.max(entry.timestamp);
         self.max_l2_weight = self.max_l2_weight.max(entry.l2_override_weight);
+
+        // Track role template IDs (deduplicated).
+        if let Some(id) = entry.role_template_id {
+            if !self.role_template_ids.contains(&id) {
+                self.role_template_ids.push(id);
+            }
+        }
     }
 
     /// Variance estimate (mean squared distance from centroid).
@@ -105,12 +115,22 @@ impl Cluster {
             embedding: self.centroid,
             applicability_vector: [0.0f32; 128],
             tool_bitmap: self.tool_bitmap,
-            role_template_id: None,
+            role_template_id: self.most_common_role(),
             weight,
             domain_version: self.domain_version,
             timestamp: self.latest_timestamp,
             l2_override_weight: self.max_l2_weight,
             l2_override_created_at: 0,
+        }
+    }
+
+    /// If the cluster has exactly one role, return it.
+    /// Mixed-role clusters return None.
+    fn most_common_role(&self) -> Option<u32> {
+        if self.role_template_ids.len() == 1 {
+            Some(self.role_template_ids[0])
+        } else {
+            None
         }
     }
 }
