@@ -78,47 +78,6 @@ impl PlanRegistry {
     }
 }
 
-/// Registry mapping agents to their plans and tasks.
-pub trait PlanRegistryOps: Send + Sync {
-    fn insert(&mut self, entity: PlanEntity);
-    fn get_by_name(&self, name: &str) -> Option<PlanEntity>;
-    fn get_by_agent(&self, agent_id: AgentId) -> Vec<PlanEntity>;
-    fn search(&self, query: &str) -> Vec<PlanEntity>;
-    fn all(&self) -> Vec<PlanEntity>;
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool;
-}
-
-impl PlanRegistryOps for PlanRegistry {
-    fn insert(&mut self, entity: PlanEntity) {
-        self.insert(entity)
-    }
-
-    fn get_by_name(&self, name: &str) -> Option<PlanEntity> {
-        self.get_by_name(name).cloned()
-    }
-
-    fn get_by_agent(&self, agent_id: AgentId) -> Vec<PlanEntity> {
-        self.get_by_agent(agent_id).into_iter().cloned().collect()
-    }
-
-    fn search(&self, query: &str) -> Vec<PlanEntity> {
-        self.search(query).into_iter().cloned().collect()
-    }
-
-    fn all(&self) -> Vec<PlanEntity> {
-        self.all().into_iter().cloned().collect()
-    }
-
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-}
-
 impl Default for PlanRegistry {
     fn default() -> Self {
         Self::new()

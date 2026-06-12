@@ -220,10 +220,10 @@ fn render_provider_popup(
         Table::new(
             rows,
             [
-                Constraint::Length(1),                           // icon
-                Constraint::Length(max_name as u16 + 1),         // name
-                Constraint::Length(max_count as u16),            // model count
-                Constraint::Length(max_status as u16),           // status badge
+                Constraint::Length(1),                   // icon
+                Constraint::Length(max_name as u16 + 1), // name
+                Constraint::Length(max_count as u16),    // model count
+                Constraint::Length(max_status as u16),   // status badge
             ],
         )
         .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
@@ -236,12 +236,7 @@ fn render_provider_popup(
 //  Key input popup
 // ──────────────────────────────────────────────
 
-fn render_key_popup(
-    f: &mut Frame,
-    area: Rect,
-    state: &AppState,
-    dialog: &crate::tui::dialogs::key::KeyDialog,
-) {
+fn render_key_popup(f: &mut Frame, area: Rect, state: &AppState, dialog: &crate::tui::dialogs::key::KeyDialog) {
     let provider_name = state
         .core
         .models
@@ -266,10 +261,7 @@ fn render_key_popup(
 
     // Provider name line
     let info_line = format!("Enter API key for {}", provider_name);
-    f.render_widget(
-        Paragraph::new(Span::styled(info_line, style::hint_style())),
-        chunks[0],
-    );
+    f.render_widget(Paragraph::new(Span::styled(info_line, style::hint_style())), chunks[0]);
 
     // Input line: "sk- <masked text>"
     let masked: String = dialog.input.chars().map(|_| '•').collect();

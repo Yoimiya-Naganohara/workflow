@@ -1,26 +1,26 @@
 //! Unified design system for the TUI.
 //!
-//! Provides consistent colors, borders, highlights, and widget helpers
-//! used across dialogs, sidebar, chat, and status bar.
+//! Clean, minimal design inspired by Claude Code's aesthetic.
+//! Uses standard terminal colors for maximum compatibility.
 
 use ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::Span,
-    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
 
-// ── Color Palette ──
+// ── Color Palette (standard terminal colors) ──
 
 /// Border color for panels and dialogs.
 pub const BORDER: Color = Color::DarkGray;
-/// Title text color (bold cyan).
+/// Title text color.
 pub const TITLE: Color = Color::Cyan;
 /// Foreground for highlighted list items.
 pub const HIGHLIGHT_FG: Color = Color::Cyan;
 /// Background for highlighted list items.
-pub const HIGHLIGHT_BG: Color = Color::Rgb(20, 40, 60);
+pub const HIGHLIGHT_BG: Color = Color::DarkGray;
 /// Active input / search border color.
 pub const ACTIVE: Color = Color::Cyan;
 /// Inactive / subtle border color.
@@ -28,7 +28,7 @@ pub const INACTIVE: Color = Color::DarkGray;
 /// Metadata label color.
 pub const LABEL: Color = Color::DarkGray;
 /// Primary value / content color.
-pub const VALUE: Color = Color::Reset;
+pub const VALUE: Color = Color::White;
 /// Success / confirm color.
 pub const SUCCESS: Color = Color::Green;
 /// Warning / in-progress color.
@@ -37,10 +37,10 @@ pub const WARNING: Color = Color::Yellow;
 pub const ERROR: Color = Color::Red;
 /// Hint / instruction text color.
 pub const HINT: Color = Color::DarkGray;
-/// Subtle background for code blocks.
-pub const CODE_BG: Color = Color::Rgb(18, 22, 30);
-/// Scroll indicator bar background.
-pub const SCROLL_BAR_BG: Color = Color::Rgb(25, 35, 50);
+/// Purple accent for tool calls.
+pub const PURPLE: Color = Color::Magenta;
+/// Light purple for tool call content.
+pub const PURPLE_LIGHT: Color = Color::LightMagenta;
 
 // ── Style Helpers ──
 
@@ -84,22 +84,19 @@ pub fn panel<'a>(title: &str) -> Block<'a> {
         .title(Span::styled(format!(" {} ", title), title_style()))
 }
 
-/// A search / input box with an optional label, styled with unified colors.
-/// `active` controls whether the border is cyan (focused) or dark gray.
+/// A search / input box with an optional label.
 pub fn input_box<'a>(active: bool) -> Block<'a> {
     let border_color = if active { ACTIVE } else { INACTIVE };
     Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
         .border_style(Style::default().fg(border_color))
 }
 
-/// Input bar — plain border with an `Input` label, matching the preview.
+/// Input bar with an `Input` label on the left.
 pub fn input_bar<'a>(active: bool) -> Block<'a> {
     let border_color = if active { ACTIVE } else { INACTIVE };
     Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
         .border_style(Style::default().fg(border_color))
         .title(Span::styled(
             " Input ",
@@ -107,17 +104,17 @@ pub fn input_bar<'a>(active: bool) -> Block<'a> {
         ))
 }
 
-/// Chat panel border — plain/straight corners (`[]` style).
+/// Chat panel border — plain corners.
 pub fn panel_chat<'a>(title: &str) -> Block<'a> {
     Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
         .border_style(Style::default().fg(BORDER))
         .title(Span::styled(format!(" {} ", title), title_style()))
 }
 
-/// Proposal/context panel border — rounded corners (`{}` style).
+/// Proposal/context panel border — rounded corners.
 pub fn panel_proposal<'a>(title: &str) -> Block<'a> {
+    use ratatui::widgets::BorderType;
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -128,12 +125,12 @@ pub fn panel_proposal<'a>(title: &str) -> Block<'a> {
 /// Width of the proposal / context panel on the right.
 pub const PROPOSAL_WIDTH: u16 = 36;
 
-/// Style for diff additions (`+ abcd`).
+/// Style for diff additions.
 pub fn diff_add_style() -> Style {
     Style::default().fg(SUCCESS)
 }
 
-/// Style for diff deletions (`- abc`).
+/// Style for diff deletions.
 pub fn diff_del_style() -> Style {
     Style::default().fg(ERROR)
 }

@@ -85,9 +85,8 @@ impl Tui {
 
             Action::OpenProviderPicker => {
                 use crate::tui::dialogs::provider::ProviderDialog;
-                core.messages.push(ChatMessage::system(
-                    "Select a provider to configure",
-                ));
+                core.messages
+                    .push(ChatMessage::system("Select a provider to configure"));
                 state.active_dialog = Some(ActiveDialog::Provider(ProviderDialog::new()));
                 state.effects.push(Effect::FetchModelRegistry);
                 ui.input.clear();

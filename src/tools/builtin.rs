@@ -147,9 +147,12 @@ impl Tool for WriteFile {
         let len = args.content.len();
         let start = args.start.unwrap_or(0);
         let end = args.end.unwrap_or(len);
+        let start = start.min(len);
+        let end = end.max(start).min(len);
         std::fs::write(&args.path, &args.content[start..end]).map_err(|e| ToolCallError(e.to_string()))?;
         let preview = if len > 200 {
-            format!("{}...", &args.content[start..start + 200])
+            let preview_end = (start + 200).min(len);
+            format!("{}...", &args.content[start..preview_end])
         } else {
             args.content[start..end].to_string()
         };
@@ -311,30 +314,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_read_file_multibyte_panics() {
+    async fn test_read_file_multibyte_line_selection() {
         let mut f = NamedTempFile::new().unwrap();
         // CJK characters: each is 3 bytes in UTF-8
-        // Need >10KB to trigger the truncation path where byte-slicing happens
+        // Need >10KB to trigger the truncation path where line joining happens
         let cjk_line = "你好世界测试内容这是多字节字符测试";
         for _ in 0..500 {
             writeln!(f, "{}", cjk_line).unwrap();
         }
         let path = f.path().to_str().unwrap().to_string();
-        // start=2, end=4 are treated as byte indices but described as line numbers
-        // This should panic because byte index 2 splits a multi-byte character
-        let result = std::panic::catch_unwind(|| {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                ReadFile
-                    .call(ReadFileArgs {
-                        path,
-                        start: Some(2),
-                        end: Some(4),
-                    })
-                    .await
+        // start=2, end=4 are 1-indexed line numbers → selects lines 2-4
+        let result = ReadFile
+            .call(ReadFileArgs {
+                path,
+                start: Some(2),
+                end: Some(4),
             })
-        });
-        // Current code panics on multi-byte UTF-8 with byte slicing
-        assert!(result.is_err(), "ReadFile should panic on multi-byte UTF-8 byte-slice");
+            .await
+            .unwrap();
+        // Should contain exactly 3 lines of CJK, no panic from byte slicing
+        assert!(result.contains(cjk_line));
+        assert!(result.contains("truncated"));
+        let count = result.matches(cjk_line).count();
+        assert_eq!(count, 3, "should select exactly 3 lines, got {count}");
     }
 
     #[tokio::test]
@@ -355,43 +357,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_write_file_short_content_panics() {
+    async fn test_write_file_out_of_bounds_clamped() {
         let f = NamedTempFile::new().unwrap();
         let path = f.path().to_str().unwrap().to_string();
-        // content is 5 bytes, start=10 is out of bounds
-        let result = std::panic::catch_unwind(|| {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                WriteFile
-                    .call(WriteFileArgs {
-                        path,
-                        content: "hello".to_string(),
-                        start: Some(10),
-                        end: Some(200),
-                    })
-                    .await
+        // content is 5 bytes, start=10 is out of bounds — should be clamped, not panic
+        let result = WriteFile
+            .call(WriteFileArgs {
+                path: path.clone(),
+                content: "hello".to_string(),
+                start: Some(10),
+                end: Some(200),
             })
-        });
-        assert!(result.is_err(), "WriteFile should panic with out-of-bounds start");
+            .await
+            .unwrap();
+        // Clamped to empty slice, so 0 bytes written
+        assert!(result.contains("Written 0 bytes"));
     }
 
     #[tokio::test]
-    async fn test_write_file_preview_panics_on_short_content() {
+    async fn test_write_file_preview_within_bounds() {
         let f = NamedTempFile::new().unwrap();
         let path = f.path().to_str().unwrap().to_string();
-        // content is 10 bytes, start=5, start+200=205 > 10
-        let _result = std::panic::catch_unwind(|| {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                WriteFile
-                    .call(WriteFileArgs {
-                        path,
-                        content: "short".to_string(),
-                        start: Some(0),
-                        end: Some(5),
-                    })
-                    .await
+        // content is 5 bytes, start=0, end=5 is in bounds
+        let result = WriteFile
+            .call(WriteFileArgs {
+                path,
+                content: "short".to_string(),
+                start: Some(0),
+                end: Some(5),
             })
-        });
-        // This one may or may not panic depending on the preview logic
+            .await
+            .unwrap();
+        assert!(result.contains("Written 5 bytes"));
     }
 
     #[tokio::test]

@@ -31,8 +31,14 @@ impl L1Arbitrator {
         trace_id: [u8; 16],
     ) -> ConflictManifest {
         let sim = cosine_similarity_768(&embedding_a, &embedding_b);
-        let priority_a = 1.0 - sim;
-        let priority_b = sim;
+
+        // Use agent_id bytes as deterministic tiebreaker when embeddings are
+        // near-identical (sim > 0.99) to avoid artificially favoring one agent.
+        let (priority_a, priority_b) = if sim > 0.99 {
+            if agent_a <= agent_b { (1.0, 0.0) } else { (0.0, 1.0) }
+        } else {
+            (1.0 - sim, sim)
+        };
 
         ConflictManifest {
             conflict_id: rand::random(),
@@ -125,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn test_identical_embeddings_agent_b_wins() {
+    fn test_identical_embeddings_tiebreaker_lower_id_wins() {
         let arbitrator = L1Arbitrator::new(-0.6);
 
         let mut a = [0.0f32; EMBEDDING_DIM];
@@ -135,41 +141,34 @@ mod tests {
 
         let manifest = arbitrator.create_conflict_manifest([1u8; 16], [2u8; 16], a, b, [0u8; 16]);
 
-        // BUG: when sim=1.0, priority_a = 1.0 - 1.0 = 0.0, priority_b = 1.0
-        // Agent B always wins with identical embeddings
+        // Tiebreaker: lower agent_id bytes gets higher priority
+        // agent_a = [1; 16] < agent_b = [2; 16], so agent_a should win
         match arbitrator.arbitrate_by_priority(&manifest) {
             L1ArbitrationResult::Override { winner, .. } => {
-                assert_eq!(
-                    winner, [2u8; 16],
-                    "BUG: identical embeddings should not deterministically favor B"
-                );
+                assert_eq!(winner, [1u8; 16], "lower agent_id bytes should win tiebreaker");
             }
             _ => panic!("Expected Override"),
         }
     }
 
     #[test]
-    fn test_priority_inversion_higher_sim_lower_priority() {
+    fn test_complement_formula_with_non_collinear_embeddings() {
         let arbitrator = L1Arbitrator::new(-0.6);
 
         let mut a = [0.0f32; EMBEDDING_DIM];
         a[0] = 1.0;
         let mut b = [0.0f32; EMBEDDING_DIM];
-        b[0] = 0.5; // Less similar to query than a
+        b[0] = 0.8;
+        b[1] = 0.6; // norm = 1.0, different direction from a
 
         let manifest = arbitrator.create_conflict_manifest([1u8; 16], [2u8; 16], a, b, [0u8; 16]);
 
-        // BUG: priority_a = 1.0 - sim, priority_b = sim
-        // Higher similarity means LOWER priority_a — inversion!
-        // Agent A (more similar) gets lower priority than B (less similar)
+        // sim = dot(a,b) / (|a| * |b|) = 0.8 / (1.0 * 1.0) = 0.8 (< 0.99, no tiebreaker)
+        // priority_a = 1.0 - 0.8 = 0.2, priority_b = 0.8
+        // Agent B wins from the complement formula
         match arbitrator.arbitrate_by_priority(&manifest) {
             L1ArbitrationResult::Override { winner, .. } => {
-                // With sim ~= 0.87, priority_a = 0.13, priority_b = 0.87
-                // B wins despite being less similar
-                assert_eq!(
-                    winner, [2u8; 16],
-                    "BUG: less similar agent wins due to priority inversion"
-                );
+                assert_eq!(winner, [2u8; 16], "agent B has higher priority from complement formula");
             }
             _ => panic!("Expected Override"),
         }

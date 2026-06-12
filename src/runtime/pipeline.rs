@@ -11,12 +11,12 @@ use tokio::sync::RwLock;
 
 use crate::admission::AdmissionControl;
 use crate::admission::AdmissionPermit;
-use crate::agent::plan::PlanRegistryOps;
-use crate::agent::suspend::SuspendQueueOps;
+use crate::agent::plan::PlanRegistry;
+use crate::agent::suspend::SuspendQueue;
 use crate::core::types::*;
+use crate::l0::BudgetGuard;
 use crate::l0::CircuitBreaker;
 use crate::l0::L0Permit;
-use crate::l0::resource::BudgetGuard;
 use crate::l1::ExperienceRetrieval;
 use crate::l1::L1Assessment;
 use crate::l2::AuditEngine;
@@ -36,8 +36,8 @@ pub struct DecisionPipelineBuilder {
     experience: Option<Box<dyn ExperienceRetrieval>>,
     audit_engine: Option<Box<dyn AuditEngine>>,
     embedding: Option<Arc<dyn EmbeddingService>>,
-    suspend: Option<Box<dyn SuspendQueueOps>>,
-    plans: Option<Box<dyn PlanRegistryOps>>,
+    suspend: Option<Box<SuspendQueue>>,
+    plans: Option<Box<PlanRegistry>>,
 }
 
 impl DecisionPipelineBuilder {
@@ -50,8 +50,8 @@ impl DecisionPipelineBuilder {
     builder_method!(experience, Box<dyn ExperienceRetrieval>);
     builder_method!(audit_engine, Box<dyn AuditEngine>);
     builder_method!(embedding, Arc<dyn EmbeddingService>);
-    builder_method!(suspend, Box<dyn SuspendQueueOps>);
-    builder_method!(plans, Box<dyn PlanRegistryOps>);
+    builder_method!(suspend, Box<SuspendQueue>);
+    builder_method!(plans, Box<PlanRegistry>);
 
     /// Use the LLM-powered audit engine instead of the default rule engine.
     ///
@@ -72,7 +72,7 @@ impl DecisionPipelineBuilder {
                 ))
             }),
             circuit_breaker: self.circuit_breaker.unwrap_or_else(|| {
-                let state = crate::l0::resource::TaskResourceState::new(
+                let state = crate::l0::TaskResourceState::new(
                     crate::core::types::DEFAULT_RUNTIME_BUDGET,
                     crate::core::types::DEFAULT_MAX_DEPTH,
                 );
@@ -123,8 +123,8 @@ pub struct DecisionPipeline {
     experience: Mutex<Box<dyn ExperienceRetrieval>>,
     audit_engine: Mutex<Box<dyn AuditEngine>>,
     embedding: Arc<dyn EmbeddingService>,
-    suspend: Mutex<Box<dyn SuspendQueueOps>>,
-    plans: Arc<RwLock<Box<dyn PlanRegistryOps>>>,
+    suspend: Mutex<Box<SuspendQueue>>,
+    plans: Arc<RwLock<Box<PlanRegistry>>>,
     /// Budget guard from the last approved request, if any.
     pending_guard: Mutex<Option<BudgetGuard>>,
 }
@@ -212,7 +212,7 @@ impl DecisionPipeline {
         &self.embedding
     }
 
-    pub fn plans(&self) -> &Arc<RwLock<Box<dyn PlanRegistryOps>>> {
+    pub fn plans(&self) -> &Arc<RwLock<Box<PlanRegistry>>> {
         &self.plans
     }
 
@@ -351,7 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pipeline_rejects_budget_exhausted() {
-        let state = crate::l0::resource::TaskResourceState::new(50, 10);
+        let state = crate::l0::TaskResourceState::new(50, 10);
         let breaker = Box::new(crate::l0::L0CircuitBreaker::new(state));
 
         let pipeline = DecisionPipelineBuilder::new()

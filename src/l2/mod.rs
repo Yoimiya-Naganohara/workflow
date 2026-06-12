@@ -18,7 +18,7 @@ impl L2RuleAuditEngine {
 
     pub fn audit(&mut self, manifest: &ConflictManifest) -> L2RuleAuditResult {
         if self.consecutive_failures >= self.max_consecutive_failures {
-            self.consecutive_failures += 1;
+            self.consecutive_failures = (self.consecutive_failures + 1).min(self.max_consecutive_failures + 10);
             return L2RuleAuditResult {
                 decision: ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
                 risk_statement: "L2 collapsed due to consecutive failures".to_string(),

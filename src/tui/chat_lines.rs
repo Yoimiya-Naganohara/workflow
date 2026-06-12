@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 use super::state::{CoreState, MessageRole, MessageStatus};
+use super::style;
 
 pub(crate) fn build_chat_lines(state: &CoreState, width: usize, think_frame: u8) -> Vec<Line<'static>> {
     let content_width = width.max(20);
@@ -38,7 +39,7 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize, think_frame: u8)
                 Span::raw("  "),
                 Span::styled(
                     format!("{} thinking...", dots_str),
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                    Style::default().fg(style::HINT).add_modifier(Modifier::ITALIC),
                 ),
             ]));
             lines.push(Line::from(String::new()));
@@ -47,15 +48,12 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize, think_frame: u8)
 
         // ── Content ──
         let is_user = matches!(message.role, MessageRole::User);
-        let bar_color = if is_user { Color::Rgb(59, 130, 246) } else { Color::Reset };
         let content_lines = render_markdown(&message.content, body_width);
         for cl in content_lines {
             if is_user {
                 // Blue left bar + content
-                let mut styled = vec![Span::styled("▐", Style::default().fg(bar_color))];
-                styled.extend(cl.spans.into_iter().map(|s| {
-                    Span::styled(s.content, s.style)
-                }));
+                let mut styled = vec![Span::styled("▐", Style::default().fg(style::ACTIVE))];
+                styled.extend(cl.spans.into_iter().map(|s| Span::styled(s.content, s.style)));
                 lines.push(Line::from(styled));
             } else {
                 // Agent messages: just indent
@@ -77,7 +75,7 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize, think_frame: u8)
 
 /// Render a tool-call decision message in compact form with a purple left bar.
 fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::ChatMessage) {
-    let bar = Span::styled("▐", Style::default().fg(Color::Rgb(139, 92, 246)));
+    let bar = Span::styled("▐", Style::default().fg(style::PURPLE));
     let first_newline = message.content.find('\n').unwrap_or(message.content.len());
     let header_clean = message.content[..first_newline]
         .trim_start_matches('\u{1f527}')
@@ -87,7 +85,7 @@ fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::
         bar.clone(),
         Span::styled(
             header_clean,
-            Style::default().fg(Color::Rgb(139, 92, 246)).add_modifier(Modifier::BOLD),
+            Style::default().fg(style::PURPLE).add_modifier(Modifier::BOLD),
         ),
     ]));
     if first_newline < message.content.len() {
@@ -96,7 +94,7 @@ fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::
             if !trimmed.is_empty() && trimmed != "```json" && trimmed != "```" {
                 lines.push(Line::from(vec![
                     bar.clone(),
-                    Span::styled(trimmed.to_string(), Style::default().fg(Color::Rgb(165, 180, 252))),
+                    Span::styled(trimmed.to_string(), Style::default().fg(style::PURPLE_LIGHT)),
                 ]));
             }
         }
@@ -105,23 +103,18 @@ fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::
 }
 
 /// Render a message header: status indicator only.
-/// Adds a subtle background tint for user messages.
 fn message_header(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::ChatMessage) {
     let state_indicator = match message.status {
         MessageStatus::Thinking => Span::styled(
             " \u{25cc}",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::SLOW_BLINK),
+            Style::default().fg(style::WARNING).add_modifier(Modifier::SLOW_BLINK),
         ),
         MessageStatus::Streaming => Span::styled(
             " \u{25c9}",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::SLOW_BLINK),
+            Style::default().fg(style::ACTIVE).add_modifier(Modifier::SLOW_BLINK),
         ),
-        MessageStatus::Completed => Span::styled(" \u{2713}", Style::default().fg(Color::Green)),
-        MessageStatus::Error => Span::styled(" \u{2717}", Style::default().fg(Color::Red)),
+        MessageStatus::Completed => Span::styled(" \u{2713}", Style::default().fg(style::SUCCESS)),
+        MessageStatus::Error => Span::styled(" \u{2717}", Style::default().fg(style::ERROR)),
     };
 
     lines.push(Line::from(vec![state_indicator]));
@@ -162,7 +155,7 @@ fn render_markdown(text: &str, body_width: usize) -> Vec<Line<'static>> {
                     for line_text in &html_lines {
                         wrap_spans(
                             &mut out,
-                            &[Span::styled(line_text.clone(), Style::default().fg(Color::DarkGray))],
+                            &[Span::styled(line_text.clone(), Style::default().fg(style::HINT))],
                             body_width,
                             "",
                         );
@@ -248,7 +241,7 @@ where
                 flush_buf(&mut spans, &mut buf, &style);
                 spans.push(Span::styled(
                     format!("`{}`", t),
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC),
+                    Style::default().fg(style::ACTIVE).add_modifier(Modifier::ITALIC),
                 ));
             }
             Some(Event::Start(tag)) => {
@@ -259,10 +252,10 @@ where
                     Tag::Strikethrough => style.strike += 1,
                     Tag::Link { .. } => {
                         style.link += 1;
-                        style.fg.push(Color::Blue);
+                        style.fg.push(style::ACTIVE);
                     }
                     Tag::Image { .. } => {
-                        style.fg.push(Color::DarkGray);
+                        style.fg.push(style::HINT);
                     }
                     _ => {}
                 }
@@ -299,13 +292,13 @@ where
                 flush_buf(&mut spans, &mut buf, &style);
                 let clean = strip_html(&html);
                 if !clean.is_empty() {
-                    spans.push(Span::styled(clean, Style::default().fg(Color::DarkGray)));
+                    spans.push(Span::styled(clean, Style::default().fg(style::HINT)));
                 }
             }
             Some(Event::TaskListMarker(checked)) => {
                 flush_buf(&mut spans, &mut buf, &style);
                 let marker = if checked { "\u{2611}" } else { "\u{2610}" };
-                spans.push(Span::styled(marker, Style::default().fg(Color::Green)));
+                spans.push(Span::styled(marker, Style::default().fg(style::SUCCESS)));
             }
             None => break,
             _ => {}
@@ -398,9 +391,9 @@ where
             Some(Event::Start(Tag::Paragraph)) => {
                 let _ = events.next();
                 let spans = collect_inline_spans(events);
-                let mut quote_spans = vec![Span::styled("  \u{258e} ", Style::default().fg(Color::DarkGray))];
+                let mut quote_spans = vec![Span::styled("  \u{258e} ", Style::default().fg(style::HINT))];
                 for s in &spans {
-                    quote_spans.push(Span::styled(s.content.clone(), s.style.fg(Color::DarkGray)));
+                    quote_spans.push(Span::styled(s.content.clone(), s.style.fg(style::HINT)));
                 }
                 wrap_spans(&mut out, &quote_spans, body_width, "");
             }
@@ -498,9 +491,9 @@ fn render_heading(out: &mut Vec<Line<'static>>, spans: &[Span<'static>], level: 
         HeadingLevel::H6 => 6,
     };
     let header_color = match level_num {
-        1 => Color::Yellow,
-        2 => Color::Cyan,
-        _ => Color::Blue,
+        1 => style::WARNING,
+        2 => style::ACTIVE,
+        _ => style::LABEL,
     };
     let prefix = format!("  {} ", "#".repeat(level_num as usize));
     let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
@@ -508,7 +501,7 @@ fn render_heading(out: &mut Vec<Line<'static>>, spans: &[Span<'static>], level: 
 
     for w in wrapped {
         let line_spans = spans_for_line(spans, &w);
-        let mut row = vec![Span::styled(prefix.clone(), Style::default().fg(Color::DarkGray))];
+        let mut row = vec![Span::styled(prefix.clone(), Style::default().fg(style::HINT))];
         for s in line_spans {
             let mut style = s.style;
             style = style.fg(header_color).add_modifier(Modifier::BOLD);
@@ -522,7 +515,7 @@ fn render_hr(out: &mut Vec<Line<'static>>, body_width: usize) {
     let hr_width = body_width.min(40);
     out.push(Line::from(vec![
         Span::raw("  "),
-        Span::styled("\u{2500}".repeat(hr_width), Style::default().fg(Color::DarkGray)),
+        Span::styled("\u{2500}".repeat(hr_width), Style::default().fg(style::HINT)),
     ]));
 }
 
@@ -530,26 +523,23 @@ fn flush_code_block(out: &mut Vec<Line<'static>>, lang: &str, code_lines: &[Stri
     if !lang.is_empty() {
         out.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(
-                format!("\u{250c}\u{2500} {} ", lang),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(format!("\u{250c}\u{2500} {} ", lang), Style::default().fg(style::HINT)),
         ]));
     } else {
         out.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled("\u{250c}\u{2500}\u{2500}\u{2500}", Style::default().fg(Color::DarkGray)),
+            Span::styled("\u{250c}\u{2500}\u{2500}\u{2500}", Style::default().fg(style::HINT)),
         ]));
     }
     for code_line in code_lines {
         out.push(Line::from(vec![
-            Span::styled("  \u{2502} ", Style::default().fg(Color::DarkGray)),
-            Span::styled(code_line.clone(), Style::default().fg(Color::Cyan)),
+            Span::styled("  \u{2502} ", Style::default().fg(style::HINT)),
+            Span::styled(code_line.clone(), Style::default().fg(style::ACTIVE)),
         ]));
     }
     out.push(Line::from(Span::styled(
         "  \u{2514}\u{2500}\u{2500}\u{2500}",
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(style::HINT),
     )));
 }
 
@@ -675,10 +665,10 @@ fn render_table_output(
     let sep = mk_sep("\u{251c}", "\u{253c}", "\u{2524}");
     let bot = mk_sep("\u{2514}", "\u{2534}", "\u{2518}");
 
-    out.push(Line::from(Span::styled(top, Style::default().fg(Color::DarkGray))));
+    out.push(Line::from(Span::styled(top, Style::default().fg(style::HINT))));
 
     if !headers.is_empty() && headers.iter().any(|h| !h.is_empty()) {
-        let mut cells = vec![Span::styled("  \u{2502} ", Style::default().fg(Color::DarkGray))];
+        let mut cells = vec![Span::styled("  \u{2502} ", Style::default().fg(style::HINT))];
         for ci in 0..effective_cols {
             let cell_text = headers
                 .first()
@@ -694,14 +684,11 @@ fn render_table_output(
             cells.push(Span::styled(padded, Style::default().add_modifier(Modifier::BOLD)));
         }
         out.push(Line::from(cells));
-        out.push(Line::from(Span::styled(
-            sep.clone(),
-            Style::default().fg(Color::DarkGray),
-        )));
+        out.push(Line::from(Span::styled(sep.clone(), Style::default().fg(style::HINT))));
     }
 
     for row in rows {
-        let mut cells = vec![Span::styled("  \u{2502} ", Style::default().fg(Color::DarkGray))];
+        let mut cells = vec![Span::styled("  \u{2502} ", Style::default().fg(style::HINT))];
         for ci in 0..effective_cols {
             let cell_text = row.get(ci).map(|s| s.as_str()).unwrap_or("");
             let w = col_widths.get(ci).copied().unwrap_or(0);
@@ -715,7 +702,7 @@ fn render_table_output(
         out.push(Line::from(cells));
     }
 
-    out.push(Line::from(Span::styled(bot, Style::default().fg(Color::DarkGray))));
+    out.push(Line::from(Span::styled(bot, Style::default().fg(style::HINT))));
 }
 
 fn wrap_spans(out: &mut Vec<Line<'static>>, spans: &[Span<'static>], max_width: usize, indent: &str) {

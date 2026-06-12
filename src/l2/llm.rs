@@ -35,7 +35,7 @@ pub struct L2LlmAuditEngine {
 #[derive(Debug, Serialize, Deserialize)]
 struct JudgeDecision {
     decision: String,
-    winner: Option<String>,
+    winner_index: Option<usize>,
     risk_level: String,
     risk_statement: String,
     lesson_learned: String,
@@ -55,7 +55,7 @@ impl L2LlmAuditEngine {
 
     pub async fn audit(&mut self, manifest: &ConflictManifest) -> Result<L2LlmAuditResult> {
         if self.consecutive_failures >= self.max_consecutive_failures {
-            self.consecutive_failures += 1;
+            self.consecutive_failures = (self.consecutive_failures + 1).min(self.max_consecutive_failures + 10);
             return Ok(L2LlmAuditResult {
                 decision: ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
                 risk_statement: "L2 collapsed due to consecutive failures".to_string(),
@@ -89,7 +89,9 @@ impl L2LlmAuditEngine {
         if judge.risk_level == "high" {
             self.consecutive_failures += 1;
         } else if judge.risk_level == "medium" {
-            // Medium risk keeps failures unchanged — only high resets.
+            if self.consecutive_failures > 0 {
+                self.consecutive_failures -= 1;
+            }
         } else {
             self.consecutive_failures = 0;
         }
@@ -105,17 +107,14 @@ impl L2LlmAuditEngine {
             });
         }
 
-        // Parse winner index (0-based) for override decisions.
         let winner_idx = judge
-            .winner
-            .as_deref()
-            .and_then(|w| w.parse::<usize>().ok())
+            .winner_index
             .filter(|&i| i < manifest.contending_agents.len())
             .unwrap_or(0);
 
         let arbitration = match judge.decision.as_str() {
             "override" => {
-                let winner = manifest.contending_agents[winner_idx];
+                let winner = manifest.contending_agents.get(winner_idx).copied().unwrap_or([0u8; 16]);
                 let losers: Vec<_> = manifest
                     .contending_agents
                     .iter()
@@ -183,7 +182,7 @@ Note: winner_index is the 0-based index of the winning agent in the contending_a
 
         let decision: JudgeDecision = serde_json::from_str(json_str)?;
 
-        if (decision.decision == "override" && decision.winner.is_some())
+        if (decision.decision == "override" && decision.winner_index.is_some())
             || decision.decision == "prune"
             || decision.decision == "merge"
         {
@@ -191,7 +190,7 @@ Note: winner_index is the 0-based index of the winning agent in the contending_a
         } else {
             Ok(JudgeDecision {
                 decision: "prune".to_string(),
-                winner: None,
+                winner_index: None,
                 risk_level: "high".to_string(),
                 risk_statement: "Unable to determine winner, pruning for safety".to_string(),
                 lesson_learned: "LLM output was ambiguous".to_string(),
@@ -304,51 +303,41 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_decision_override_with_agent_id() {
+    fn test_parse_decision_override_with_winner_index() {
         let provider = Arc::new(LlmProvider::OpenAi(
             rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
         ));
         let engine = L2LlmAuditEngine::new(provider, L2LlmConfig::default());
 
-        // LLM returns agent_id (not index) as winner
-        let json = r#"{"decision": "override", "winner": "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]", "risk_level": "low", "risk_statement": "test", "lesson_learned": "test"}"#;
+        // LLM returns winner_index (0-based index) as a number
+        let json = r#"{"decision": "override", "winner_index": 0, "risk_level": "low", "risk_statement": "test", "lesson_learned": "test"}"#;
         let result = engine.parse_decision(json).unwrap();
         assert_eq!(result.decision, "override");
-        // BUG: winner is parsed as usize, but prompt says agent_id string
-        assert!(result.winner.is_some(), "winner should be parsed");
-        let winner_usize = result.winner.unwrap().parse::<usize>();
-        assert!(winner_usize.is_err(), "BUG: agent_id string should not parse as usize");
+        assert_eq!(result.winner_index, Some(0), "winner_index should be Some(0)");
     }
 
     #[test]
-    fn test_empty_contending_agents_panics() {
+    fn test_empty_contending_agents_handled_safely() {
         let provider = Arc::new(LlmProvider::OpenAi(
             rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
         ));
         let engine = L2LlmAuditEngine::new(provider, L2LlmConfig::default());
 
-        // Parse a decision that says "override" but manifest has empty agents
-        let json = r#"{"decision": "override", "winner": "0", "risk_level": "low", "risk_statement": "test", "lesson_learned": "test"}"#;
+        // Parse a decision with winner_index
+        let json = r#"{"decision": "override", "winner_index": 0, "risk_level": "low", "risk_statement": "test", "lesson_learned": "test"}"#;
         let decision = engine.parse_decision(json).unwrap();
 
         let manifest = make_manifest(vec![], vec![]);
 
-        // This will panic at line 102: unwrap_or(manifest.contending_agents[0])
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // Simulate the arbitration logic from audit()
-            let winner_idx = decision.winner.and_then(|w| w.parse::<usize>().ok()).unwrap_or(0);
-            let _winner = manifest
-                .contending_agents
-                .get(winner_idx)
-                .copied()
-                .unwrap_or(manifest.contending_agents[0]); // PANICS on empty
-        }));
+        // Verify no panic: empty agents should be handled gracefully
+        let winner_idx = decision.winner_index.unwrap_or(0);
+        let _winner = manifest.contending_agents.get(winner_idx).copied().unwrap_or([0u8; 16]);
 
-        assert!(result.is_err(), "BUG: empty contending_agents causes panic");
+        // No panic means this test passes
     }
 
     #[test]
-    fn test_medium_risk_resets_failure_counter() {
+    fn test_medium_risk_decrements_failure_counter() {
         let provider = Arc::new(LlmProvider::OpenAi(
             rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
         ));
@@ -363,19 +352,19 @@ mod tests {
         // Simulate 2 high-risk failures
         engine.consecutive_failures = 2;
 
-        // BUG: medium risk resets to 0 instead of decrementing
+        // Medium risk should decrement, not reset
         let risk_level = "medium";
         if risk_level == "high" {
             engine.consecutive_failures += 1;
+        } else if risk_level == "medium" {
+            if engine.consecutive_failures > 0 {
+                engine.consecutive_failures -= 1;
+            }
         } else {
-            engine.consecutive_failures = 0; // BUG: should decrement, not reset
+            engine.consecutive_failures = 0;
         }
 
-        assert_eq!(
-            engine.consecutive_failures, 0,
-            "BUG: medium risk resets failure counter"
-        );
-        // After 2 high-risk failures, a single medium-risk should leave us at 1, not 0
+        assert_eq!(engine.consecutive_failures, 1, "medium risk should decrement by 1");
     }
 
     #[test]
@@ -409,7 +398,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_consecutive_failures_increment_after_collapse() {
+    async fn test_consecutive_failures_saturates_during_collapse() {
         let provider = Arc::new(LlmProvider::OpenAi(
             rig::providers::openai::CompletionsClient::new("test-key").unwrap(),
         ));
@@ -426,17 +415,14 @@ mod tests {
 
         let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.8, 0.3]);
 
-        // Each audit call while collapsed increments the counter
-        let _ = engine.audit(&manifest).await;
-        assert_eq!(engine.consecutive_failures, 3);
+        // Counter increments during collapse but saturates at max + 10 (= 12)
+        for _ in 0..20 {
+            let _ = engine.audit(&manifest).await;
+        }
 
-        let _ = engine.audit(&manifest).await;
-        assert_eq!(engine.consecutive_failures, 4);
-
-        // BUG: counter keeps growing, will wrap to 0 after u32::MAX
-        assert!(
-            engine.consecutive_failures > 2,
-            "counter should keep incrementing during collapse"
+        assert_eq!(
+            engine.consecutive_failures, 12,
+            "counter should saturate at max_consecutive_failures + 10"
         );
     }
 }

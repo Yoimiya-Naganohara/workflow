@@ -116,8 +116,14 @@ impl Default for Keymap {
         );
 
         // Provider / command picker
-        km.bind(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL), Action::OpenProviderPicker);
-        km.bind(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL), Action::OpenCommandPicker);
+        km.bind(
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            Action::OpenProviderPicker,
+        );
+        km.bind(
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+            Action::OpenCommandPicker,
+        );
 
         // Chat input
         km.bind(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), Action::SendMessage);

@@ -107,37 +107,6 @@ impl SuspendQueue {
     }
 }
 
-/// Priority-ordered queue for deferred spawn requests.
-pub trait SuspendQueueOps: Send + Sync {
-    fn enqueue(&mut self, request: SpawnRequest, priority: f32);
-    fn dequeue(&mut self) -> Option<SuspendedRequest>;
-    fn prune_expired(&mut self) -> Vec<SpawnRequest>;
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool;
-}
-
-impl SuspendQueueOps for SuspendQueue {
-    fn enqueue(&mut self, request: SpawnRequest, priority: f32) {
-        self.enqueue(request, priority)
-    }
-
-    fn dequeue(&mut self) -> Option<SuspendedRequest> {
-        self.dequeue()
-    }
-
-    fn prune_expired(&mut self) -> Vec<SpawnRequest> {
-        self.prune_expired()
-    }
-
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -49,26 +49,20 @@ pub(crate) fn render_proposal(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 /// Build the proposal panel lines matching the HTML preview.
-fn build_proposal_lines(
-    core: &super::state::CoreState,
-    ui: &super::state::UiState,
-) -> Vec<Line<'static>> {
+fn build_proposal_lines(core: &super::state::CoreState, ui: &super::state::UiState) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
 
-    // ── Recent commit / diff ──
+    // ── Section: Proposal header ──
     lines.push(Line::from(vec![
-        Span::styled(" # ", Style::default().fg(style::INACTIVE)),
+        Span::styled("# ", Style::default().fg(style::INACTIVE)),
         Span::styled("Proposal", style::title_style()),
     ]));
 
-    // Show the latest git hash if available
+    // ── Recent commit / diff ──
     let commit_hash = get_latest_commit_hash();
     lines.push(Line::from(vec![
-        Span::styled(" # ", Style::default().fg(style::INACTIVE)),
-        Span::styled(
-            commit_hash,
-            Style::default().fg(style::VALUE),
-        ),
+        Span::styled("# ", Style::default().fg(style::INACTIVE)),
+        Span::styled(commit_hash, Style::default().fg(style::VALUE)),
     ]));
 
     if let Some(diff) = get_recent_diff() {
@@ -88,24 +82,27 @@ fn build_proposal_lines(
     }
 
     lines.push(Line::from(Span::styled(
-        "─".repeat(34),
+        "\u{2500}".repeat(34),
         Style::default().fg(style::INACTIVE),
     )));
 
     // ── Status section ──
-    lines.push(Line::from(vec![
-        Span::styled(" Status", style::title_style()),
-    ]));
+    lines.push(Line::from(vec![Span::styled("Status", style::title_style())]));
 
     // Budget
     lines.push(Line::from(vec![
-        Span::styled("   Budget", style::label_style()),
+        Span::styled("  Budget", Style::default().fg(style::LABEL)),
         Span::raw("    "),
         Span::styled(
-            format!("{}%", if ui.budget_total > 0 {
-                ui.budget_used * 100 / ui.budget_total
-            } else { 0 }),
-            style::value_style(),
+            format!(
+                "{}%",
+                if ui.budget_total > 0 {
+                    ui.budget_used * 100 / ui.budget_total
+                } else {
+                    0
+                }
+            ),
+            Style::default().fg(style::VALUE),
         ),
     ]));
 
@@ -114,76 +111,64 @@ fn build_proposal_lines(
         if let Ok(rt) = runtime.try_read() {
             format!("{}", rt.experience_count())
         } else {
-            "—".to_string()
+            "\u{2014}".to_string()
         }
     } else {
-        "—".to_string()
+        "\u{2014}".to_string()
     };
     lines.push(Line::from(vec![
-        Span::styled("   Pool", style::label_style()),
+        Span::styled("  Pool", Style::default().fg(style::LABEL)),
         Span::raw("      "),
-        Span::styled(pool_count, style::value_style()),
+        Span::styled(pool_count, Style::default().fg(style::VALUE)),
     ]));
 
-    // Depth (L level based on state)
+    // Depth
     let depth_label = get_depth_label();
     lines.push(Line::from(vec![
-        Span::styled("   Depth", style::label_style()),
+        Span::styled("  Depth", Style::default().fg(style::LABEL)),
         Span::raw("     "),
-        Span::styled(depth_label, style::value_style()),
+        Span::styled(depth_label, Style::default().fg(style::VALUE)),
     ]));
 
     // Model (selected model name)
     let model_name = if let Some(sel) = core.selected_models.first() {
-        sel.model_id.split('/').last().unwrap_or(&sel.model_id).to_string()
+        sel.model_id.split('/').next_back().unwrap_or(&sel.model_id).to_string()
     } else {
-        "—".to_string()
+        "\u{2014}".to_string()
     };
     lines.push(Line::from(vec![
-        Span::styled("   Model", style::label_style()),
+        Span::styled("  Model", Style::default().fg(style::LABEL)),
         Span::raw("     "),
-        Span::styled(model_name, style::value_style()),
+        Span::styled(model_name, Style::default().fg(style::VALUE)),
     ]));
 
     lines.push(Line::from(Span::styled(
-        "─".repeat(34),
+        "\u{2500}".repeat(34),
         Style::default().fg(style::INACTIVE),
     )));
 
     // ── Plan section ──
     if let Some(plan) = &ui.current_plan {
-        lines.push(Line::from(vec![
-            Span::styled(" Plan", style::title_style()),
-        ]));
+        lines.push(Line::from(vec![Span::styled("Plan", style::title_style())]));
         for task in &plan.tasks {
             let (prefix, bullet_color, item_style, tag) = match task.status {
                 TaskStatus::Completed => (
-                    "▸",
+                    "\u{25b8}",
                     style::SUCCESS,
                     Style::default().fg(style::INACTIVE).crossed_out(),
                     Some(("done", style::SUCCESS)),
                 ),
                 TaskStatus::Running => (
-                    "▸",
+                    "\u{25b8}",
                     style::ACTIVE,
                     Style::default().fg(style::VALUE),
                     Some(("in prog", style::ACTIVE)),
                 ),
-                TaskStatus::Failed => (
-                    "▸",
-                    style::ERROR,
-                    Style::default().fg(style::VALUE),
-                    None,
-                ),
-                TaskStatus::Pending => (
-                    "▸",
-                    style::INACTIVE,
-                    Style::default().fg(style::INACTIVE),
-                    None,
-                ),
+                TaskStatus::Failed => ("\u{25b8}", style::ERROR, Style::default().fg(style::VALUE), None),
+                TaskStatus::Pending => ("\u{25b8}", style::INACTIVE, Style::default().fg(style::INACTIVE), None),
             };
             let desc = if task.description.len() > 20 {
-                format!("{}…", &task.description[..19])
+                format!("{}...", &task.description[..17])
             } else {
                 task.description.clone()
             };
@@ -201,28 +186,20 @@ fn build_proposal_lines(
         }
     } else {
         // Show plan placeholder like the HTML preview
-        lines.push(Line::from(vec![
-            Span::styled(" Plan", style::title_style()),
-        ]));
+        lines.push(Line::from(vec![Span::styled("Plan", style::title_style())]));
         let plan_items = get_plan_items();
         for item in plan_items {
             let mut row = vec![
-                Span::styled(" ▸ ", Style::default().fg(style::INACTIVE)),
+                Span::styled(" \u{25b8} ", Style::default().fg(style::INACTIVE)),
                 Span::styled(item.label, Style::default().fg(style::INACTIVE)),
             ];
             if item.active {
                 row.push(Span::raw(" ".repeat(6)));
-                row.push(Span::styled(
-                    "in prog",
-                    Style::default().fg(style::ACTIVE),
-                ));
+                row.push(Span::styled("in prog", Style::default().fg(style::ACTIVE)));
             }
             if item.done {
                 row.push(Span::raw(" ".repeat(6)));
-                row.push(Span::styled(
-                    "done",
-                    Style::default().fg(style::SUCCESS),
-                ));
+                row.push(Span::styled("done", Style::default().fg(style::SUCCESS)));
             }
             lines.push(Line::from(row));
         }
@@ -233,7 +210,6 @@ fn build_proposal_lines(
 
 /// Get the latest git commit short hash.
 fn get_latest_commit_hash() -> String {
-    // Try to read from git HEAD
     if let Ok(output) = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
@@ -245,16 +221,12 @@ fn get_latest_commit_hash() -> String {
             }
         }
     }
-    "—".to_string()
+    "\u{2014}".to_string()
 }
 
 /// Get recent diff lines (staged or unstaged).
 fn get_recent_diff() -> Option<Vec<String>> {
-    // Try to get a short diff stat
-    if let Ok(output) = std::process::Command::new("git")
-        .args(["diff", "--stat"])
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new("git").args(["diff", "--stat"]).output() {
         if output.status.success() {
             let stat = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !stat.is_empty() {

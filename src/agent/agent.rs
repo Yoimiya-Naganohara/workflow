@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
 use crate::core::types::AgentId;
-use crate::l0::resource::BudgetGuard;
+use crate::l0::BudgetGuard;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {

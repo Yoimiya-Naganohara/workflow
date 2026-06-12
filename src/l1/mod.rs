@@ -114,6 +114,56 @@ pub struct L1Assessment {
     pub matched_experiences: usize,
 }
 
+/// L1: Experience-driven confidence assessment.
+pub trait ExperienceRetrieval: Send + Sync {
+    fn retrieve(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)>;
+    fn check_confidence(
+        &self,
+        task_embedding: &[f32; EMBEDDING_DIM],
+        role_embedding: &[f32; EMBEDDING_DIM],
+    ) -> Result<L1Assessment, SpawnRejection>;
+    fn add_experience(&mut self, entry: ExperienceEntry);
+    fn experience_count(&self) -> usize;
+
+    /// Flush persistent storage to disk (no-op for in-memory retrievers).
+    fn flush(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+    /// Number of bedrock (persistent) entries.
+    fn bedrock_count(&self) -> usize {
+        0
+    }
+    /// Number of fluid (volatile) entries.
+    fn fluid_count(&self) -> usize {
+        0
+    }
+}
+
+impl ExperienceRetrieval for L1Retriever {
+    fn retrieve(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)> {
+        self.retrieve(query, k)
+            .into_iter()
+            .map(|(e, s)| (e.clone(), s))
+            .collect()
+    }
+
+    fn check_confidence(
+        &self,
+        task_embedding: &[f32; EMBEDDING_DIM],
+        role_embedding: &[f32; EMBEDDING_DIM],
+    ) -> Result<L1Assessment, SpawnRejection> {
+        self.check_confidence(task_embedding, role_embedding)
+    }
+
+    fn add_experience(&mut self, entry: ExperienceEntry) {
+        self.add_experience(entry)
+    }
+
+    fn experience_count(&self) -> usize {
+        self.experience_count()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,55 +213,5 @@ mod tests {
 
         let result = retriever.check_confidence(&query, &query);
         assert!(result.is_ok());
-    }
-}
-
-/// L1: Experience-driven confidence assessment.
-pub trait ExperienceRetrieval: Send + Sync {
-    fn retrieve(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)>;
-    fn check_confidence(
-        &self,
-        task_embedding: &[f32; EMBEDDING_DIM],
-        role_embedding: &[f32; EMBEDDING_DIM],
-    ) -> Result<L1Assessment, SpawnRejection>;
-    fn add_experience(&mut self, entry: ExperienceEntry);
-    fn experience_count(&self) -> usize;
-
-    /// Flush persistent storage to disk (no-op for in-memory retrievers).
-    fn flush(&mut self) -> anyhow::Result<()> {
-        Ok(())
-    }
-    /// Number of bedrock (persistent) entries.
-    fn bedrock_count(&self) -> usize {
-        0
-    }
-    /// Number of fluid (volatile) entries.
-    fn fluid_count(&self) -> usize {
-        0
-    }
-}
-
-impl ExperienceRetrieval for L1Retriever {
-    fn retrieve(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)> {
-        self.retrieve(query, k)
-            .into_iter()
-            .map(|(e, s)| (e.clone(), s))
-            .collect()
-    }
-
-    fn check_confidence(
-        &self,
-        task_embedding: &[f32; EMBEDDING_DIM],
-        role_embedding: &[f32; EMBEDDING_DIM],
-    ) -> Result<L1Assessment, SpawnRejection> {
-        self.check_confidence(task_embedding, role_embedding)
-    }
-
-    fn add_experience(&mut self, entry: ExperienceEntry) {
-        self.add_experience(entry)
-    }
-
-    fn experience_count(&self) -> usize {
-        self.experience_count()
     }
 }
