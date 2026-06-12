@@ -8,29 +8,24 @@
 :root{
   --bg:#212121;--bg2:#2c2c2c;--bg3:#181818;
   --text:#cdd6f4;--text2:#a6adc8;--text3:#7f849c;
-  --border:#4b4c5c;--border-f:#89b4fa;--border-d:#313244;
+  --border:#4b4c5c;--border-d:#313244;
   --blue:#89b4fa;--mauve:#cba6f7;--peach:#fab387;
   --red:#f38ba8;--green:#a6e3a1;--yellow:#f9e2af;
-  --pink:#f5c2e7;--sky:#89dceb;--teal:#94e2d5;
-  --sapphire:#74c7ec;--lavender:#b4befe;
-  --overlay0:#6c7086;--overlay1:#7f849c;
+  --pink:#f5c2e7;--sky:#89dceb;--overlay0:#6c7086;--overlay1:#7f849c;
   --diff-add:#478247;--diff-add-bg:#303A30;
-  --diff-del:#7C4444;--diff-del-bg:#3A3030;
 }
-body{font-family:'SF Mono','JetBrains Mono','Fira Code',monospace;background:var(--bg3);color:var(--text);font-size:13px;line-height:1.5;display:flex;justify-content:center;min-height:100vh;padding:0}
-.term{width:100%;max-width:860px;background:var(--bg);display:flex;flex-direction:column;min-height:100vh}
-
-/* messages area */
-.messages{flex:1;padding:12px 16px;overflow-y:auto;max-height:calc(100vh - 80px)}
-
-/* message with thick left border */
+body{font-family:'SF Mono','JetBrains Mono','Fira Code',monospace;background:var(--bg3);color:var(--text);font-size:13px;line-height:1.5;display:flex;justify-content:center;min-height:100vh;padding:16px}
+.term{width:100%;max-width:860px;background:var(--bg);border:1px solid var(--border-d);border-radius:6px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+.titlebar{display:flex;align-items:center;padding:6px 12px;background:var(--bg3);border-bottom:1px solid var(--border-d);gap:6px;font-size:11px;color:var(--text3)}
+.titlebar .dots{display:flex;gap:5px}.titlebar .dot{width:10px;height:10px;border-radius:50%}
+.dot.r{background:#f38ba8}.dot.y{background:#f9e2af}.dot.g{background:#a6e3a1}
+.titlebar .name{flex:1;text-align:center}
+.messages{padding:16px 20px;max-height:520px;overflow-y:auto}
 .msg{margin-bottom:16px;display:flex;gap:0}
 .msg .bar{width:3px;flex-shrink:0;border-radius:1px;margin-right:10px;align-self:stretch}
 .msg.user .bar{background:var(--green)}
 .msg.assistant .bar{background:var(--blue)}
 .msg .body{flex:1;min-width:0}
-
-/* tool call */
 .tool{margin-bottom:16px;display:flex;gap:0}
 .tool .bar{width:3px;flex-shrink:0;border-radius:1px;margin-right:10px;align-self:stretch;background:var(--overlay0)}
 .tool .body{flex:1;min-width:0}
@@ -39,50 +34,40 @@ body{font-family:'SF Mono','JetBrains Mono','Fira Code',monospace;background:var
 .tool-params{color:var(--overlay0);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-result{margin-top:6px;padding:8px 12px;background:var(--bg3);border-radius:4px;font-size:12px;border-left:2px solid var(--overlay0)}
 .tool-result pre{font-family:inherit;font-size:12px;line-height:1.5;color:var(--text)}
-.tool-result.err{border-left-color:var(--red)}
-
-/* diff */
 .diff{margin-top:6px;font-size:12px;border-radius:4px;overflow:hidden}
 .diff .ln{padding:1px 12px;font-family:inherit}
 .diff .ln.a{background:var(--diff-add-bg);color:var(--diff-add)}
-.diff .ln.d{background:var(--diff-del-bg);color:var(--diff-del)}
 .diff .ln .p{display:inline-block;width:12px;font-weight:bold}
-
-/* markdown */
-code{background:var(--surface0,#313244);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--green)}
+code{background:var(--border-d);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--green)}
 pre code{background:none;padding:0;color:var(--text)}
 .bq{border-left:2px solid var(--yellow);padding-left:12px;color:var(--yellow);margin:8px 0;font-style:italic}
-ul{padding-left:18px;margin:6px 0}
-li{margin:3px 0;color:var(--text2)}
-li::marker{color:var(--blue)}
+ul{padding-left:18px;margin:6px 0}li{margin:3px 0;color:var(--text2)}li::marker{color:var(--blue)}
 strong{color:var(--peach);font-weight:bold}
-em{color:var(--yellow);font-style:italic}
-
-/* thinking */
 .think{color:var(--blue);font-size:12px;display:flex;align-items:center;gap:6px}
 .think::before{content:"⟳";animation:spin 1s linear infinite}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-
-/* editor */
 .editor{border-top:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:8px}
 .editor .pr{color:var(--blue);font-weight:bold;font-size:14px}
 .editor .tx{flex:1;color:var(--text)}
 .editor .cu{display:inline-block;width:7px;height:15px;background:var(--blue);border-radius:1px;animation:blink 1s step-end infinite;vertical-align:middle}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
-
-/* status bar */
 .status{display:flex;align-items:center;font-size:11px;height:24px}
 .status .help{background:var(--text2);color:var(--bg3);padding:0 8px;font-weight:bold;height:100%;display:flex;align-items:center}
 .status .tokens{background:var(--text);color:var(--bg2);padding:0 8px;height:100%;display:flex;align-items:center;white-space:nowrap}
-.status .tokens.warn{background:var(--yellow)}
 .status .spacer{background:var(--bg2);flex:1;height:100%}
 .status .diagnostics{background:var(--bg3);padding:0 8px;height:100%;display:flex;align-items:center;gap:6px;color:var(--text3)}
 .status .diagnostics .err{color:var(--red)}.status .diagnostics .warn{color:var(--yellow)}
 .status .model{background:var(--mauve);color:var(--bg3);padding:0 8px;font-weight:bold;height:100%;display:flex;align-items:center}
+.messages::-webkit-scrollbar{width:5px}.messages::-webkit-scrollbar-thumb{background:var(--border-d);border-radius:3px}
 </style>
 </head>
 <body>
 <div class="term">
+  <div class="titlebar">
+    <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+    <div class="name">workflow</div>
+    <div style="width:40px"></div>
+  </div>
   <div class="messages">
 
     <div class="msg user">
