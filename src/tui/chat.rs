@@ -64,7 +64,7 @@ pub(crate) fn render_chat(f: &mut Frame, area: Rect, state: &AppState, visible_l
     let input_idx = if pop_h > 0 { 2 } else { 1 };
     let input_area = chunks[input_idx];
     let is_focused = state.ui.focus == crate::tui::state::Focus::Input;
-    let input_block = style::input_box(is_focused);
+    let input_block = style::input_bar(is_focused);
     let input_style = if is_focused {
         style::value_style()
     } else {

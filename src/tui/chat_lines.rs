@@ -6,7 +6,7 @@ use ratatui::{
 
 use super::state::{CoreState, MessageRole, MessageStatus};
 
-pub(crate) fn build_chat_lines(state: &CoreState, width: usize) -> Vec<Line<'static>> {
+pub(crate) fn build_chat_lines(state: &CoreState, width: usize, think_frame: u8) -> Vec<Line<'static>> {
     let content_width = width.max(20);
     let body_width = content_width.saturating_sub(4).max(1);
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -30,10 +30,14 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize) -> Vec<Line<'sta
         message_header(&mut lines, message);
 
         if message.content.is_empty() && matches!(message.status, MessageStatus::Thinking) {
+            // Cycling dots animation using think_frame
+            let dots = ["●", "●●", "●●●", "●●", "●", "●●", "●●●", "●●"];
+            let phase = (think_frame as usize / 3) % dots.len();
+            let dots_str = dots[phase];
             lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    "thinking\u{2026}",
+                    format!("{} thinking...", dots_str),
                     Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
                 ),
             ]));

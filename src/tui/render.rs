@@ -45,9 +45,10 @@ impl Tui {
         // This catches the case where streaming completes (msg_count unchanged but content
         // length is now final) — otherwise the final message would be invisible until
         // the next user message.
-        let cache_key = (msg_count, last_content_len, is_streaming, chat_width);
+        // Include think_frame in cache key when streaming so the thinking animation updates.
+        let cache_key = (msg_count, last_content_len, is_streaming, chat_width, is_streaming.then_some(state.ui.think_frame));
         if cache_key != self.chat_cache_key {
-            self.chat_lines_cache = build_chat_lines(&state.core, chat_width);
+            self.chat_lines_cache = build_chat_lines(&state.core, chat_width, state.ui.think_frame);
             self.chat_cache_key = cache_key;
         }
 
