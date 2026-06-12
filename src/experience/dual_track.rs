@@ -350,11 +350,9 @@ impl DualTrackMemory {
             .as_secs();
 
         // Search task matches across both tracks (role-aware when possible).
-        let mut task_has_role_data = false;
         let task_matches = if let Some(role_id) = role_template_id {
             let role_task = self.search_by_role(task_embedding, role_id, 5);
             if !role_task.is_empty() {
-                task_has_role_data = true;
                 role_task
             } else {
                 self.search(task_embedding, 5)
@@ -363,11 +361,9 @@ impl DualTrackMemory {
             self.search(task_embedding, 5)
         };
 
-        let mut role_has_role_data = false;
         let role_matches = if let Some(role_id) = role_template_id {
             let role_role = self.search_by_role(role_embedding, role_id, 5);
             if !role_role.is_empty() {
-                role_has_role_data = true;
                 role_role
             } else {
                 self.search(role_embedding, 5)
@@ -379,9 +375,14 @@ impl DualTrackMemory {
         let task_score = Self::aggregate_top_k(&task_matches, now);
         let role_score = Self::aggregate_top_k(&role_matches, now);
 
-        // New role without any experiences yet → use initial confidence directly.
-        // Existing role with data → use real similarity scores.
-        let combined = if role_template_id.is_some() && !task_has_role_data && !role_has_role_data {
+        // Count experiences for this specific role (0 if no role context).
+        let role_count = role_template_id
+            .map(|id| self.count_by_role(id))
+            .unwrap_or(0);
+
+        // Few experiences → trust initial confidence.
+        // Enough experiences → use real similarity data.
+        let combined = if role_count < 5 {
             initial_confidence.unwrap_or(0.6)
         } else {
             (task_score + role_score) / 2.0
@@ -450,6 +451,22 @@ impl DualTrackMemory {
         }
 
         results
+    }
+
+    /// Count experiences belonging to a specific role.
+    pub fn count_by_role(&self, role_id: u32) -> usize {
+        let mut count = 0;
+        for entry in self.bedrock.entries() {
+            if entry.role_template_id == Some(role_id) {
+                count += 1;
+            }
+        }
+        for entry in self.fluid.entries() {
+            if entry.role_template_id == Some(role_id) {
+                count += 1;
+            }
+        }
+        count
     }
 
     /// Aggregate top-k matches with positional weighting and time decay.
