@@ -149,13 +149,20 @@ impl Tool for WriteFile {
         let end = args.end.unwrap_or(len);
         let start = start.min(len);
         let end = end.max(start).min(len);
-        std::fs::write(&args.path, &args.content[start..end]).map_err(|e| ToolCallError(e.to_string()))?;
+
+        // Safe slicing: .get() returns None instead of panicking on
+        // non-UTF-8 boundaries (LLM may send byte indices that split chars).
+        let write_slice = args.content.get(start..end).unwrap_or("");
+        std::fs::write(&args.path, write_slice).map_err(|e| ToolCallError(e.to_string()))?;
+
         let preview = if len > 200 {
             let preview_end = (start + 200).min(len);
-            format!("{}...", &args.content[start..preview_end])
+            let slice = args.content.get(start..preview_end).unwrap_or("");
+            format!("{}...", slice)
         } else {
-            args.content[start..end].to_string()
+            write_slice.to_string()
         };
+
         Ok(format!(
             "Written {} bytes to {}\nFirst {} chars:\n---\n{}\n---",
             end - start,
