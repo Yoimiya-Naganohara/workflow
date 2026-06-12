@@ -734,15 +734,17 @@ impl AgentRuntime {
         };
 
         // Leaf agent — response is the result
-        {
+        let role_template_id = {
             let mut pool = agent_pool.write().await;
+            let role_tpl_id = pool.get_agent(&agent_id).and_then(|a| a.role_template_id);
             if let Some(agent) = pool.get_agent_mut(&agent_id) {
                 agent.result = Some(response);
                 agent.status = AgentStatus::Completed;
                 pool.release_budget_guard(&agent_id);
                 pool.notify_completed(&agent_id);
             }
-        }
+            role_tpl_id
+        };
 
         // Record experience entry (feedback loop).
         if let Ok(emb) = self.pipeline.embedding().embed(&goal).await {
@@ -750,7 +752,7 @@ impl AgentRuntime {
                 embedding: emb,
                 applicability_vector: [0.0f32; 128],
                 tool_bitmap: 0,
-                role_template_id: None,
+                role_template_id,
                 weight: 0.8,
                 domain_version: 0,
                 timestamp: std::time::SystemTime::now()
