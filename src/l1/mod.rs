@@ -67,8 +67,16 @@ impl L1Retriever {
         let role_score = role_matches.first().map(|(_, s)| *s).unwrap_or(0.0);
 
         let combined = (task_score + role_score) / 2.0;
-        // Floor: never below the role's inherent confidence.
-        let combined = combined.max(initial_confidence.unwrap_or(0.0));
+
+        // Bayesian blending: initial_confidence acts as a prior that gets
+        // diluted as real experiences accumulate.
+        let combined = if let Some(init_conf) = initial_confidence {
+            let n = (task_matches.len() + role_matches.len()) as f32;
+            let prior_weight = 1.0;
+            (combined * n + init_conf * prior_weight) / (n + prior_weight)
+        } else {
+            combined
+        };
 
         if combined >= self.confidence_threshold {
             let recommended_tools = self.infer_tools(&task_matches);
