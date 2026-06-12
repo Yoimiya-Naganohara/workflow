@@ -63,7 +63,7 @@ fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::
     let bar = Span::styled("┃", Style::default().fg(style::OVERLAY0));
     let content = &message.content;
     let (name, args) = if let Some(pos) = content.find(" — ") {
-        (&content[..pos], &content[pos + 3..])
+        (&content[..pos], &content[pos + 5..])
     } else {
         (content.as_str(), "")
     };

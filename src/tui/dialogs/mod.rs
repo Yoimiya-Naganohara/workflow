@@ -81,10 +81,9 @@ impl ActiveDialog {
 
     /// Whether the dialog renders as a centered overlay (true) or
     /// as an inline popup above the input box (false).
-    /// Provider and Key dialogs render inline; ModelPicker and CustomWizard
-    /// use the full-screen overlay.
+    /// All dialogs use overlay mode.
     pub fn is_overlay(&self) -> bool {
-        matches!(self, Self::ModelPicker(_) | Self::CustomWizard(_) | Self::RoleWizard(_))
+        true
     }
 }
 
