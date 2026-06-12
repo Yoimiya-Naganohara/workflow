@@ -103,7 +103,7 @@ async fn run_cli() -> Result<()> {
     info!("Task: {}", task);
     info!("Role: {}", role);
 
-    match runtime.process_with_text(task, role, value, 1000, 0).await? {
+    match runtime.process_with_text(task, role, value, 1000, 0, None).await? {
         SpawnDecision::Approved(config) => {
             info!("Spawn APPROVED");
             info!("  Agent ID: {:?}", config.agent_id);

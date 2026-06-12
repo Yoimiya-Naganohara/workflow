@@ -330,6 +330,7 @@ impl DualTrackMemory {
         &self,
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
+        role_template_id: Option<u32>,
     ) -> std::result::Result<L1Assessment, SpawnRejection> {
         if self.is_empty() {
             // Presumed guilty: no experience = insufficient evidence.
@@ -342,12 +343,41 @@ impl DualTrackMemory {
             });
         }
 
-        let task_matches = self.search(task_embedding, 5);
-        let role_matches = self.search(role_embedding, 5);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
 
-        let task_score = task_matches.first().map(|(_, s)| *s).unwrap_or(0.0);
-        let role_score = role_matches.first().map(|(_, s)| *s).unwrap_or(0.0);
+        // Search task matches across both tracks (role-aware when possible).
+        let task_matches = if let Some(role_id) = role_template_id {
+            // Role-specific task search: use search_by_role for better precision.
+            let role_task = self.search_by_role(task_embedding, role_id, 5);
+            if !role_task.is_empty() {
+                role_task
+            } else {
+                self.search(task_embedding, 5)
+            }
+        } else {
+            self.search(task_embedding, 5)
+        };
 
+        // Search role matches.
+        let role_matches = if let Some(role_id) = role_template_id {
+            let role_role = self.search_by_role(role_embedding, role_id, 5);
+            if !role_role.is_empty() {
+                role_role
+            } else {
+                self.search(role_embedding, 5)
+            }
+        } else {
+            self.search(role_embedding, 5)
+        };
+
+        // Multi-score aggregation: weighted sum of Top-5, not just Top-1.
+        let task_score = Self::aggregate_top_k(&task_matches, now);
+        let role_score = Self::aggregate_top_k(&role_matches, now);
+
+        // Combined score.
         let combined = (task_score + role_score) / 2.0;
 
         if combined >= self.confidence_threshold {
@@ -355,7 +385,7 @@ impl DualTrackMemory {
             Ok(L1Assessment {
                 confidence: combined,
                 recommended_tools,
-                matched_experiences: task_matches.len(),
+                matched_experiences: task_matches.len() + role_matches.len(),
             })
         } else {
             Err(SpawnRejection::L1Rejected {
@@ -415,6 +445,34 @@ impl DualTrackMemory {
         results
     }
 
+    /// Aggregate top-k matches with positional weighting and time decay.
+    fn aggregate_top_k(matches: &[(ExperienceEntry, f32)], now: u64) -> f32 {
+        const WEIGHTS: [f32; 5] = [0.45, 0.25, 0.15, 0.10, 0.05];
+        let half_life: u64 = 86400 * 7; // 7 days in seconds
+        let n = matches.len().min(WEIGHTS.len());
+        if n == 0 {
+            return 0.0;
+        }
+
+        // Renormalize weights so they always sum to 1.0
+        let total: f32 = WEIGHTS[..n].iter().sum();
+
+        matches
+            .iter()
+            .enumerate()
+            .take(n)
+            .map(|(i, (entry, score))| {
+                let decay = if entry.timestamp > 0 {
+                    let age = now.saturating_sub(entry.timestamp);
+                    (-(age as f64) / (half_life as f64)).exp() as f32
+                } else {
+                    1.0
+                };
+                score * decay * WEIGHTS[i] / total
+            })
+            .sum()
+    }
+
     fn infer_tools(&self, matches: &[(ExperienceEntry, f32)]) -> u64 {
         let mut tool_votes = [0u32; 64];
         for (entry, score) in matches {
@@ -449,8 +507,9 @@ impl crate::l1::ExperienceRetrieval for DualTrackMemory {
         &self,
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
+        role_template_id: Option<u32>,
     ) -> std::result::Result<L1Assessment, SpawnRejection> {
-        self.check_confidence(task_embedding, role_embedding)
+        self.check_confidence(task_embedding, role_embedding, role_template_id)
     }
 
     fn add_experience(&mut self, entry: ExperienceEntry) {
@@ -575,7 +634,7 @@ mod tests {
         // Empty -> presumed guilty: rejected.
         let mut query = [0.0f32; EMBEDDING_DIM];
         query[0] = 1.0;
-        let result = mem.check_confidence(&query, &query);
+        let result = mem.check_confidence(&query, &query, None);
         assert!(result.is_err(), "empty pool should reject (presumed guilty)");
         std::fs::remove_file(&path).ok();
     }

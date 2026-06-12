@@ -259,8 +259,8 @@ impl AgentRuntime {
     // ── Pipeline delegation ──
 
     /// Run a [`SpawnRequest`] through the decision pipeline.
-    pub async fn process_request(&self, request: SpawnRequest) -> Result<SpawnDecision> {
-        self.pipeline.process_request(request).await
+    pub async fn process_request(&self, request: SpawnRequest, role_template_id: Option<u32>) -> Result<SpawnDecision> {
+        self.pipeline.process_request(request, role_template_id).await
     }
 
     /// Embed text and run through the decision pipeline.
@@ -268,13 +268,14 @@ impl AgentRuntime {
         &self,
         task_description: &str,
         role_description: &str,
-        _value_statement: &str,
+        value_statement: &str,
         requested_budget: u64,
         current_depth: u32,
+        role_template_id: Option<u32>,
     ) -> Result<SpawnDecision> {
         let task_emb = self.pipeline.embedding().embed(task_description).await?;
         let role_emb = self.pipeline.embedding().embed(role_description).await?;
-        let value_emb = self.pipeline.embedding().embed(_value_statement).await?;
+        let value_emb = self.pipeline.embedding().embed(value_statement).await?;
 
         let request = SpawnRequest {
             trace_id: rand::random(),
@@ -289,7 +290,7 @@ impl AgentRuntime {
             raw_text_ref: None,
         };
 
-        self.pipeline.process_request(request).await
+        self.pipeline.process_request(request, role_template_id).await
     }
 
     // ── Budget guard ──
@@ -536,7 +537,8 @@ impl AgentRuntime {
             raw_text_ref: None,
         };
 
-        let decision = self.pipeline.process_request(request).await?;
+        let role_tpl_id = Some(role_tpl.template_id);
+        let decision = self.pipeline.process_request(request, role_tpl_id).await?;
         match decision {
             SpawnDecision::Approved(config) => {
                 // Attach budget guard to the agent (ownership transferred).
@@ -547,7 +549,7 @@ impl AgentRuntime {
                     id: agent_id,
                     name: format!("{}-{:04x}", role, u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
                     role: role.to_string(),
-                    role_template_id: Some(role_tpl.template_id),
+                    role_template_id: role_tpl_id,
                     parent_id: None,
                     children: Vec::new(),
                     depth: 0,
@@ -617,7 +619,8 @@ impl AgentRuntime {
             raw_text_ref: None,
         };
 
-        let decision = self.pipeline.process_request(request).await?;
+        let role_tpl_id = Some(role_tpl.template_id);
+        let decision = self.pipeline.process_request(request, role_tpl_id).await?;
         match decision {
             SpawnDecision::Approved(config) => {
                 // Attach budget guard to the child agent.
@@ -918,7 +921,7 @@ mod tests {
         let role = "Senior Rust developer";
         let value = "Write secure, well-tested code";
 
-        let decision = runtime.process_with_text(task, role, value, 1000, 0).await.unwrap();
+        let decision = runtime.process_with_text(task, role, value, 1000, 0, None).await.unwrap();
 
         match decision {
             SpawnDecision::Approved(config) => {
@@ -939,7 +942,7 @@ mod tests {
         let role = "A role";
         let value = "some value";
 
-        let decision = runtime.process_with_text(task, role, value, 99999, 0).await.unwrap();
+        let decision = runtime.process_with_text(task, role, value, 99999, 0, None).await.unwrap();
 
         // Should still pass L1/L2, may pass L0 if budget allows
         // (initial_budget is 10000, requested is 99999, should be rejected)

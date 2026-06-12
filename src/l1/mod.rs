@@ -47,6 +47,7 @@ impl L1Retriever {
         &self,
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
+        _role_template_id: Option<u32>,
     ) -> Result<L1Assessment, SpawnRejection> {
         if self.experiences.is_empty() {
             // Presumed guilty: no experience = insufficient evidence.
@@ -121,6 +122,7 @@ pub trait ExperienceRetrieval: Send + Sync {
         &self,
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
+        role_template_id: Option<u32>,
     ) -> Result<L1Assessment, SpawnRejection>;
     fn add_experience(&mut self, entry: ExperienceEntry);
     fn experience_count(&self) -> usize;
@@ -167,8 +169,9 @@ impl ExperienceRetrieval for L1Retriever {
         &self,
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
+        role_template_id: Option<u32>,
     ) -> Result<L1Assessment, SpawnRejection> {
-        self.check_confidence(task_embedding, role_embedding)
+        self.check_confidence(task_embedding, role_embedding, role_template_id)
     }
 
     fn add_experience(&mut self, entry: ExperienceEntry) {
@@ -227,7 +230,7 @@ mod tests {
         let mut query = [0.0f32; EMBEDDING_DIM];
         query[0] = 1.0;
 
-        let result = retriever.check_confidence(&query, &query);
+        let result = retriever.check_confidence(&query, &query, None);
         assert!(result.is_ok());
     }
 }
