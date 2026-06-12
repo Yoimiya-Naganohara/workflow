@@ -125,6 +125,9 @@ fn render_markdown(text: &str, body_width: usize) -> Vec<Line<'static>> {
             Event::Rule => {
                 render_hr(&mut out, body_width);
             }
+            Event::Start(Tag::Table(_alignments)) => {
+                render_table(&mut events, &mut out, body_width);
+            }
             _ => {}
         }
     }
@@ -319,6 +322,106 @@ fn render_hr(out: &mut Vec<Line<'static>>, body_width: usize) {
         Span::raw("  "),
         Span::styled("─".repeat(hr_width), Style::default().fg(style::TEXT_MUTED)),
     ]));
+}
+
+/// Render a markdown table as a bordered grid.
+fn render_table<'a, I>(events: &mut std::iter::Peekable<I>, out: &mut Vec<Line<'static>>, body_width: usize)
+where
+    I: Iterator<Item = Event<'a>>,
+{
+    // Collect all rows: first is header, rest are data.
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut depth = 0;
+    loop {
+        match events.next() {
+            Some(Event::Start(Tag::Table(_) | Tag::TableHead | Tag::TableRow)) => {
+                depth += 1;
+                let mut cells = Vec::new();
+                loop {
+                    match events.next() {
+                        Some(Event::Start(Tag::TableCell)) => {
+                            let mut text = String::new();
+                            loop {
+                                match events.next() {
+                                    Some(Event::Text(t)) => text.push_str(&t),
+                                    Some(Event::End(TagEnd::TableCell | TagEnd::TableRow | TagEnd::TableHead)) => break,
+                                    Some(Event::End(TagEnd::Table)) => { depth -= 1; break; }
+                                    _ => {}
+                                }
+                            }
+                            cells.push(text);
+                        }
+                        Some(Event::End(TagEnd::TableRow | TagEnd::TableHead)) => { break; }
+                        Some(Event::End(TagEnd::Table)) => { break; }
+                        None => break,
+                        _ => {}
+                    }
+                }
+                rows.push(cells);
+            }
+            Some(Event::End(TagEnd::Table)) => break,
+            None => break,
+            _ => {}
+        }
+    }
+
+    if rows.is_empty() { return; }
+
+    let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    if col_count == 0 { return; }
+
+    let table_w = body_width.min(80);
+    let max_col = (table_w / col_count).saturating_sub(2).max(8).min(50);
+
+    // Find max width per column for alignment.
+    let col_widths: Vec<usize> = (0..col_count)
+        .map(|ci| {
+            rows.iter()
+                .filter_map(|r| r.get(ci))
+                .map(|c| c.len().min(max_col))
+                .max()
+                .unwrap_or(8)
+        })
+        .collect();
+
+    // Horizontal line.
+    let h_line = format!(
+        "  {}",
+        col_widths.iter().map(|w| "─".repeat(w + 2)).collect::<Vec<_>>().join("┬")
+    );
+    out.push(Line::from(Span::styled(h_line, Style::default().fg(style::TEXT_MUTED))));
+
+    for (ri, row) in rows.iter().enumerate() {
+        let mut line = String::from("  │");
+        for (ci, cell) in row.iter().enumerate() {
+            let w = col_widths.get(ci).copied().unwrap_or(8);
+            let display = if cell.len() > w {
+                format!("{}…", &cell[..w.saturating_sub(1)])
+            } else {
+                cell.clone()
+            };
+            line.push_str(&format!(" {} {}", display, " ".repeat(w.saturating_sub(display.len()))));
+            line.push('│');
+        }
+        out.push(Line::from(Span::styled(line, Style::default().fg(style::TEXT_PRIMARY))));
+
+        // Separator after header.
+        if ri == 0 && rows.len() > 1 {
+            let sep = format!(
+                "  {}",
+                col_widths.iter().map(|w| "─".repeat(w + 2)).collect::<Vec<_>>().join("┼")
+            );
+            out.push(Line::from(Span::styled(sep, Style::default().fg(style::TEXT_MUTED))));
+        }
+    }
+
+    // Bottom border.
+    let b_line = format!(
+        "  {}",
+        col_widths.iter().map(|w| "─".repeat(w + 2)).collect::<Vec<_>>().join("┴")
+    );
+    out.push(Line::from(Span::styled(b_line, Style::default().fg(style::TEXT_MUTED))));
+    out.push(Line::from(String::new()));
 }
 
 fn flush_code_block(out: &mut Vec<Line<'static>>, lang: &str, code_lines: &[String]) {
