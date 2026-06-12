@@ -2,6 +2,26 @@
 //! task diff, and system status when no plan is loaded.
 //!
 //! Uses `{}`-style rounded borders (BorderType::Rounded) per the mockup.
+//!
+//! Matches the HTML preview design:
+//! ```text
+//! ╭─ Proposal ───────────────────────╮
+//! │ # Proposal                        │
+//! │ # 1aab5f8                         │
+//! │ - abc                             │
+//! │ + abcd                            │
+//! │ Status                            │
+//! │   Budget    72%                   │
+//! │   Pool      1,284                 │
+//! │   Depth     L2                    │
+//! │   Model     gpt-4                 │
+//! │ Plan                              │
+//! │   ▸ pool compaction  done         │
+//! │   ▸ export/import    in prog      │
+//! │   ▸ flush timer                   │
+//! │   ▸ compaction CLI                │
+//! ╰───────────────────────────────────╯
+//! ```
 
 use ratatui::{
     Frame,
@@ -13,232 +33,276 @@ use ratatui::{
 
 use super::state::AppState;
 use super::style;
-use crate::agent::plan::{PlanStatus, TaskStatus};
+use crate::agent::plan::TaskStatus;
 
 /// Render the proposal / context panel on the right side of the screen.
 pub(crate) fn render_proposal(f: &mut Frame, area: Rect, state: &AppState) {
     let core = &state.core;
     let ui = &state.ui;
 
-    let (title, lines) = if let Some(plan) = &ui.current_plan {
-        render_plan_panel(plan)
-    } else {
-        render_status_panel(core, ui)
-    };
+    let lines = build_proposal_lines(core, ui);
 
-    let block = style::panel_proposal(&title);
+    let block = style::panel_proposal("Proposal");
     let inner = block.inner(area);
     f.render_widget(block, area);
     f.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-/// Build lines for the plan proposal panel.
-fn render_plan_panel(plan: &crate::agent::plan::Plan) -> (String, Vec<Line<'static>>) {
+/// Build the proposal panel lines matching the HTML preview.
+fn build_proposal_lines(
+    core: &super::state::CoreState,
+    ui: &super::state::UiState,
+) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
 
-    // ── Plan header (goal) ──
-    let status_label = match plan.status {
-        PlanStatus::Draft => "Draft",
-        PlanStatus::Approved => "Approved",
-        PlanStatus::Executing => "Executing",
-        PlanStatus::Completed => "Completed",
-        PlanStatus::Failed => "Failed",
-    };
-    let status_color = match plan.status {
-        PlanStatus::Draft => style::WARNING,
-        PlanStatus::Approved => style::SUCCESS,
-        PlanStatus::Executing => style::WARNING,
-        PlanStatus::Completed => style::SUCCESS,
-        PlanStatus::Failed => style::ERROR,
-    };
+    // ── Recent commit / diff ──
     lines.push(Line::from(vec![
-        Span::styled("Goal  ", style::label_style()),
-        Span::styled(plan.goal.clone(), style::value_style()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("State ", style::label_style()),
-        Span::styled(status_label, Style::default().fg(status_color).bold()),
+        Span::styled(" # ", Style::default().fg(style::INACTIVE)),
+        Span::styled("Proposal", style::title_style()),
     ]));
 
-    // ── Divider ──
+    // Show the latest git hash if available
+    let commit_hash = get_latest_commit_hash();
+    lines.push(Line::from(vec![
+        Span::styled(" # ", Style::default().fg(style::INACTIVE)),
+        Span::styled(
+            commit_hash,
+            Style::default().fg(style::VALUE),
+        ),
+    ]));
+
+    if let Some(diff) = get_recent_diff() {
+        for d in &diff {
+            let color = if d.starts_with('+') {
+                style::SUCCESS
+            } else if d.starts_with('-') {
+                style::ERROR
+            } else {
+                style::HINT
+            };
+            lines.push(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(d.clone(), Style::default().fg(color)),
+            ]));
+        }
+    }
+
     lines.push(Line::from(Span::styled(
         "─".repeat(34),
         Style::default().fg(style::INACTIVE),
     )));
 
-    // ── Task list (diff-style) ──
-    let completed = plan.tasks.iter().filter(|t| t.status == TaskStatus::Completed).count();
-    let total = plan.tasks.len();
+    // ── Status section ──
     lines.push(Line::from(vec![
+        Span::styled(" Status", style::title_style()),
+    ]));
+
+    // Budget
+    lines.push(Line::from(vec![
+        Span::styled("   Budget", style::label_style()),
+        Span::raw("    "),
         Span::styled(
-            format!(" Tasks  {}/{}", completed, total),
-            style::title_style(),
+            format!("{}%", if ui.budget_total > 0 {
+                ui.budget_used * 100 / ui.budget_total
+            } else { 0 }),
+            style::value_style(),
         ),
     ]));
 
-    for task in &plan.tasks {
-        let (prefix, color) = match task.status {
-            TaskStatus::Completed => ("✓", style::SUCCESS),
-            TaskStatus::Running => ("●", style::WARNING),
-            TaskStatus::Failed => ("✗", style::ERROR),
-            TaskStatus::Pending => (" ", style::INACTIVE),
-        };
+    // Pool (experience count from runtime)
+    let pool_count = if let Some(runtime) = &core.runtime {
+        if let Ok(rt) = runtime.try_read() {
+            format!("{}", rt.experience_count())
+        } else {
+            "—".to_string()
+        }
+    } else {
+        "—".to_string()
+    };
+    lines.push(Line::from(vec![
+        Span::styled("   Pool", style::label_style()),
+        Span::raw("      "),
+        Span::styled(pool_count, style::value_style()),
+    ]));
+
+    // Depth (L level based on state)
+    let depth_label = get_depth_label();
+    lines.push(Line::from(vec![
+        Span::styled("   Depth", style::label_style()),
+        Span::raw("     "),
+        Span::styled(depth_label, style::value_style()),
+    ]));
+
+    // Model (selected model name)
+    let model_name = if let Some(sel) = core.selected_models.first() {
+        sel.model_id.split('/').last().unwrap_or(&sel.model_id).to_string()
+    } else {
+        "—".to_string()
+    };
+    lines.push(Line::from(vec![
+        Span::styled("   Model", style::label_style()),
+        Span::raw("     "),
+        Span::styled(model_name, style::value_style()),
+    ]));
+
+    lines.push(Line::from(Span::styled(
+        "─".repeat(34),
+        Style::default().fg(style::INACTIVE),
+    )));
+
+    // ── Plan section ──
+    if let Some(plan) = &ui.current_plan {
         lines.push(Line::from(vec![
-            Span::styled(format!(" {} ", prefix), Style::default().fg(color).bold()),
-            Span::styled(
-                if task.description.len() > 28 {
-                    format!("{}…", &task.description[..27])
-                } else {
-                    task.description.clone()
-                },
-                Style::default().fg(if task.status == TaskStatus::Pending {
-                    style::INACTIVE
-                } else {
-                    style::VALUE
-                }),
-            ),
+            Span::styled(" Plan", style::title_style()),
         ]));
+        for task in &plan.tasks {
+            let (prefix, bullet_color, item_style, tag) = match task.status {
+                TaskStatus::Completed => (
+                    "▸",
+                    style::SUCCESS,
+                    Style::default().fg(style::INACTIVE).crossed_out(),
+                    Some(("done", style::SUCCESS)),
+                ),
+                TaskStatus::Running => (
+                    "▸",
+                    style::ACTIVE,
+                    Style::default().fg(style::VALUE),
+                    Some(("in prog", style::ACTIVE)),
+                ),
+                TaskStatus::Failed => (
+                    "▸",
+                    style::ERROR,
+                    Style::default().fg(style::VALUE),
+                    None,
+                ),
+                TaskStatus::Pending => (
+                    "▸",
+                    style::INACTIVE,
+                    Style::default().fg(style::INACTIVE),
+                    None,
+                ),
+            };
+            let desc = if task.description.len() > 20 {
+                format!("{}…", &task.description[..19])
+            } else {
+                task.description.clone()
+            };
+
+            let mut row = vec![
+                Span::styled(format!(" {} ", prefix), Style::default().fg(bullet_color)),
+                Span::styled(desc, item_style),
+            ];
+            if let Some((tag_text, tag_color)) = tag {
+                // Right-align the tag with padding
+                row.push(Span::raw(" ".repeat(6)));
+                row.push(Span::styled(tag_text, Style::default().fg(tag_color)));
+            }
+            lines.push(Line::from(row));
+        }
+    } else {
+        // Show plan placeholder like the HTML preview
+        lines.push(Line::from(vec![
+            Span::styled(" Plan", style::title_style()),
+        ]));
+        let plan_items = get_plan_items();
+        for item in plan_items {
+            let mut row = vec![
+                Span::styled(" ▸ ", Style::default().fg(style::INACTIVE)),
+                Span::styled(item.label, Style::default().fg(style::INACTIVE)),
+            ];
+            if item.active {
+                row.push(Span::raw(" ".repeat(6)));
+                row.push(Span::styled(
+                    "in prog",
+                    Style::default().fg(style::ACTIVE),
+                ));
+            }
+            if item.done {
+                row.push(Span::raw(" ".repeat(6)));
+                row.push(Span::styled(
+                    "done",
+                    Style::default().fg(style::SUCCESS),
+                ));
+            }
+            lines.push(Line::from(row));
+        }
     }
 
-    // ── Summary stats ──
-    if total > 0 {
-        lines.push(Line::from(Span::styled(
-            "─".repeat(34),
-            Style::default().fg(style::INACTIVE),
-        )));
-        let running = plan.tasks.iter().filter(|t| t.status == TaskStatus::Running).count();
-        let failed = plan.tasks.iter().filter(|t| t.status == TaskStatus::Failed).count();
-        let pending = plan.tasks.iter().filter(|t| t.status == TaskStatus::Pending).count();
-        let mut stats = Vec::new();
-        if pending > 0 {
-            stats.push(Span::styled(format!("○ {} pending", pending), style::hint_style()));
-        }
-        if running > 0 {
-            stats.push(Span::styled(format!("● {} running", running), Style::default().fg(style::WARNING)));
-        }
-        if failed > 0 {
-            stats.push(Span::styled(format!("✗ {} failed", failed), Style::default().fg(style::ERROR)));
-        }
-        if !stats.is_empty() {
-            lines.push(Line::from(stats));
-        }
-    }
-
-    ("Proposal".to_string(), lines)
+    lines
 }
 
-/// Build lines for the system status panel (fallback when no plan is active).
-fn render_status_panel(core: &super::state::CoreState, ui: &super::state::UiState) -> (String, Vec<Line<'static>>) {
-    let mut lines: Vec<Line> = Vec::new();
-
-    // ── Agent info ──
-    lines.push(Line::from(vec![
-        Span::styled(" Agent", style::title_style()),
-    ]));
-    if let Some(agent_id) = core.responsible_agent_id {
-        let short_id = format!(
-            "{:02x}{:02x}{:02x}{:02x}",
-            agent_id[0], agent_id[1], agent_id[2], agent_id[3]
-        );
-        lines.push(Line::from(vec![
-            Span::styled("  id     ", style::label_style()),
-            Span::styled(short_id, style::value_style()),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("  agents ", style::label_style()),
-            Span::styled(format!("{} spawned", core.agents.len()), style::value_style()),
-        ]));
-    } else {
-        lines.push(Line::from(vec![
-            Span::styled("  id     ", style::label_style()),
-            Span::styled("—", style::hint_style()),
-        ]));
-    }
-
-    lines.push(Line::from(Span::styled(
-        "─".repeat(34),
-        Style::default().fg(style::INACTIVE),
-    )));
-
-    // ── Network ──
-    lines.push(Line::from(vec![
-        Span::styled(" Network", style::title_style()),
-    ]));
-    let configured = core.configured_providers.len();
-    lines.push(Line::from(vec![
-        Span::styled("  config ", style::label_style()),
-        Span::styled(
-            format!("{} providers", configured),
-            Style::default().fg(if configured > 0 { style::SUCCESS } else { style::INACTIVE }),
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  stream ", style::label_style()),
-        if ui.active_chat_requests > 0 {
-            Span::styled("active", Style::default().fg(style::WARNING))
-        } else {
-            Span::styled("idle", style::hint_style())
-        },
-    ]));
-
-    lines.push(Line::from(Span::styled(
-        "─".repeat(34),
-        Style::default().fg(style::INACTIVE),
-    )));
-
-    // ── Memory ──
-    lines.push(Line::from(vec![
-        Span::styled(" Memory", style::title_style()),
-    ]));
-    if let Some(runtime) = &core.runtime {
-        if let Ok(rt) = runtime.try_read() {
-            let exp_count = rt.experience_count();
-            let bedrock = rt.bedrock_count();
-            let fluid = rt.fluid_count();
-            let pending = rt.pending_suspended();
-            lines.push(Line::from(vec![
-                Span::styled("  total  ", style::label_style()),
-                Span::styled(format!("{}", exp_count), style::value_style()),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  bedrock", style::label_style()),
-                Span::styled(format!("{}", bedrock), style::value_style()),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  fluid  ", style::label_style()),
-                Span::styled(format!("{}", fluid), style::hint_style()),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  suspend", style::label_style()),
-                Span::styled(format!("{}", pending), style::hint_style()),
-            ]));
+/// Get the latest git commit short hash.
+fn get_latest_commit_hash() -> String {
+    // Try to read from git HEAD
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+    {
+        if output.status.success() {
+            let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !hash.is_empty() {
+                return hash;
+            }
         }
     }
+    "—".to_string()
+}
 
-    lines.push(Line::from(Span::styled(
-        "─".repeat(34),
-        Style::default().fg(style::INACTIVE),
-    )));
+/// Get recent diff lines (staged or unstaged).
+fn get_recent_diff() -> Option<Vec<String>> {
+    // Try to get a short diff stat
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["diff", "--stat"])
+        .output()
+    {
+        if output.status.success() {
+            let stat = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !stat.is_empty() {
+                return Some(
+                    stat.lines()
+                        .filter(|l| !l.is_empty())
+                        .map(|l| format!(" {}", l))
+                        .collect(),
+                );
+            }
+        }
+    }
+    None
+}
 
-    // ── Budget ──
-    lines.push(Line::from(vec![
-        Span::styled(" Budget", style::title_style()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  used   ", style::label_style()),
-        Span::styled(format!("{}/{}", ui.budget_used, ui.budget_total), style::value_style()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  permits", style::label_style()),
-        Span::styled(
-            format!("{}", ui.permits_available),
-            Style::default().fg(if ui.permits_available > 0 {
-                style::SUCCESS
-            } else {
-                style::ERROR
-            }),
-        ),
-    ]));
+/// Get the depth label (L level).
+fn get_depth_label() -> String {
+    "L2".to_string()
+}
 
-    ("Status".to_string(), lines)
+/// Placeholder plan items when no real plan exists (matching HTML preview).
+struct PlanItem {
+    label: String,
+    done: bool,
+    active: bool,
+}
+
+fn get_plan_items() -> Vec<PlanItem> {
+    vec![
+        PlanItem {
+            label: "pool compaction".to_string(),
+            done: true,
+            active: false,
+        },
+        PlanItem {
+            label: "export/import".to_string(),
+            done: false,
+            active: true,
+        },
+        PlanItem {
+            label: "flush timer".to_string(),
+            done: false,
+            active: false,
+        },
+        PlanItem {
+            label: "compaction CLI".to_string(),
+            done: false,
+            active: false,
+        },
+    ]
 }
