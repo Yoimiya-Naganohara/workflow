@@ -228,12 +228,17 @@ impl AgentRuntime {
             },
         ]);
 
-        Self {
+        let rt = Self {
             pipeline,
             provider: None,
             model_id: String::new(),
             role_template_store: Arc::new(store),
-        }
+        };
+
+        // Compute role embeddings in background (non-blocking).
+        rt.compute_role_embeddings_async();
+
+        rt
     }
 
     /// Default path for the role template store.
@@ -382,9 +387,47 @@ impl AgentRuntime {
     }
 
     /// Save (create or update) a role template.
+    /// If the template has no embedding, computes one in background.
     pub fn save_role_template(&self, template: RoleTemplate) {
+        let needs_embedding = template.embedding.is_none();
         self.role_template_store.upsert(template);
         let _ = self.role_template_store.persist();
+        if needs_embedding {
+            self.compute_role_embeddings_async();
+        }
+    }
+
+    /// Compute embeddings for all role templates that lack one.
+    /// Runs asynchronously — the runtime continues to function while
+    /// embeddings are computed in the background.
+    pub fn compute_role_embeddings_async(&self) {
+        let store = self.role_template_store.clone();
+        let embedding = self.pipeline.embedding().clone();
+        tokio::spawn(async move {
+            let templates = store.all();
+            let mut updated = false;
+            for t in &templates {
+                if t.embedding.is_some() {
+                    continue;
+                }
+                match embedding.embed(&t.system_prompt).await {
+                    Ok(emb) => {
+                        let mut new_t = t.clone();
+                        new_t.embedding = Some(emb);
+                        store.upsert(new_t);
+                        tracing::info!("Computed embedding for role '{}'", t.role);
+                        updated = true;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to compute embedding for role '{}': {}", t.role, e);
+                    }
+                }
+            }
+            if updated {
+                let _ = store.persist();
+                tracing::info!("Role embeddings persisted");
+            }
+        });
     }
 
     // ── Chat ──

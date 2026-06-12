@@ -339,6 +339,7 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                 "  /role create                  - Create a new role template (wizard)",
                 "  /role edit <name>             - Edit an existing role template (wizard)",
                 "  /role delete <name>           - Delete a role template",
+                "  /role embed                    - Compute embeddings for all roles missing them",
             ]
             .join("\n");
             core.messages.push(ChatMessage::system(help));
@@ -449,6 +450,26 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                             )));
                         }
                     }
+                } else {
+                    core.messages.push(ChatMessage::system("Runtime locked"));
+                }
+            } else {
+                core.messages.push(ChatMessage::system("Runtime not available"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/role embed" => {
+            if let Some(runtime) = &core.runtime {
+                if let Ok(rt) = runtime.try_read() {
+                    let n = rt.all_role_templates().len();
+                    core.messages.push(ChatMessage::system(format!(
+                        "Computing embeddings for {} role template(s)...",
+                        n
+                    )));
+                    rt.compute_role_embeddings_async();
                 } else {
                     core.messages.push(ChatMessage::system("Runtime locked"));
                 }
