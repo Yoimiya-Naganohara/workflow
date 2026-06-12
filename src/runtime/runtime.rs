@@ -82,7 +82,8 @@ impl AgentRuntime {
         // Open dual-track memory with mmap persistence (creates file if needed)
         let dual_track = Box::new(
             DualTrackMemory::open(&bedrock_path, 512, config.l1_confidence_threshold)
-                .expect("Failed to open experience pool"),
+                .expect("Failed to open experience pool")
+                .with_min_experiences(config.min_experiences),
         );
 
         let pipeline = DecisionPipelineBuilder::new()

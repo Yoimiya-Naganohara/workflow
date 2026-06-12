@@ -157,6 +157,9 @@ pub struct DualTrackMemory {
     /// Auto-consolidation threshold: when fluid exceeds this count,
     /// the next add triggers a consolidation pass.
     auto_consolidate_at: usize,
+    /// Minimum experiences needed for a role before using similarity-based confidence.
+    /// Below this count, spawns are unconditional with full tool access.
+    min_experiences: usize,
 }
 
 impl DualTrackMemory {
@@ -181,6 +184,7 @@ impl DualTrackMemory {
             fluid_credibility: 0.6,
             confidence_threshold,
             auto_consolidate_at: fluid_max_size,
+            min_experiences: 5,
         })
     }
 
@@ -239,6 +243,11 @@ impl DualTrackMemory {
 
     pub fn with_auto_consolidate_at(mut self, n: usize) -> Self {
         self.auto_consolidate_at = n;
+        self
+    }
+
+    pub fn with_min_experiences(mut self, n: usize) -> Self {
+        self.min_experiences = n;
         self
     }
 
@@ -376,7 +385,7 @@ impl DualTrackMemory {
 
         // Few experiences → unconditional pass with all tools.
         // Enough experiences → use real similarity data.
-        if role_count < 5 {
+        if role_count < self.min_experiences {
             return Ok(L1Assessment {
                 confidence: 0.6,
                 recommended_tools: !0,

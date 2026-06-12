@@ -22,6 +22,9 @@ pub struct AgentRuntimeConfig {
     /// Path to the bedrock experience pool mmap file.
     /// Defaults to `~/.workflow/experience_a.bin`.
     pub bedrock_path: Option<std::path::PathBuf>,
+    /// Minimum experiences per role before L1 uses similarity.
+    /// Below this count, spawns pass with full tool access.
+    pub min_experiences: usize,
 }
 
 impl Default for AgentRuntimeConfig {
@@ -35,6 +38,7 @@ impl Default for AgentRuntimeConfig {
             semantic_conflict_threshold: crate::core::types::DEFAULT_SEMANTIC_THRESHOLD,
             suspend_timeout_ms: crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS,
             bedrock_path: None,
+            min_experiences: 5,
         }
     }
 }
