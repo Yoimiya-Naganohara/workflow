@@ -303,8 +303,9 @@ impl AgentRuntime {
         &self,
         request: SpawnRequest,
         role_template_id: Option<u32>,
+        role_min_experiences: Option<usize>,
     ) -> Result<SpawnDecision> {
-        self.pipeline.process_request(request, role_template_id).await
+        self.pipeline.process_request(request, role_template_id, role_min_experiences).await
     }
 
     /// Embed text and run through the decision pipeline.
@@ -316,6 +317,7 @@ impl AgentRuntime {
         requested_budget: u64,
         current_depth: u32,
         role_template_id: Option<u32>,
+        role_min_experiences: Option<usize>,
     ) -> Result<SpawnDecision> {
         let task_emb = self.pipeline.embedding().embed(task_description).await?;
         let role_emb = self.pipeline.embedding().embed(role_description).await?;
@@ -334,7 +336,7 @@ impl AgentRuntime {
             raw_text_ref: None,
         };
 
-        self.pipeline.process_request(request, role_template_id).await
+        self.pipeline.process_request(request, role_template_id, role_min_experiences).await
     }
 
     // ── Budget guard ──
@@ -584,7 +586,7 @@ impl AgentRuntime {
         };
 
         let role_tpl_id = Some(role_tpl.template_id);
-        let decision = self.pipeline.process_request(request, role_tpl_id).await?;
+        let decision = self.pipeline.process_request(request, role_tpl_id, Some(role_tpl.min_experiences)).await?;
         match decision {
             SpawnDecision::Approved(config) => {
                 // Attach budget guard to the agent (ownership transferred).
@@ -667,7 +669,7 @@ impl AgentRuntime {
         };
 
         let role_tpl_id = Some(role_tpl.template_id);
-        let decision = self.pipeline.process_request(request, role_tpl_id).await?;
+        let decision = self.pipeline.process_request(request, role_tpl_id, Some(role_tpl.min_experiences)).await?;
         match decision {
             SpawnDecision::Approved(config) => {
                 // Attach budget guard to the child agent.
@@ -968,7 +970,7 @@ mod tests {
         let role = "Senior Rust developer";
         let value = "Write secure, well-tested code";
 
-        let decision = runtime.process_with_text(task, role, value, 1000, 0, None).await.unwrap();
+        let decision = runtime.process_with_text(task, role, value, 1000, 0, None, None).await.unwrap();
 
         match decision {
             SpawnDecision::Approved(config) => {
@@ -989,7 +991,7 @@ mod tests {
         let role = "A role";
         let value = "some value";
 
-        let decision = runtime.process_with_text(task, role, value, 99999, 0, None).await.unwrap();
+        let decision = runtime.process_with_text(task, role, value, 99999, 0, None, None).await.unwrap();
 
         // Should still pass L1/L2, may pass L0 if budget allows
         // (initial_budget is 10000, requested is 99999, should be rejected)
@@ -1027,7 +1029,7 @@ mod tests {
         let value = "Write quality code";
 
         for i in 0..5 {
-            let decision = rt.process_with_text(task, role, value, 200, 0, None).await.unwrap();
+            let decision = rt.process_with_text(task, role, value, 200, 0, None, None).await.unwrap();
 
             match &decision {
                 SpawnDecision::Approved(config) => {
