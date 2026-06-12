@@ -225,7 +225,7 @@ Build a holographic self-evolving multi-agent system in Rust with layered decisi
 - Implement pool compaction (remove stale/low-weight entries from bedrock)
 - Add memmap2 rescue/repair on file corruption
 - **P1: 角色 embedding 自动计算**（启动时 + `/role embed`）
-- **P2: Prompt 优化引擎**（LLM 分析经验 → 改进提示词）
+- **P2: Prompt 优化引擎**（LLM 分析经验 → 改进提示词 → TUI 触发）
 - **P3: 副作用与反馈**（工具使用记录 + L2 反馈）
 
 ### Completed
