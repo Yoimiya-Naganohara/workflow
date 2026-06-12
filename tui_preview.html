@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workflow TUI — opencode style</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#212121;--bg2:#2c2c2c;--bg3:#181818;
+    --text:#cdd6f4;--text2:#a6adc8;--text3:#7f849c;
+    --border:#4b4c5c;--border-d:#313244;
+    --blue:#89b4fa;--mauve:#cba6f7;--peach:#fab387;
+    --red:#f38ba8;--green:#a6e3a1;--yellow:#f9e2af;
+    --pink:#f5c2e7;--sky:#89dceb;--overlay0:#6c7086;--overlay1:#7f849c;
+  }
+  body{background:#0d0e14;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:'JetBrains Mono','Fira Code',monospace;padding:16px}
+  .terminal{background:#161822;border-radius:14px;padding:10px;box-shadow:0 0 0 1px rgba(255,255,255,.06),0 20px 60px rgba(0,0,0,.7);max-width:980px;width:100%}
+  .terminal-inner{background:var(--bg3);border-radius:8px;overflow:hidden}
+  .tui{display:grid;grid-template-columns:1fr;grid-template-rows:1fr 28px;min-height:560px}
+  .chat-panel{border:1px solid var(--border-d);border-bottom:none;display:flex;flex-direction:column;min-height:0}
+  .chat-scroll{padding:8px 10px 0;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:0;scroll-behavior:smooth;min-height:0}
+  .msg{padding:3px 0;line-height:1.55;animation:fadeIn .15s ease-out}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  .msg-user{border-left:3px solid var(--green);padding-left:8px;margin-bottom:1px}
+  .msg-user .text{color:var(--text);font-size:12.5px}
+  .msg-agent{padding-left:8px;margin-bottom:1px}
+  .msg-agent .text{color:var(--text);font-size:12.5px}
+  .msg-thinking{padding-left:8px;margin-bottom:1px}
+  .msg-thinking .text{color:var(--text3);font-size:12px;font-style:italic}
+  .msg-thinking .dots{display:inline-block;min-width:24px}
+  .msg-tool{border-left:3px solid var(--overlay0);padding-left:8px;margin:1px 0 3px}
+  .msg-tool .text{color:var(--mauve);font-size:11.5px;padding:3px 6px;background:rgba(203,166,247,.08);border-radius:4px;display:inline-block;margin-top:2px;word-break:break-all}
+  .msg-model-tag{font-size:10.5px;color:var(--text3);padding:2px 0 4px 10px}
+  .msg-model-tag .model-name{color:var(--green)}
+  .msg-model-tag .sep{color:var(--overlay0)}
+  .spacer{flex:1;min-height:6px}
+  .popup-area{padding:0 10px;flex-shrink:0;display:none}
+  .popup-area.visible{display:block}
+  .popup{border:1px solid var(--border-d);border-radius:6px;background:#14151e;overflow:hidden;margin-bottom:4px}
+  .popup .header{display:flex;align-items:center;padding:5px 10px;border-bottom:1px solid #1e2030;color:var(--text3);font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase}
+  .popup .row{display:flex;align-items:center;padding:3px 10px;font-size:12px;color:var(--text2);cursor:pointer;transition:background .1s}
+  .popup .row:hover{background:rgba(137,180,250,.06)}
+  .popup .row .cmd{color:var(--text);font-weight:500;min-width:88px;flex-shrink:0}
+  .popup .row .desc{color:var(--text3);margin-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .popup .row.highlight{background:rgba(137,180,250,.15)}
+  .popup .row.highlight .cmd{color:var(--blue)}
+  .popup.provider .search-box{border:none;border-bottom:1px solid #1e2030;display:flex;align-items:center;background:var(--bg3)}
+  .popup.provider .search-box:focus-within{background:var(--bg3)}
+  .popup.provider .search-box .search-icon{color:var(--overlay0);padding:0 8px;font-size:11px;user-select:none}
+  .popup.provider .search-box input{flex:1;background:transparent;border:none;outline:none;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;padding:5px 6px 5px 0;caret-color:var(--blue)}
+  .popup.provider .search-box input::placeholder{color:var(--overlay0)}
+  .popup.provider .scroll{max-height:240px;overflow-y:auto}
+  .popup .prow{display:flex;align-items:center;padding:3px 10px;font-size:12px;color:var(--text2);cursor:pointer;transition:background .1s;gap:6px}
+  .popup .prow:hover{background:rgba(137,180,250,.06)}
+  .popup .prow.highlight{background:rgba(137,180,250,.15)}
+  .popup .prow .picon{flex-shrink:0;font-size:12px;width:16px;text-align:center}
+  .popup .prow .picon.on{color:var(--green)}
+  .popup .prow .picon.off{color:var(--text3)}
+  .popup .prow .pname{flex:1;color:var(--text);font-weight:500}
+  .popup .prow .pcount{color:var(--text3);font-size:10.5px}
+  .popup .prow .pstatus{font-size:9px;padding:1px 5px;border-radius:4px}
+  .popup .prow .pstatus.conf{background:rgba(166,227,161,.1);color:var(--green)}
+  .popup .prow .pstatus.key{background:rgba(127,132,156,.1);color:var(--text2)}
+  .popup .prow .pstatus.na{background:rgba(137,180,250,.1);color:var(--blue)}
+  .popup .psep{height:1px;background:#1e2030;margin:2px 10px}
+  .popup .padd{display:flex;align-items:center;gap:4px;padding:3px 10px;cursor:pointer;font-size:11.5px;color:var(--blue)}
+  .popup .padd:hover{background:rgba(137,180,250,.06)}
+  .popup .padd.highlight{background:rgba(137,180,250,.15)}
+  .popup .padd .plus{font-size:13px}
+  .popup .no-match{padding:12px;text-align:center;color:var(--overlay0);font-size:11px}
+  .popup .key-provider{color:var(--text2);font-size:11px;padding:6px 10px;border-bottom:1px solid #1e2030}
+  .popup .key-provider strong{color:var(--text)}
+  .popup .key-field{border:none;border-bottom:1px solid #1e2030;display:flex;align-items:center;background:var(--bg3)}
+  .popup .key-field:focus-within{background:var(--bg3)}
+  .popup .key-field .klabel{color:var(--overlay0);padding:0 8px;font-size:10px;user-select:none}
+  .popup .key-field input{flex:1;background:transparent;border:none;outline:none;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;padding:5px 6px 5px 0;caret-color:var(--blue)}
+  .popup .key-field input::placeholder{color:var(--overlay0)}
+  .popup .key-hint{padding:5px 10px;color:var(--overlay0);font-size:9.5px;text-align:center}
+  .popup .key-hint kbd{color:var(--text3);border:1px solid var(--border-d);padding:0 4px;border-radius:3px;font-size:8.5px;font-family:'JetBrains Mono',monospace}
+  .input-area{padding:0 10px 8px;flex-shrink:0}
+  .input-box{border:1px solid var(--border-d);display:flex;align-items:center;background:var(--bg3)}
+  .input-box:focus-within{border-color:var(--blue)}
+  .input-box .input-label{display:inline-flex;align-items:center;padding:0 8px;font-size:11px;font-weight:700;color:var(--text3);border-right:1px solid var(--border-d);height:26px;letter-spacing:.3px;flex-shrink:0;user-select:none}
+  .input-box:focus-within .input-label{color:var(--blue);border-right-color:var(--blue)}
+  .input-box .input-text{padding:4px 8px;font-size:12.5px;color:var(--text);font-family:'JetBrains Mono',monospace;flex:1;min-height:26px;outline:none;border:none;background:transparent;caret-color:var(--blue)}
+  .input-box .input-text::placeholder{color:var(--overlay0);font-size:12px}
+  .status-bar{grid-column:1/-1;border:1px solid var(--border-d);border-top:none;display:flex;align-items:center;padding:0;font-size:10.5px;background:var(--bg);color:var(--text3)}
+  .status-bar .help{background:var(--text2);color:var(--bg3);padding:0 8px;font-weight:bold;height:100%;display:flex;align-items:center}
+  .status-bar .tokens{background:var(--text);color:var(--bg2);padding:0 8px;height:100%;display:flex;align-items:center;white-space:nowrap}
+  .status-bar .tokens.warn{background:var(--yellow)}
+  .status-bar .spacer{background:var(--bg2);flex:1;height:100%}
+  .status-bar .diagnostics{background:var(--bg3);padding:0 8px;height:100%;display:flex;align-items:center;gap:6px;color:var(--text3)}
+  .status-bar .diagnostics .err{color:var(--red)}.status-bar .diagnostics .warn{color:var(--yellow)}
+  .status-bar .model{background:var(--mauve);color:var(--bg3);padding:0 8px;font-weight:bold;height:100%;display:flex;align-items:center}
+  .chat-scroll::-webkit-scrollbar{width:5px}.chat-scroll::-webkit-scrollbar-thumb{background:var(--border-d);border-radius:3px}
+</style>
+</head>
+<body>
+<div id="app" class="terminal">
+  <div class="terminal-inner">
+    <div class="tui">
+      <div class="chat-panel">
+        <div id="chatScroll" class="chat-scroll">
+          <div id="messages"></div>
+          <div class="spacer"></div>
+        </div>
+        <div id="popupArea" class="popup-area"><div id="popup" class="popup"></div></div>
+        <div class="input-area">
+          <div class="input-box">
+            <span class="input-label">Input</span>
+            <input id="chatInput" class="input-text" type="text" placeholder="type / for commands" spellcheck="false" autofocus>
+          </div>
+        </div>
+      </div>
+      <div class="status-bar">
+        <div class="help">ctrl+? help</div>
+        <div class="tokens" id="statTokens">Context: 5.5K, Cost: $0.12</div>
+        <div class="spacer"></div>
+        <div class="diagnostics"><span class="err" id="diagErr">✖ 2</span><span class="warn" id="diagWarn">⚠ 3</span></div>
+        <div class="model" id="statModel">Claude Sonnet 4</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const COMMANDS=[{cmd:'/connect',desc:'Configure a provider'},{cmd:'/models',desc:'Open model picker'},{cmd:'/apply',desc:'Approve and execute plan'},{cmd:'/clear',desc:'Clear conversation'},{cmd:'/pool',desc:'Pool management commands'},{cmd:'/sh',desc:'Run a shell command'},{cmd:'/help',desc:'Show help'}];
+const SUBCOMMANDS={'/pool':[{cmd:'stats',desc:'Show pool statistics'},{cmd:'flush',desc:'Flush fluid data to bedrock'},{cmd:'clear',desc:'Clear pool'},{cmd:'export',desc:'Export pool to JSON'},{cmd:'import',desc:'Import pool from JSON'}]};
+const PROVIDERS=[{id:'openai',name:'OpenAI',models:45,auth:true},{id:'anthropic',name:'Anthropic',models:12,auth:true},{id:'google',name:'Google (Gemini)',models:28,auth:true},{id:'groq',name:'Groq',models:18,auth:true},{id:'mistral',name:'Mistral',models:14,auth:true},{id:'ollama',name:'Ollama',models:60,auth:false},{id:'deepseek',name:'DeepSeek',models:6,auth:true},{id:'xai',name:'xAI (Grok)',models:4,auth:true},{id:'openrouter',name:'OpenRouter',models:200,auth:true}];
+const AGENT_RESPONSES={default:["I understand the request. Let me analyze the current state and design a solution.","Looking at the codebase, the experience pool structure needs adjustments. The mmap-backed bedrock uses a fixed 1024-byte entry format with weight, last_access, and embedding fields.","I'll also add a `rebuild` step that copies non-tombstone entries into a fresh file."],'/pool':["Here are the current pool statistics:\n\n  • Bedrock (A-track):  1,284 entries\n  • Fluid (B-track):    37 entries\n  • Pending suspend:    12\n  • Budget usage:       72%\n  File: `~/.workflow/pool.bin` (2.1 MB). No corruption.","Pool is healthy. Fluid drain threshold is 50 — currently at 37."],'/help':["Commands:\n  /connect  — Configure a provider\n  /models   — Open model picker\n  /clear    — Clear conversation\n  /pool     — Pool management\n  /sh       — Shell command\n  /help     — This help\n\nKeybindings:\n  /         — Open command picker\n  Esc       — Clear input\n  Tab       — Complete command"],'/sh':["Running shell command...\n\n$ ls -la ~/.workflow/\ntotal 2148\ndrwxr-xr-x  2 user user    4096 Jun 12 10:23 .\n-rw-r--r--  1 user user 2101248 Jun 12 10:23 pool.bin\n-rw-r--r--  1 user user    2048 Jun 12 10:23 state.json\n\nExit code 0."],'/apply':["Plan approved. Compaction phase 1:\n  • Scanned  1,284 entries\n  • Found    23 stale\n  • Marked   23 tombstones\nPhase 2 ready. Run `/pool flush`."],'/clear':["Conversation cleared. Pool data preserved."]};
+const TOOL_CALLS={default:[{tool:'View',args:'src/experience/pool.rs'},{tool:'Bash',args:'du -sh ~/.workflow/'}],'/pool':[{tool:'Bash',args:'ls -la ~/.workflow/pool.bin'}]};
+const state={messages:[],thinking:false,streaming:false,input:'',messageCount:1,stats:{tokens:5.5,cost:0.12,err:2,warn:3,model:'Claude Sonnet 4'},configuredProviders:['openai','anthropic'],pickerMode:null,pickerSearch:'',pickerIdx:0,pendingKeyProvider:null};
+const $=id=>document.getElementById(id);const chatScroll=$('chatScroll'),messagesEl=$('messages'),chatInput=$('chatInput'),popupArea=$('popupArea'),popup=$('popup');
+function escHtml(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function addMsg(type,parts){const el=document.createElement('div');el.className=`msg msg-${type}`;let html='';for(const p of parts){if(typeof p==='string')html+=`<span class="text">${escHtml(p)}</span>`;else if(p.text)html+=`<div class="text">${escHtml(p.text)}</div>`}el.innerHTML=html;messagesEl.appendChild(el);state.messageCount++;scrollDown()}
+function addThinking(){const el=document.createElement('div');el.className='msg msg-thinking';el.id='thinkingMsg';el.innerHTML=`<span class="text"><span class="dots" id="thinkingDots">●</span> thinking...</span>`;messagesEl.appendChild(el);state.thinking=true;scrollDown();animateDots()}
+let dotsInterval=null,dotPhase=0;
+function animateDots(){dotPhase=0;if(dotsInterval)clearInterval(dotsInterval);dotsInterval=setInterval(()=>{const d=document.getElementById('thinkingDots');if(!d){clearInterval(dotsInterval);dotsInterval=null;return}dotPhase=(dotPhase+1)%8;d.textContent=['●','●●','●●●','●●','●','●●','●●●','●●'][dotPhase]},300)}
+function removeThinking(){const el=document.getElementById('thinkingMsg');if(el)el.remove();state.thinking=false;if(dotsInterval){clearInterval(dotsInterval);dotsInterval=null}}
+function addToolCall(tool,args){const el=document.createElement('div');el.className='msg msg-tool';el.innerHTML=`<div class="text">${escHtml(tool)}: ${escHtml(args)}</div>`;messagesEl.appendChild(el);scrollDown()}
+function addModelTag(){const el=document.createElement('div');el.className='msg-model-tag';el.innerHTML=`<span class="model-name">${escHtml(state.stats.model)}</span> <span class="sep">·</span> streaming`;messagesEl.appendChild(el);scrollDown()}
+function scrollDown(){requestAnimationFrame(()=>{chatScroll.scrollTop=chatScroll.scrollHeight})}
+function updateStatus(){$('statTokens').textContent=`Context: ${state.stats.tokens.toFixed(1)}K, Cost: $${state.stats.cost.toFixed(2)}`;$('diagErr').textContent=`✖ ${state.stats.err}`;$('diagWarn').textContent=`⚠ ${state.stats.warn}`;$('statModel').textContent=state.stats.model}
+function randomStatTick(){state.stats.tokens=Math.max(0.5,state.stats.tokens+(Math.random()-.5)*.3);state.stats.cost=Math.max(0,state.stats.cost+(Math.random()-.4)*.002);state.stats.err=Math.max(0,state.stats.err+Math.round((Math.random()-.6)));state.stats.warn=Math.max(0,state.stats.warn+Math.round((Math.random()-.5)));updateStatus()}
+function pickRandom(a){return a[Math.floor(Math.random()*a.length)]}
+function delayed(ms,fn){return new Promise(r=>setTimeout(()=>{fn();r()},ms))}
+async function simulateAgentResponse(userInput){if(state.streaming)return;state.streaming=true;chatInput.disabled=true;const trimmed=userInput.trim();const cmdRoot=trimmed.startsWith('/')?'/'+trimmed.split(' ')[0].slice(1):null;const responses=cmdRoot&&AGENT_RESPONSES[cmdRoot]?AGENT_RESPONSES[cmdRoot]:AGENT_RESPONSES.default;const tools=cmdRoot&&TOOL_CALLS[cmdRoot]?TOOL_CALLS[cmdRoot]:TOOL_CALLS.default;const texts=typeof responses==='string'?[responses]:responses;const numTurns=Math.min(texts.length,3);for(let i=0;i<numTurns;i++){addThinking();if(i===0&&Math.random()>.3){const tc=pickRandom(tools);await delayed(600+Math.random()*400,()=>{removeThinking();addToolCall(tc.tool,tc.args)});addThinking()}await delayed(800+Math.random()*600,()=>{removeThinking()});await delayed(200,()=>{addMsg('agent',[texts[i]]);randomStatTick()})}addModelTag();scrollDown();chatInput.disabled=false;state.streaming=false;chatInput.focus()}
+function handleSubmit(value){const trimmed=value.trim();if(!trimmed)return;if(trimmed==='/clear'){messagesEl.innerHTML='';state.messageCount=0;chatInput.value='';state.input='';addMsg('agent',['Conversation cleared. Pool data preserved.']);chatInput.focus();return}if(trimmed==='/connect'){chatInput.value='';state.input='';openPicker('provider');return}addMsg('user',[trimmed]);chatInput.value='';state.input='';randomStatTick();simulateAgentResponse(trimmed)}
+function filterProviders(q){if(!q)return PROVIDERS.map((p,i)=>({provider:p,idx:i}));const lq=q.toLowerCase();return PROVIDERS.map((p,i)=>({provider:p,idx:i})).filter(item=>item.provider.name.toLowerCase().includes(lq)||item.provider.id.toLowerCase().includes(lq))}
+function commitProvider(pid){const p=PROVIDERS.find(x=>x.id===pid);if(!p)return;if(!p.auth){if(!state.configuredProviders.includes(pid))state.configuredProviders.push(pid);state.stats.model=p.name;updateStatus();closePicker();addMsg('agent',[`${p.name} configured (no API key required).`]);return}if(state.configuredProviders.includes(pid)){state.stats.model=p.name;updateStatus();closePicker();addMsg('agent',[`Switched to ${p.name}.`]);return}state.pendingKeyProvider=pid;state.pickerMode='key';state.pickerSearch='';state.pickerIdx=0;chatInput.value='';state.input='';renderPopup()}
+function confirmKey(val){const pid=state.pendingKeyProvider;if(!pid||!val.trim())return;if(!state.configuredProviders.includes(pid))state.configuredProviders.push(pid);const p=PROVIDERS.find(x=>x.id===pid);state.stats.model=p?p.name:pid;updateStatus();closePicker();if(p)addMsg('agent',[`${p.name} configured with API key.`])}
+function openPicker(mode){state.pickerMode=mode||'provider';state.pickerSearch='';state.pickerIdx=0;state.pendingKeyProvider=null;chatInput.value='';state.input='';popupArea.classList.add('visible');renderPopup()}
+function closePicker(){state.pickerMode=null;state.pickerSearch='';state.pickerIdx=0;state.pendingKeyProvider=null;popupArea.classList.remove('visible');chatInput.focus()}
+function renderPopup(){
+  if(state.pickerMode==='key'){popup.className='popup';const p=PROVIDERS.find(x=>x.id===state.pendingKeyProvider);popup.innerHTML=`<div class="key-provider">Enter API key for <strong>${escHtml(p?p.name:'?')}</strong></div><div class="key-field"><span class="klabel">sk-</span><input id="keyFieldInput" type="text" placeholder="..." autocomplete="off" spellcheck="false"></div><div class="key-hint"><kbd>Enter</kbd> confirm · <kbd>Esc</kbd> back</div>`;popupArea.classList.add('visible');requestAnimationFrame(()=>{const inp=document.getElementById('keyFieldInput');if(inp){inp.focus();inp.onkeydown=handleKeyField}});return}
+  if(state.pickerMode==='provider'){popup.className='popup provider';const items=filterProviders(state.pickerSearch);const sel=state.pickerIdx;let listHtml='';if(!items.length){listHtml='<div class="no-match">No matching providers.</div>'}else{items.forEach((item,i)=>{const pf=item.provider;const isCfg=state.configuredProviders.includes(pf.id);const hl=i===sel?' highlight':'';const icon=isCfg?'<span class="picon on">✓</span>':'<span class="picon off">⌁</span>';const status=isCfg?'<span class="pstatus conf">configured</span>':pf.auth?'<span class="pstatus key">needs key</span>':'<span class="pstatus na">no auth</span>';listHtml+=`<div class="prow${hl}" data-idx="${i}">${icon}<span class="pname">${escHtml(pf.name)}</span><span class="pcount">${pf.models} models</span>${status}</div>`});listHtml+=`<div class="psep"></div><div class="padd${items.length===sel?' highlight':''}" data-idx="custom"><span class="plus">+</span><span>Add Custom Provider</span></div>`}popup.innerHTML=`<div class="header">Configure Provider</div><div class="search-box"><span class="search-icon">⌕</span><input id="provFilter" type="text" placeholder="Search providers..." autocomplete="off" spellcheck="false"></div><div class="scroll">${listHtml}</div>`;popupArea.classList.add('visible');requestAnimationFrame(()=>{const inp=document.getElementById('provFilter');if(inp){inp.value=state.pickerSearch;inp.focus();inp.oninput=e=>{state.pickerSearch=e.target.value;state.pickerIdx=0;renderPopup()};inp.onkeydown=handleProvKeydown}const sc=popup.querySelector('.scroll');if(sc)sc.onclick=handleProvClick});return}
+  popup.className='popup';const val=chatInput.value.trimStart();let info;
+  if(/^\/pool\s+\S/.test(val)){const partial=val.replace(/^\/pool\s+/,'');const subs=SUBCOMMANDS['/pool']||[];info={header:'pool · manage experience pool',items:partial?subs.filter(s=>s.cmd.startsWith(partial)):subs}}
+  else if(/^\/pool$/.test(val)){info={header:'pool · manage experience pool',items:SUBCOMMANDS['/pool']||[]}}
+  else if(/^\/sh\s+\S/.test(val)){popupArea.classList.remove('visible');return}
+  else if(/^\//.test(val)){const partial=val.slice(1);info={header:'Commands',items:partial?COMMANDS.filter(c=>c.cmd.slice(1).startsWith(partial)):COMMANDS}}
+  else{popupArea.classList.remove('visible');return}
+  if(!info||!info.items.length){popup.innerHTML=`<div class="header">${escHtml(info?.header||'')}</div><div class="row" style="color:var(--overlay0);font-style:italic;padding:6px 10px">no matches</div>`;popupArea.classList.add('visible');return}
+  let matchIdx=info.items.findIndex((item,i)=>{if(info.header==='Commands')return item.cmd.slice(1).startsWith(val.slice(1));return item.cmd.startsWith(val.replace(/^\/pool\s+/,''))});matchIdx=Math.max(0,matchIdx);
+  let html=`<div class="header">${escHtml(info.header)}</div>`;info.items.forEach((item,i)=>{const hl=i===matchIdx?' highlight':'';html+=`<div class="row${hl}" data-idx="${i}"><span class="cmd">${escHtml(item.cmd)}</span><span class="desc">${escHtml(item.desc)}</span></div>`});popup.innerHTML=html;popupArea.classList.add('visible')}
+function handleProvKeydown(e){const items=filterProviders(state.pickerSearch);if(e.key==='Escape'){e.preventDefault();closePicker();return}if(e.key==='ArrowDown'){e.preventDefault();state.pickerIdx=Math.min(state.pickerIdx+1,items.length);renderPopup();return}if(e.key==='ArrowUp'){e.preventDefault();state.pickerIdx=Math.max(state.pickerIdx-1,0);renderPopup();return}if(e.key==='Enter'){e.preventDefault();if(state.pickerIdx===items.length){closePicker();addMsg('agent',['Custom provider wizard would open here.']);return}const item=items[state.pickerIdx];if(item)commitProvider(item.provider.id)}}
+function handleProvClick(e){const row=e.target.closest('.prow,.padd');if(!row)return;if(row.dataset.idx==='custom'){closePicker();addMsg('agent',['Custom provider wizard would open here.']);return}const items=filterProviders(state.pickerSearch);const item=items[parseInt(row.dataset.idx)];if(item)commitProvider(item.provider.id)}
+function handleKeyField(e){if(e.key==='Escape'){e.preventDefault();state.pickerMode='provider';state.pendingKeyProvider=null;state.pickerSearch='';state.pickerIdx=0;chatInput.value='';renderPopup();return}if(e.key==='Enter'){e.preventDefault();confirmKey(e.target.value)}}
+chatInput.addEventListener('input',()=>{state.input=chatInput.value;if(state.pickerMode)return;if(chatInput.value.startsWith('/'))renderPopup();else popupArea.classList.remove('visible')});
+chatInput.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&(e.key==='a'||e.key==='A')){e.preventDefault();if(state.streaming)return;if(state.pickerMode){closePicker();return}openPicker('provider');return}
+  if((e.ctrlKey||e.metaKey)&&(e.key==='p'||e.key==='P')){e.preventDefault();if(state.streaming)return;if(state.pickerMode){closePicker();return}chatInput.value='/';state.input='/';renderPopup();return}
+  if(e.key==='Enter'){e.preventDefault();if(state.streaming)return;if(state.pickerMode)return;if(popupArea.classList.contains('visible')){const hl=popup.querySelector('.row.highlight')||popup.querySelector('.row');if(hl){const cmdText=hl.querySelector('.cmd')?.textContent||'';const val=chatInput.value.trimStart();let fullCmd;if(val.startsWith('/pool '))fullCmd='/pool '+cmdText;else if(val.startsWith('/'))fullCmd=cmdText.startsWith('/')?cmdText:'/ '+cmdText;else fullCmd=cmdText;if(!val.startsWith('/pool ')&&SUBCOMMANDS[fullCmd]){chatInput.value=fullCmd+' ';state.input=chatInput.value;renderPopup();return}if(val.startsWith('/pool ')&&!val.replace(/^\/pool\s+/,'')){popupArea.classList.remove('visible');chatInput.value='';state.input='';handleSubmit(fullCmd);return}popupArea.classList.remove('visible');chatInput.value='';state.input='';handleSubmit(fullCmd);return}}handleSubmit(chatInput.value);return}
+  if(e.key==='Escape'){e.preventDefault();if(state.pickerMode){closePicker();return}chatInput.value='';state.input='';popupArea.classList.remove('visible');return}
+  if((e.key==='ArrowDown'||e.key==='ArrowUp')&&popupArea.classList.contains('visible')&&!state.pickerMode){e.preventDefault();const rows=popup.querySelectorAll('.row');if(!rows.length)return;let cur=-1;rows.forEach((r,i)=>{if(r.classList.contains('highlight')){cur=i;r.classList.remove('highlight')}});const next=e.key==='ArrowDown'?(cur+1)%rows.length:(cur-1+rows.length)%rows.length;rows[next].classList.add('highlight');return}
+  if(e.key==='Tab'&&popupArea.classList.contains('visible')&&!state.pickerMode){e.preventDefault();const hl=popup.querySelector('.row.highlight');if(!hl)return;const cmd=hl.querySelector('.cmd')?.textContent||'';const val=chatInput.value.trimStart();if(val.startsWith('/pool'))chatInput.value=val.replace(/^\/pool\s*/,'/pool ')+cmd+' ';else chatInput.value=(cmd.startsWith('/')?'':'/')+cmd+' ';state.input=chatInput.value;renderPopup();return}});
+popup.addEventListener('click',e=>{if(state.pickerMode)return;const row=e.target.closest('.row');if(!row)return;const cmd=row.querySelector('.cmd')?.textContent||'';const val=chatInput.value.trimStart();if(val.startsWith('/pool '))chatInput.value=val.replace(/^\/pool\s*/,'/pool ')+cmd+' ';else chatInput.value=(cmd.startsWith('/')?'':'/')+cmd+' ';state.input=chatInput.value;renderPopup();chatInput.focus()});
+addMsg('agent',['Welcome to the holographic self-evolving multi-agent system. Type a message or `/help` to begin.']);
+setInterval(randomStatTick,5000);chatInput.focus();document.addEventListener('click',()=>{chatInput.focus()});
+</script>
+</body>
+</html>

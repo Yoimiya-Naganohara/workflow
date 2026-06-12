@@ -131,7 +131,7 @@ pub struct DecisionPipeline {
 
 impl DecisionPipeline {
     /// Run a [`SpawnRequest`] through the full pipeline.
-    pub async fn process_request(&self, request: SpawnRequest, role_template_id: Option<u32>, initial_confidence: Option<f32>) -> Result<SpawnDecision> {
+    pub async fn process_request(&self, request: SpawnRequest, role_template_id: Option<u32>) -> Result<SpawnDecision> {
         // ── L-1: Admission ──
         let _permit: AdmissionPermit = self
             .admission
@@ -168,7 +168,7 @@ impl DecisionPipeline {
         // ── L1: Experience retrieval & confidence check ──
         let l1_assessment: L1Assessment = {
             let exp = self.experience.lock().expect("experience mutex poisoned");
-            exp.check_confidence(task_emb, role_emb, role_template_id, initial_confidence)?
+            exp.check_confidence(task_emb, role_emb, role_template_id)?
         };
 
         // ── L2: Screen request before final approval (sync, no .await) ──
@@ -356,7 +356,7 @@ mod tests {
             raw_text_ref: None,
         };
 
-        let decision = pipeline.process_request(request, None, None).await.unwrap();
+        let decision = pipeline.process_request(request, None).await.unwrap();
         assert!(matches!(decision, SpawnDecision::Approved(_)));
     }
 
@@ -383,7 +383,7 @@ mod tests {
             raw_text_ref: None,
         };
 
-        let decision = pipeline.process_request(request, None, None).await.unwrap();
+        let decision = pipeline.process_request(request, None).await.unwrap();
         assert!(matches!(
             decision,
             SpawnDecision::Rejected(SpawnRejection::BudgetExhausted { .. })

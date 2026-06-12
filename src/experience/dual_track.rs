@@ -331,15 +331,11 @@ impl DualTrackMemory {
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
         role_template_id: Option<u32>,
-        initial_confidence: Option<f32>,
     ) -> std::result::Result<L1Assessment, SpawnRejection> {
         if self.is_empty() {
-            // Cold start: pool is empty — allow spawn with a reasonable baseline
-            // confidence so the system can bootstrap. Once agents run and produce
-            // experiences, subsequent spawns use real similarity data.
             return Ok(L1Assessment {
                 confidence: 0.6,
-                recommended_tools: 0,
+                recommended_tools: !0,
                 matched_experiences: 0,
             });
         }
@@ -349,7 +345,6 @@ impl DualTrackMemory {
             .unwrap_or_default()
             .as_secs();
 
-        // Search task matches across both tracks (role-aware when possible).
         let task_matches = if let Some(role_id) = role_template_id {
             let role_task = self.search_by_role(task_embedding, role_id, 5);
             if !role_task.is_empty() {
@@ -375,18 +370,21 @@ impl DualTrackMemory {
         let task_score = Self::aggregate_top_k(&task_matches, now);
         let role_score = Self::aggregate_top_k(&role_matches, now);
 
-        // Count experiences for this specific role (0 if no role context).
         let role_count = role_template_id
             .map(|id| self.count_by_role(id))
             .unwrap_or(0);
 
-        // Few experiences → trust initial confidence.
+        // Few experiences → unconditional pass with all tools.
         // Enough experiences → use real similarity data.
-        let combined = if role_count < 5 {
-            initial_confidence.unwrap_or(0.6)
-        } else {
-            (task_score + role_score) / 2.0
-        };
+        if role_count < 5 {
+            return Ok(L1Assessment {
+                confidence: 0.6,
+                recommended_tools: !0,
+                matched_experiences: role_count,
+            });
+        }
+
+        let combined = (task_score + role_score) / 2.0;
 
         if combined >= self.confidence_threshold {
             let recommended_tools = self.infer_tools(&task_matches);
@@ -532,9 +530,8 @@ impl crate::l1::ExperienceRetrieval for DualTrackMemory {
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
         role_template_id: Option<u32>,
-        initial_confidence: Option<f32>,
     ) -> std::result::Result<L1Assessment, SpawnRejection> {
-        self.check_confidence(task_embedding, role_embedding, role_template_id, initial_confidence)
+        self.check_confidence(task_embedding, role_embedding, role_template_id)
     }
 
     fn add_experience(&mut self, entry: ExperienceEntry) {
@@ -659,12 +656,12 @@ mod tests {
         // Cold start: empty pool returns low confidence instead of rejection.
         let mut query = [0.0f32; EMBEDDING_DIM];
         query[0] = 1.0;
-        let result = mem.check_confidence(&query, &query, None, None);
+        let result = mem.check_confidence(&query, &query, None);
         // Cold start: empty pool returns low confidence, not rejection.
         assert!(result.is_ok(), "empty pool should allow cold-start spawn");
         if let Ok(assessment) = result {
             assert!(assessment.confidence > 0.5, "cold-start confidence should be above threshold");
-            assert_eq!(assessment.recommended_tools, 0);
+            assert_eq!(assessment.recommended_tools, !0);
         }
         std::fs::remove_file(&path).ok();
     }
