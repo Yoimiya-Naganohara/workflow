@@ -47,18 +47,21 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize, think_frame: u8)
 
         // ── Content ──
         let is_user = matches!(message.role, MessageRole::User);
+        let bar_color = if is_user { Color::Rgb(59, 130, 246) } else { Color::Reset };
         let content_lines = render_markdown(&message.content, body_width);
         for cl in content_lines {
             if is_user {
-                // Add subtle background for user messages
-                let styled_spans: Vec<Span> = cl
-                    .spans
-                    .into_iter()
-                    .map(|s| Span::styled(s.content, s.style.bg(Color::Rgb(20, 40, 55))))
-                    .collect();
-                lines.push(Line::from(styled_spans));
+                // Blue left bar + content
+                let mut styled = vec![Span::styled("▐", Style::default().fg(bar_color))];
+                styled.extend(cl.spans.into_iter().map(|s| {
+                    Span::styled(s.content, s.style)
+                }));
+                lines.push(Line::from(styled));
             } else {
-                lines.push(cl);
+                // Agent messages: just indent
+                let mut styled = vec![Span::raw(" ")];
+                styled.extend(cl.spans);
+                lines.push(Line::from(styled));
             }
         }
 
@@ -72,24 +75,28 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize, think_frame: u8)
     lines
 }
 
-/// Render a tool-call decision message in compact form.
+/// Render a tool-call decision message in compact form with a purple left bar.
 fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::ChatMessage) {
+    let bar = Span::styled("▐", Style::default().fg(Color::Rgb(139, 92, 246)));
     let first_newline = message.content.find('\n').unwrap_or(message.content.len());
     let header_clean = message.content[..first_newline]
         .trim_start_matches('\u{1f527}')
         .trim()
         .to_string();
-    lines.push(Line::from(vec![Span::styled(
-        header_clean,
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-    )]));
+    lines.push(Line::from(vec![
+        bar.clone(),
+        Span::styled(
+            header_clean,
+            Style::default().fg(Color::Rgb(139, 92, 246)).add_modifier(Modifier::BOLD),
+        ),
+    ]));
     if first_newline < message.content.len() {
         for raw_line in message.content[first_newline..].lines() {
             let trimmed = raw_line.trim();
             if !trimmed.is_empty() && trimmed != "```json" && trimmed != "```" {
                 lines.push(Line::from(vec![
-                    Span::styled("    ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(trimmed.to_string(), Style::default().fg(Color::Cyan)),
+                    bar.clone(),
+                    Span::styled(trimmed.to_string(), Style::default().fg(Color::Rgb(165, 180, 252))),
                 ]));
             }
         }
@@ -100,26 +107,21 @@ fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::
 /// Render a message header: status indicator only.
 /// Adds a subtle background tint for user messages.
 fn message_header(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::ChatMessage) {
-    let is_user = matches!(message.role, MessageRole::User);
-    let bg = if is_user { Color::Rgb(20, 40, 55) } else { Color::Reset };
-
     let state_indicator = match message.status {
         MessageStatus::Thinking => Span::styled(
             " \u{25cc}",
             Style::default()
                 .fg(Color::Yellow)
-                .bg(bg)
                 .add_modifier(Modifier::SLOW_BLINK),
         ),
         MessageStatus::Streaming => Span::styled(
             " \u{25c9}",
             Style::default()
                 .fg(Color::Cyan)
-                .bg(bg)
                 .add_modifier(Modifier::SLOW_BLINK),
         ),
-        MessageStatus::Completed => Span::styled(" \u{2713}", Style::default().fg(Color::Green).bg(bg)),
-        MessageStatus::Error => Span::styled(" \u{2717}", Style::default().fg(Color::Red).bg(bg)),
+        MessageStatus::Completed => Span::styled(" \u{2713}", Style::default().fg(Color::Green)),
+        MessageStatus::Error => Span::styled(" \u{2717}", Style::default().fg(Color::Red)),
     };
 
     lines.push(Line::from(vec![state_indicator]));
