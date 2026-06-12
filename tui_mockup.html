@@ -2,318 +2,222 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workflow TUI — Design Mockup</title>
+<title>Workflow TUI</title>
 <style>
-  :root {
-    --primary: #89B4FA;
-    --secondary: #A6E3A1;
-    --accent: #F5C2E7;
-    --muted: #6C7086;
-    --error: #F38BA8;
-    --warning: #F9E2AF;
-    --text: #CDD6F4;
-    --subtext: #BAC2DE;
-    --surface: #1E1E2E;
-    --surface-light: #252536;
-    --surface-lighter: #2A2A3C;
-    --bg: #11111B;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-    background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.5;
-    display: flex; justify-content: center; align-items: center;
-    min-height: 100vh; padding: 20px;
-  }
-  .terminal {
-    width: 100%; max-width: 900px; background: var(--surface);
-    border: 1px solid var(--muted); border-radius: 8px;
-    overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-  }
-  .titlebar {
-    display: flex; align-items: center; padding: 10px 16px;
-    background: var(--surface-light); border-bottom: 1px solid var(--muted); gap: 8px;
-  }
-  .titlebar .dots { display: flex; gap: 6px; }
-  .titlebar .dot { width: 12px; height: 12px; border-radius: 50%; }
-  .dot.red { background: #F38BA8; }
-  .dot.yellow { background: #F9E2AF; }
-  .dot.green { background: #A6E3A1; }
-  .titlebar .title { flex: 1; text-align: center; color: var(--muted); font-size: 12px; }
-  .chat-area { padding: 20px 24px; min-height: 500px; max-height: 500px; overflow-y: auto; }
-  .message { margin-bottom: 20px; }
-  .msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .msg-status { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; }
-  .msg-status.done { color: var(--secondary); }
-  .msg-status.thinking { color: var(--warning); }
-  .msg-status.error { color: var(--error); }
-  .msg-status.streaming { color: var(--primary); }
-  .msg-role { font-weight: bold; font-size: 13px; }
-  .msg-role.user { color: var(--primary); }
-  .msg-role.agent { color: var(--text); }
-  .msg-role.system { color: var(--muted); }
-  .msg-time { margin-left: auto; color: var(--muted); font-size: 11px; }
-  .msg-content { padding-left: 26px; color: var(--subtext); }
-  .message.user .msg-content { border-left: 2px solid var(--primary); padding-left: 14px; margin-left: 4px; }
-  .tool-call { margin-bottom: 16px; padding-left: 4px; }
-  .tool-call .msg-content { border-left: 2px solid var(--accent); padding-left: 14px; margin-left: 4px; }
-  .tool-call .msg-role { color: var(--accent); }
-  .tool-call .tool-name { color: var(--accent); font-weight: bold; }
-  .tool-call .tool-args { color: var(--subtext); font-size: 12px; margin-top: 4px; }
-  .tool-call .tool-output {
-    margin-top: 6px; padding: 8px 12px; background: var(--surface-light);
-    border-radius: 4px; color: var(--subtext); font-size: 12px; border-left: 2px solid var(--muted);
-  }
-  .tool-call .tool-output .truncated { color: var(--muted); font-style: italic; margin-top: 4px; }
-  .code-block { margin: 10px 0; border-radius: 6px; overflow: hidden; background: var(--surface-light); }
-  .code-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 6px 14px; background: var(--surface-lighter);
-    border-bottom: 1px solid rgba(108,112,134,0.3); font-size: 11px; color: var(--muted);
-  }
-  .code-header .lang { color: var(--primary); font-weight: bold; }
-  .code-header .line-count { color: var(--muted); }
-  .code-body { padding: 12px 14px; overflow-x: auto; }
-  .code-body pre { font-family: inherit; font-size: 12px; line-height: 1.6; color: var(--text); }
-  .code-body .line-num { color: var(--muted); user-select: none; display: inline-block; width: 24px; text-align: right; margin-right: 16px; }
-  .code-body .kw { color: var(--primary); }
-  .code-body .str { color: var(--secondary); }
-  .code-body .fn { color: var(--accent); }
-  .code-body .cm { color: var(--muted); font-style: italic; }
-  .code-body .ty { color: var(--warning); }
-  .code-body .lt { color: var(--error); }
-  .code-body .mac { color: var(--accent); }
-  .diff-block { margin: 10px 0; border-radius: 6px; overflow: hidden; background: var(--surface-light); }
-  .diff-header {
-    padding: 6px 14px; background: var(--surface-lighter);
-    border-bottom: 1px solid rgba(108,112,134,0.3); font-size: 11px; color: var(--muted);
-  }
-  .diff-header .file { color: var(--primary); }
-  .diff-body { padding: 8px 0; }
-  .diff-line { padding: 1px 14px; font-size: 12px; font-family: inherit; }
-  .diff-line.add { background: rgba(166,227,161,0.1); color: var(--secondary); }
-  .diff-line.del { background: rgba(243,139,168,0.1); color: var(--error); }
-  .diff-line.ctx { color: var(--muted); }
-  .diff-line .prefix { display: inline-block; width: 14px; font-weight: bold; }
-  code { background: var(--surface-lighter); padding: 1px 6px; border-radius: 3px; font-size: 12px; color: var(--accent); }
-  .blockquote { border-left: 3px solid var(--muted); padding-left: 14px; color: var(--muted); margin: 8px 0; font-style: italic; }
-  .msg-content ul { padding-left: 20px; margin: 6px 0; }
-  .msg-content li { margin: 3px 0; color: var(--subtext); }
-  .msg-content li::marker { color: var(--muted); }
-  b, strong { color: var(--text); font-weight: bold; }
-  .thinking { display: flex; align-items: center; gap: 8px; padding-left: 26px; color: var(--warning); font-style: italic; }
-  .thinking-dots::after { content: "⠋"; animation: dots 1.5s steps(5, end) infinite; }
-  @keyframes dots { 0%, 20% { content: "⠋"; } 40% { content: "⠙"; } 60% { content: "⠹"; } 80%, 100% { content: "⠸"; } }
-  .input-area { border-top: 1px solid var(--muted); padding: 12px 16px; }
-  .input-box {
-    display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px;
-    background: var(--surface-light); border: 1px solid var(--primary); border-radius: 6px; min-height: 42px;
-  }
-  .input-box .prompt { color: var(--primary); font-weight: bold; flex-shrink: 0; line-height: 1.5; }
-  .input-box .input-text { flex: 1; color: var(--text); line-height: 1.5; }
-  .input-box .cursor { display: inline-block; width: 8px; height: 16px; background: var(--primary); animation: blink 1s step-end infinite; vertical-align: middle; }
-  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-  .input-meta { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--muted); }
-  .statusbar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 6px 16px; background: var(--surface-light); border-top: 1px solid var(--muted); font-size: 11px; color: var(--muted);
-  }
-  .statusbar .left { display: flex; align-items: center; gap: 12px; }
-  .statusbar .model { color: var(--primary); font-weight: bold; }
-  .statusbar .stat { color: var(--subtext); }
-  .statusbar .stat .label { color: var(--muted); }
-  .statusbar .budget-good { color: var(--secondary); }
-  .statusbar .right { display: flex; gap: 12px; }
-  .statusbar .key kbd { background: var(--surface-lighter); padding: 1px 5px; border-radius: 3px; font-family: inherit; font-size: 10px; border: 1px solid var(--muted); }
-  .command-popup { margin: 0 16px 8px; background: var(--surface-light); border: 1px solid var(--muted); border-radius: 6px; overflow: hidden; }
-  .command-popup .cmd-item { display: flex; align-items: center; padding: 6px 14px; gap: 12px; cursor: pointer; }
-  .command-popup .cmd-item.selected { background: var(--surface-lighter); border-left: 2px solid var(--primary); }
-  .command-popup .cmd-name { color: var(--primary); font-weight: bold; min-width: 100px; }
-  .command-popup .cmd-desc { color: var(--muted); font-size: 12px; }
-  .hr { border: none; border-top: 1px solid var(--muted); opacity: 0.3; margin: 12px 0; }
-  .chat-area::-webkit-scrollbar { width: 6px; }
-  .chat-area::-webkit-scrollbar-track { background: transparent; }
-  .chat-area::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 3px; }
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0f0f14;--bg1:#16161e;--bg2:#1c1c26;--bg3:#22222c;
+  --fg:#c8c8d4;--fg2:#8888a0;--fg3:#55556a;
+  --blue:#7aa2f7;--green:#9ece6a;--red:#f7768e;--yellow:#e0af68;
+  --purple:#bb9af7;--cyan:#7dcfff;--pink:#ff7eb6;
+  --border:#2a2a38;
+}
+body{font-family:'SF Mono','JetBrains Mono','Fira Code',monospace;background:var(--bg);color:var(--fg);font-size:13.5px;line-height:1.6;display:flex;justify-content:center;min-height:100vh;padding:32px 16px}
+
+/* terminal shell */
+.term{width:100%;max-width:820px}
+.shell{background:var(--bg1);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.6)}
+.titlebar{display:flex;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);gap:8px}
+.titlebar .dots{display:flex;gap:6px}.titlebar .dot{width:10px;height:10px;border-radius:50%}
+.dot.r{background:#f7768e}.dot.y{background:#e0af68}.dot.g{background:#9ece6a}
+.titlebar .name{flex:1;text-align:center;color:var(--fg3);font-size:12px}
+
+/* chat */
+.chat{padding:24px 28px 16px;min-height:440px}
+
+/* messages */
+.msg{margin-bottom:24px}
+.msg .role{display:inline-flex;align-items:center;gap:8px;margin-bottom:8px}
+.msg .icon{font-size:11px;width:20px;text-align:center}
+.msg .icon.ok{color:var(--green)}.msg .icon.run{color:var(--blue)}.msg .icon.wait{color:var(--yellow)}
+.msg .name{font-weight:600;font-size:13px;color:var(--fg)}
+.msg .ts{color:var(--fg3);font-size:11px;margin-left:8px}
+.msg .body{padding-left:28px;color:var(--fg2);font-size:13.5px}
+
+/* user messages */
+.msg.user .body{color:var(--fg);padding-left:16px;border-left:2px solid var(--blue);margin-left:6px}
+
+/* tool results */
+.tool{margin-bottom:20px;padding-left:6px}
+.tool .role{margin-bottom:6px}
+.tool .icon{color:var(--purple)}
+.tool .name{color:var(--purple);font-weight:600}
+.tool .body{padding-left:16px;border-left:2px solid var(--bg3);margin-left:6px}
+.tool .arg{color:var(--fg3);font-size:12.5px}
+.tool .out{margin-top:6px;padding:8px 12px;background:var(--bg);border-radius:4px;font-size:12px;color:var(--fg2);border:1px solid var(--border)}
+.tool .out .ok{color:var(--green)}
+.tool .out .more{color:var(--fg3);margin-top:4px;font-style:italic}
+
+/* code */
+.code{margin:10px 0;border-radius:6px;background:var(--bg);border:1px solid var(--border);overflow:hidden}
+.code .top{display:flex;justify-content:space-between;padding:6px 14px;border-bottom:1px solid var(--border);font-size:11px;color:var(--fg3)}
+.code .top b{color:var(--blue)}
+.code pre{padding:12px 14px;font-family:inherit;font-size:12px;line-height:1.7;overflow-x:auto}
+.k{color:var(--blue)}.s{color:var(--green)}.f{color:var(--purple)}.c{color:var(--fg3);font-style:italic}.t{color:var(--yellow)}.l{color:var(--red)}.m{color:var(--purple)}
+
+/* diff */
+.diff{margin:10px 0;border-radius:6px;background:var(--bg);border:1px solid var(--border);overflow:hidden}
+.diff .top{padding:6px 14px;border-bottom:1px solid var(--border);font-size:11px;color:var(--fg3)}
+.diff .top b{color:var(--blue)}
+.diff .ln{padding:2px 14px;font-size:12px;font-family:inherit}
+.diff .ln.a{background:rgba(158,206,106,.06);color:var(--green)}
+.diff .ln.d{background:rgba(247,118,142,.06);color:var(--red)}
+.diff .ln .p{display:inline-block;width:12px}
+
+/* blockquote */
+.bq{border-left:2px solid var(--fg3);padding-left:14px;color:var(--fg3);margin:10px 0;font-style:italic}
+
+/* list */
+.msg .body ul{padding-left:20px;margin:8px 0}
+.msg .body li{margin:4px 0;color:var(--fg2)}
+.msg .body li::marker{color:var(--fg3)}
+code{background:var(--bg2);padding:1px 6px;border-radius:3px;font-size:12px;color:var(--purple)}
+strong{color:var(--fg);font-weight:600}
+
+/* thinking */
+.think{padding-left:28px;color:var(--yellow);font-size:12px;display:flex;align-items:center;gap:8px}
+.think::before{content:"⠋";animation:d 1.2s steps(1) infinite}
+@keyframes d{0%{content:"⠋"}11%{content:"⠙"}22%{content:"⠹"}33%{content:"⠸"}44%{content:"⠼"}55%{content:"⠴"}66%{content:"⠦"}77%{content:"⠧"}88%{content:"⠇"}}
+
+/* separator */
+.sep{border:none;border-top:1px solid var(--border);margin:16px 0}
+
+/* input */
+.input{border-top:1px solid var(--border);padding:12px 16px}
+.box{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg2);border:1px solid var(--blue);border-radius:8px}
+.box .pr{color:var(--blue);font-weight:bold;font-size:14px}
+.box .tx{flex:1;color:var(--fg)}
+.box .cu{display:inline-block;width:8px;height:16px;background:var(--blue);border-radius:1px;animation:blink 1s step-end infinite;vertical-align:middle}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.hint{display:flex;justify-content:space-between;margin-top:6px;font-size:10.5px;color:var(--fg3)}
+
+/* status */
+.status{display:flex;align-items:center;justify-content:space-between;padding:6px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--fg3)}
+.status .l{display:flex;gap:14px;align-items:center}
+.status .model{color:var(--blue);font-weight:600}
+.status .s{color:var(--fg2)}
+.status .r{display:flex;gap:14px}
+.status kbd{background:var(--bg2);padding:1px 5px;border-radius:3px;font-family:inherit;font-size:10px;border:1px solid var(--border)}
+
+/* command popup */
+.popup{margin:0 16px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.popup .row{display:flex;padding:7px 14px;gap:12px;align-items:center}
+.popup .row.sel{background:var(--bg3);border-left:2px solid var(--blue)}
+.popup .row .cmd{color:var(--blue);font-weight:600;min-width:80px}
+.popup .row .desc{color:var(--fg3);font-size:12px}
+
+/* scrollbar */
+.chat::-webkit-scrollbar{width:5px}.chat::-webkit-scrollbar-thumb{background:var(--fg3);border-radius:3px}
 </style>
 </head>
 <body>
-<div class="terminal">
+<div class="term">
+<div class="shell">
   <div class="titlebar">
-    <div class="dots"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
-    <div class="title">workflow — agent</div>
-    <div style="width: 52px;"></div>
+    <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+    <div class="name">workflow</div>
+    <div style="width:40px"></div>
   </div>
-  <div class="chat-area">
-    <div class="message system">
-      <div class="msg-content" style="color: var(--muted); font-style: italic; padding-left: 4px; margin-bottom: 16px;">
-        Workflow Agent — connected. Use <code>/connect</code> to configure a provider.
+  <div class="chat">
+
+    <div class="msg">
+      <div class="role"><span class="icon run">┃</span><span class="name">You</span><span class="ts">12:34</span></div>
+      <div class="body">Implement auth middleware and rate limiter for the user service.</div>
+    </div>
+
+    <div class="tool">
+      <div class="role"><span class="icon">read_file</span><span class="ts">12:34</span></div>
+      <div class="body"><span class="arg">src/models/user.rs</span></div>
+    </div>
+
+    <div class="tool">
+      <div class="role"><span class="icon">sh</span><span class="ts">12:34</span></div>
+      <div class="body"><span class="arg">cargo check</span>
+        <div class="out"><span class="ok">Finished</span> dev profile in 0.42s<div class="more">... 3 warnings</div></div>
       </div>
     </div>
-    <div class="message user">
-      <div class="msg-header">
-        <div class="msg-status done">┃</div>
-        <div class="msg-role user">User</div>
-        <div class="msg-time">12:34:02</div>
-      </div>
-      <div class="msg-content">Implement a REST API with authentication and rate limiting for the user service.</div>
-    </div>
-    <div class="tool-call">
-      <div class="msg-header">
-        <div class="msg-status streaming">▐</div>
-        <div class="msg-role"><span class="tool-name">read_file</span></div>
-        <div class="msg-time">12:34:05</div>
-      </div>
-      <div class="msg-content"><div class="tool-args">src/models/user.rs</div></div>
-    </div>
-    <div class="tool-call">
-      <div class="msg-header">
-        <div class="msg-status streaming">▐</div>
-        <div class="msg-role"><span class="tool-name">sh</span></div>
-        <div class="msg-time">12:34:08</div>
-      </div>
-      <div class="msg-content">
-        <div class="tool-args">cargo check 2>&1 | head -20</div>
-        <div class="tool-output">
-          <span style="color: var(--secondary);">Finished</span> dev profile [unoptimized + debuginfo] target(s) in 0.42s<br>
-          warning: unused variable <code>config</code><br>
-          &nbsp;&nbsp;--&gt; src/main.rs:12:9
-          <div class="truncated">... 3 more lines</div>
+
+    <div class="msg">
+      <div class="role"><span class="icon ok">✓</span><span class="name">Agent</span><span class="ts">12:34</span></div>
+      <div class="body">Auth middleware:
+        <div class="code">
+          <div class="top"><b>rust</b><span>21 lines</span></div>
+          <pre><span class="k">use</span> axum::{<span class="t">Extract</span>, <span class="t">Request</span>, <span class="t">Next</span>};
+
+<span class="k">pub async fn</span> <span class="f">auth_middleware</span>(
+    <span class="m">mut</span> req: <span class="t">Request</span>,
+    next: <span class="t">Next</span>,
+) -&gt; <span class="t">Result</span>&lt;<span class="t">Response</span>, <span class="t">StatusCode</span>&gt; {
+    <span class="k">let</span> token = req.<span class="f">headers</span>()
+        .<span class="f">get</span>(<span class="s">"Authorization"</span>)
+        .<span class="f">and_then</span>(|v| v.<span class="f">to_str</span>().<span class="f">ok</span>())
+        .<span class="f">and_then</span>(|s| s.<span class="f">strip_prefix</span>(<span class="s">"Bearer "</span>))
+        .<span class="f">ok_or</span>(<span class="t">StatusCode</span>::<span class="l">UNAUTHORIZED</span>)?;
+    <span class="c">// verify &amp; inject claims</span>
+    <span class="t">Ok</span>(next.<span class="f">run</span>(req).<span class="f">await</span>)
+}</pre>
         </div>
       </div>
     </div>
-    <div class="message agent">
-      <div class="msg-header">
-        <div class="msg-status done">✓</div>
-        <div class="msg-role agent">Agent</div>
-        <div class="msg-time">12:34:12</div>
-      </div>
-      <div class="msg-content">
-        I'll create the authentication middleware. Here's the implementation:
-        <div class="code-block">
-          <div class="code-header"><span class="lang">rust</span><span class="line-count">24 lines</span></div>
-          <div class="code-body"><pre><span class="line-num"> 1</span><span class="kw">use</span> axum::{<span class="ty">Extract</span>, <span class="ty">Request</span>, <span class="ty">Next</span>};
-<span class="line-num"> 2</span><span class="kw">use</span> axum::response::<span class="ty">Response</span>;
-<span class="line-num"> 3</span>
-<span class="line-num"> 4</span><span class="kw">pub async fn</span> <span class="fn">auth_middleware</span>(
-<span class="line-num"> 5</span>    <span class="mac">mut</span> req: <span class="ty">Request</span>,
-<span class="line-num"> 6</span>    next: <span class="ty">Next</span>,
-<span class="line-num"> 7</span>) -&gt; <span class="ty">Result</span>&lt;<span class="ty">Response</span>, <span class="ty">StatusCode</span>&gt; {
-<span class="line-num"> 8</span>    <span class="kw">let</span> token = req
-<span class="line-num"> 9</span>        .<span class="fn">headers</span>()
-<span class="line-num">10</span>        .<span class="fn">get</span>(<span class="str">"Authorization"</span>)
-<span class="line-num">11</span>        .<span class="fn">and_then</span>(|v| v.<span class="fn">to_str</span>().<span class="fn">ok</span>())
-<span class="line-num">12</span>        .<span class="fn">and_then</span>(|s| s.<span class="fn">strip_prefix</span>(<span class="str">"Bearer "</span>))
-<span class="line-num">13</span>        .<span class="fn">ok_or</span>(<span class="ty">StatusCode</span>::<span class="lt">UNAUTHORIZED</span>)?;
-<span class="line-num">14</span>
-<span class="line-num">15</span>    <span class="kw">let</span> claims = <span class="fn">verify_token</span>(token)
-<span class="line-num">16</span>        .<span class="fn">await</span>
-<span class="line-num">17</span>        .<span class="fn">map_err</span>(|_| <span class="ty">StatusCode</span>::<span class="lt">UNAUTHORIZED</span>)?;
-<span class="line-num">18</span>
-<span class="line-num">19</span>    req.<span class="fn">extensions_mut</span>().<span class="fn">insert</span>(claims);
-<span class="line-num">20</span>    <span class="ty">Ok</span>(next.<span class="fn">run</span>(req).<span class="fn">await</span>)
-<span class="line-num">21</span>}</pre></div>
-        </div>
-        The middleware extracts the Bearer token from the <code>Authorization</code> header, verifies it, and injects the claims into the request extensions.
-      </div>
-    </div>
-    <hr class="hr">
-    <div class="tool-call">
-      <div class="msg-header">
-        <div class="msg-status streaming">▐</div>
-        <div class="msg-role"><span class="tool-name">write_file</span></div>
-        <div class="msg-time">12:34:18</div>
-      </div>
-      <div class="msg-content">
-        <div class="tool-args">src/middleware/auth.rs - 24 lines written</div>
-        <div class="diff-block">
-          <div class="diff-header">diff: <span class="file">src/middleware/auth.rs</span> (+24, -0)</div>
-          <div class="diff-body">
-            <div class="diff-line add"><span class="prefix">+</span><span class="kw">use</span> axum::{<span class="ty">Extract</span>, <span class="ty">Request</span>, <span class="ty">Next</span>};</div>
-            <div class="diff-line add"><span class="prefix">+</span><span class="kw">use</span> axum::response::<span class="ty">Response</span>;</div>
-            <div class="diff-line add"><span class="prefix">+</span></div>
-            <div class="diff-line add"><span class="prefix">+</span><span class="kw">pub async fn</span> <span class="fn">auth_middleware</span>(</div>
-            <div class="diff-line add"><span class="prefix">+</span>    <span class="mac">mut</span> req: <span class="ty">Request</span>,</div>
-            <div class="diff-line add"><span class="prefix">+</span>    next: <span class="ty">Next</span>,</div>
-            <div class="diff-line add"><span class="prefix">+</span>) -&gt; <span class="ty">Result</span>&lt;<span class="ty">Response</span>, <span class="ty">StatusCode</span>&gt; {</div>
-            <div class="diff-line add"><span class="prefix">+</span>    <span class="cm">// ... implementation</span></div>
-            <div class="diff-line add"><span class="prefix">+</span>}</div>
-          </div>
+
+    <hr class="sep">
+
+    <div class="tool">
+      <div class="role"><span class="icon">write_file</span><span class="ts">12:34</span></div>
+      <div class="body">
+        <span class="arg">src/middleware/auth.rs</span>
+        <div class="diff">
+          <div class="top">diff: <b>auth.rs</b> (+21, -0)</div>
+          <div class="ln a"><span class="p">+</span><span class="k">use</span> axum::{<span class="t">Extract</span>, <span class="t">Request</span>, <span class="t">Next</span>};</div>
+          <div class="ln a"><span class="p">+</span><span class="k">pub async fn</span> <span class="f">auth_middleware</span>(</div>
+          <div class="ln a"><span class="p">+</span>    <span class="m">mut</span> req: <span class="t">Request</span>,</div>
+          <div class="ln a"><span class="p">+</span>) -&gt; <span class="t">Result</span>&lt;<span class="t">Response</span>, <span class="t">StatusCode</span>&gt; {</div>
+          <div class="ln a"><span class="p">+</span>    <span class="c">// ...</span></div>
         </div>
       </div>
     </div>
-    <div class="message agent">
-      <div class="msg-header">
-        <div class="msg-status done">✓</div>
-        <div class="msg-role agent">Agent</div>
-        <div class="msg-time">12:34:20</div>
-      </div>
-      <div class="msg-content">
-        Now let me add the rate limiter:
-        <div class="code-block">
-          <div class="code-header"><span class="lang">rust</span><span class="line-count">18 lines</span></div>
-          <div class="code-body"><pre><span class="line-num"> 1</span><span class="kw">use</span> std::collections::<span class="ty">HashMap</span>;
-<span class="line-num"> 2</span><span class="kw">use</span> std::time::{<span class="ty">Duration</span>, <span class="ty">Instant</span>};
-<span class="line-num"> 3</span><span class="kw">use</span> tokio::sync::<span class="ty">RwLock</span>;
-<span class="line-num"> 4</span>
-<span class="line-num"> 5</span><span class="kw">pub struct</span> <span class="ty">RateLimiter</span> {
-<span class="line-num"> 6</span>    window: <span class="ty">Duration</span>,
-<span class="line-num"> 7</span>    max_requests: <span class="ty">u32</span>,
-<span class="line-num"> 8</span>    clients: <span class="ty">RwLock</span>&lt;<span class="ty">HashMap</span>&lt;<span class="ty">String</span>, <span class="ty">ClientState</span>&gt;&gt;,
-<span class="line-num"> 9</span>}</pre></div>
-        </div>
-      </div>
-    </div>
-    <div class="message agent">
-      <div class="msg-header">
-        <div class="msg-status done">✓</div>
-        <div class="msg-role agent">Agent</div>
-        <div class="msg-time">12:34:25</div>
-      </div>
-      <div class="msg-content">
-        <div class="blockquote">Both middleware components are now in place. The auth middleware validates Bearer tokens, and the rate limiter tracks per-client request counts within a sliding window.</div>
-        <b>Key decisions:</b>
+
+    <div class="msg">
+      <div class="role"><span class="icon ok">✓</span><span class="name">Agent</span><span class="ts">12:35</span></div>
+      <div class="body">
+        <div class="bq">Auth + rate limiter done.</div>
         <ul>
-          <li>Using <code>tokio::sync::RwLock</code> for concurrent access</li>
-          <li>Sliding window algorithm (not fixed window)</li>
-          <li>Claims injected via request extensions for downstream handlers</li>
+          <li><code>RwLock</code> for concurrency</li>
+          <li>Claims via request extensions</li>
         </ul>
       </div>
     </div>
-    <div class="message agent">
-      <div class="msg-header">
-        <div class="msg-status thinking">◌</div>
-        <div class="msg-role agent">Agent</div>
-        <div class="msg-time">12:34:28</div>
-      </div>
-      <div class="thinking"><span class="thinking-dots"></span><span>thinking... 2.3s</span></div>
+
+    <div class="msg">
+      <div class="role"><span class="icon wait">◌</span><span class="name">Agent</span><span class="ts">12:35</span></div>
+      <div class="think">thinking... 1.2s</div>
     </div>
+
   </div>
-  <div class="command-popup">
-    <div class="cmd-item selected"><span class="cmd-name">/models</span><span class="cmd-desc">Manage model pool (add/remove models)</span></div>
-    <div class="cmd-item"><span class="cmd-name">/pool</span><span class="cmd-desc">Manage experience pool (flush/clear/stats)</span></div>
+
+  <div class="popup">
+    <div class="row sel"><span class="cmd">/models</span><span class="desc">Manage model pool</span></div>
+    <div class="row"><span class="cmd">/pool</span><span class="desc">Manage experience pool</span></div>
   </div>
-  <div class="input-area">
-    <div class="input-box">
-      <span class="prompt">&gt;</span>
-      <span class="input-text">Now add integration tests for both middleware<span class="cursor"></span></span>
-    </div>
-    <div class="input-meta"><span>Alt+Enter for newline</span><span>44 chars</span></div>
+
+  <div class="input">
+    <div class="box"><span class="pr">&gt;</span><span class="tx">Add integration tests<span class="cu"></span></span></div>
+    <div class="hint"><span>Alt+Enter newline</span><span>22 chars</span></div>
   </div>
-  <div class="statusbar">
-    <div class="left">
+
+  <div class="status">
+    <div class="l">
       <span class="model">gpt-4</span>
-      <span class="stat"><span class="label">↑</span>2.1k</span>
-      <span class="stat"><span class="label">↓</span>3.4k</span>
-      <span class="stat"><span class="label">pool:</span> 128</span>
-      <span class="stat"><span class="budget-good">budget: 72%</span></span>
+      <span class="s">↑2.1k ↓3.4k</span>
+      <span class="s">pool 128</span>
+      <span class="s" style="color:var(--green)">72%</span>
     </div>
-    <div class="right">
-      <span class="key"><kbd>Ctrl+A</kbd> providers</span>
-      <span class="key"><kbd>/</kbd> cmds</span>
-      <span class="key"><kbd>Ctrl+X</kbd> stop</span>
+    <div class="r">
+      <span><kbd>Ctrl+A</kbd> providers</span>
+      <span><kbd>/</kbd> cmds</span>
     </div>
   </div>
+</div>
 </div>
 </body>
 </html>

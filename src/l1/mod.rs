@@ -49,13 +49,10 @@ impl L1Retriever {
         role_embedding: &[f32; EMBEDDING_DIM],
     ) -> Result<L1Assessment, SpawnRejection> {
         if self.experiences.is_empty() {
-            // Cold start: no experience yet — allow with low confidence.
-            // Without this, the first spawn would always fail and the system
-            // would never accumulate any experience to learn from.
-            return Ok(L1Assessment {
-                confidence: 0.1,
-                recommended_tools: 0,
-                matched_experiences: 0,
+            // Presumed guilty: no experience = insufficient evidence.
+            return Err(SpawnRejection::L1Rejected {
+                reason: "No experience available — presumed guilty".to_string(),
+                confidence: 0.0,
             });
         }
 
