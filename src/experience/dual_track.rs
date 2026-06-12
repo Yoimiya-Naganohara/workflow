@@ -333,13 +333,13 @@ impl DualTrackMemory {
         role_template_id: Option<u32>,
     ) -> std::result::Result<L1Assessment, SpawnRejection> {
         if self.is_empty() {
-            // Presumed guilty: no experience = insufficient evidence.
-            // Cold start is handled by bootstrap_root_agent which skips the
-            // pipeline entirely. By the time spawn_child runs (via spawn_agent
-            // tool), TUI chat experiences already exist in the pool.
-            return Err(SpawnRejection::L1Rejected {
-                reason: "No experience available — presumed guilty".to_string(),
-                confidence: 0.0,
+            // Cold start: pool is empty — allow spawn with a reasonable baseline
+            // confidence so the system can bootstrap. Once agents run and produce
+            // experiences, subsequent spawns use real similarity data.
+            return Ok(L1Assessment {
+                confidence: 0.3,
+                recommended_tools: 0,
+                matched_experiences: 0,
             });
         }
 
@@ -631,11 +631,16 @@ mod tests {
         let path = tmp_path();
         let mem = DualTrackMemory::open(&path, 10, 0.5).unwrap();
 
-        // Empty -> presumed guilty: rejected.
+        // Cold start: empty pool returns low confidence instead of rejection.
         let mut query = [0.0f32; EMBEDDING_DIM];
         query[0] = 1.0;
         let result = mem.check_confidence(&query, &query, None);
-        assert!(result.is_err(), "empty pool should reject (presumed guilty)");
+        // Cold start: empty pool returns low confidence, not rejection.
+        assert!(result.is_ok(), "empty pool should allow cold-start spawn");
+        if let Ok(assessment) = result {
+            assert!(assessment.confidence < 0.5, "cold-start confidence should be below normal threshold");
+            assert_eq!(assessment.recommended_tools, 0);
+        }
         std::fs::remove_file(&path).ok();
     }
 

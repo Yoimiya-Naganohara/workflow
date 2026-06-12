@@ -50,10 +50,12 @@ impl L1Retriever {
         _role_template_id: Option<u32>,
     ) -> Result<L1Assessment, SpawnRejection> {
         if self.experiences.is_empty() {
-            // Presumed guilty: no experience = insufficient evidence.
-            return Err(SpawnRejection::L1Rejected {
-                reason: "No experience available — presumed guilty".to_string(),
-                confidence: 0.0,
+            // Cold start: pool is empty — allow spawn with a reasonable baseline
+            // confidence so the system can bootstrap.
+            return Ok(L1Assessment {
+                confidence: 0.3,
+                recommended_tools: 0,
+                matched_experiences: 0,
             });
         }
 
