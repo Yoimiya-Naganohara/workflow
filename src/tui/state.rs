@@ -219,19 +219,6 @@ impl AppState {
                     msg.status = MessageStatus::Streaming;
                 }
             }
-            AppEvent::ChatToolCall {
-                response_index: _,
-                name,
-                args,
-                timestamp,
-            } => {
-                self.core.messages.push(ChatMessage {
-                    role: MessageRole::Decision,
-                    content: format!("{} — {}", name, args),
-                    timestamp,
-                    status: MessageStatus::Completed,
-                });
-            }
             AppEvent::ChatCompleted {
                 response_index,
                 request_id: _,
@@ -309,6 +296,9 @@ impl AppState {
                     "Role '{}' optimization failed: {}",
                     role_name, error
                 )));
+            }
+            AppEvent::ChatToolCall { .. } => {
+                // Tool calls are handled silently — no chat message displayed.
             }
         }
     }
