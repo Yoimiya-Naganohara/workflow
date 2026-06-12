@@ -330,6 +330,169 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
             true
         }
 
+        // ── Role management commands ──
+        "/role" | "/role help" => {
+            let help = [
+                "Role Template Commands:",
+                "  /role list                    - List all role templates",
+                "  /role show <name>             - Show role template details",
+                "  /role create                  - Create a new role template (wizard)",
+                "  /role edit <name>             - Edit an existing role template (wizard)",
+                "  /role delete <name>           - Delete a role template",
+            ]
+            .join("\n");
+            core.messages.push(ChatMessage::system(help));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/role list" => {
+            if let Some(runtime) = &core.runtime {
+                if let Ok(rt) = runtime.try_read() {
+                    let templates = rt.all_role_templates();
+                    if templates.is_empty() {
+                        core.messages.push(ChatMessage::system("No role templates found."));
+                    } else {
+                        let mut lines = vec!["Role Templates:".to_string()];
+                        for t in &templates {
+                            let embedded = if t.embedding.is_some() { "✓" } else { "✗" };
+                            lines.push(format!(
+                                "  id={:<3}  {:<30}  label={:<20}  embedded={}",
+                                t.template_id,
+                                t.role,
+                                t.label,
+                                embedded
+                            ));
+                        }
+                        core.messages.push(ChatMessage::system(lines.join("\n")));
+                    }
+                } else {
+                    core.messages.push(ChatMessage::system("Runtime locked"));
+                }
+            } else {
+                core.messages.push(ChatMessage::system("Runtime not available"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/role show ") => {
+            let role_name = trimmed.strip_prefix("/role show ").unwrap().trim().to_string();
+            if role_name.is_empty() {
+                core.messages.push(ChatMessage::system("Usage: /role show <name>"));
+            } else if let Some(runtime) = &core.runtime {
+                if let Ok(rt) = runtime.try_read() {
+                    match rt.get_role_template(&role_name) {
+                        Some(t) => {
+                            let embedded = if t.embedding.is_some() { "yes" } else { "no" };
+                            let details = format!(
+                                "Role: {}\n  Label:        {}\n  ID:           {}\n  Embedded:     {}\n  Prompt ({}):\n{}\n{}\n{}",
+                                t.role,
+                                t.label,
+                                t.template_id,
+                                embedded,
+                                t.system_prompt.len(),
+                                "─".repeat(36),
+                                t.system_prompt,
+                                "─".repeat(36)
+                            );
+                            core.messages.push(ChatMessage::system(details));
+                        }
+                        None => {
+                            core.messages.push(ChatMessage::system(format!(
+                                "Role '{}' not found. Use /role list to see available roles.",
+                                role_name
+                            )));
+                        }
+                    }
+                } else {
+                    core.messages.push(ChatMessage::system("Runtime locked"));
+                }
+            } else {
+                core.messages.push(ChatMessage::system("Runtime not available"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/role create" => {
+            state.active_dialog = Some(crate::tui::dialogs::ActiveDialog::RoleWizard(
+                crate::tui::dialogs::role::RoleWizard::new(),
+            ));
+            core.messages.push(ChatMessage::system("Creating new role template..."));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/role edit ") => {
+            let role_name = trimmed.strip_prefix("/role edit ").unwrap().trim().to_string();
+            if role_name.is_empty() {
+                core.messages.push(ChatMessage::system("Usage: /role edit <name>"));
+            } else if let Some(runtime) = &core.runtime {
+                if let Ok(rt) = runtime.try_read() {
+                    match rt.get_role_template(&role_name) {
+                        Some(t) => {
+                            state.active_dialog = Some(
+                                crate::tui::dialogs::ActiveDialog::RoleWizard(
+                                    crate::tui::dialogs::role::RoleWizard::from_template(t),
+                                ),
+                            );
+                        }
+                        None => {
+                            core.messages.push(ChatMessage::system(format!(
+                                "Role '{}' not found. Use /role list to see available roles.",
+                                role_name
+                            )));
+                        }
+                    }
+                } else {
+                    core.messages.push(ChatMessage::system("Runtime locked"));
+                }
+            } else {
+                core.messages.push(ChatMessage::system("Runtime not available"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/role delete ") => {
+            let role_name = trimmed.strip_prefix("/role delete ").unwrap().trim().to_string();
+            if role_name.is_empty() {
+                core.messages.push(ChatMessage::system("Usage: /role delete <name>"));
+            } else if let Some(runtime) = &core.runtime {
+                if let Ok(rt) = runtime.try_read() {
+                    match rt.get_role_template(&role_name) {
+                        Some(t) => {
+                            // Delete via the role template store
+                            rt.delete_role_template(t.template_id);
+                            core.messages.push(ChatMessage::system(format!(
+                                "Role '{}' deleted.",
+                                role_name
+                            )));
+                        }
+                        None => {
+                            core.messages.push(ChatMessage::system(format!(
+                                "Role '{}' not found.",
+                                role_name
+                            )));
+                        }
+                    }
+                } else {
+                    core.messages.push(ChatMessage::system("Runtime locked"));
+                }
+            } else {
+                core.messages.push(ChatMessage::system("Runtime not available"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
         // Not a recognised command — let caller handle as chat message.
         _ => false,
     }
@@ -345,4 +508,5 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/keymap", "Show keyboard shortcuts"),
     ("/custom", "Add/list/remove custom providers"),
     ("/help", "Show help"),
+    ("/role", "Manage role templates (list/show/create/edit/delete)"),
 ];

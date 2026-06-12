@@ -130,6 +130,14 @@ impl RoleTemplateStore {
         Ok(())
     }
 
+    /// Delete a template by its ID.
+    /// Silently succeeds if the ID does not exist.
+    pub fn delete_by_id(&self, template_id: u32) {
+        let mut guard = self.templates.write().expect("role template store poisoned");
+        guard.retain(|t| t.template_id != template_id);
+        self.persist_impl(&guard);
+    }
+
     // ── helpers ──
 
     fn persist_impl(&self, guard: &[RoleTemplate]) {

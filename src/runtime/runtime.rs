@@ -370,6 +370,23 @@ impl AgentRuntime {
         self.role_template_store.get_by_role(role)
     }
 
+    /// List all role templates.
+    pub fn all_role_templates(&self) -> Vec<RoleTemplate> {
+        self.role_template_store.all()
+    }
+
+    /// Delete a role template by ID.
+    /// Silently succeeds if the role does not exist.
+    pub fn delete_role_template(&self, template_id: u32) {
+        self.role_template_store.delete_by_id(template_id);
+    }
+
+    /// Save (create or update) a role template.
+    pub fn save_role_template(&self, template: RoleTemplate) {
+        self.role_template_store.upsert(template);
+        let _ = self.role_template_store.persist();
+    }
+
     // ── Chat ──
 
     /// Chat with an LLM agent for a user goal.

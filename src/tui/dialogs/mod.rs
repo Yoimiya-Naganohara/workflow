@@ -7,6 +7,7 @@ pub mod custom_wizard;
 pub mod key;
 pub mod model_picker;
 pub mod provider;
+pub mod role;
 
 use crossterm::event::KeyEvent;
 use ratatui::{Frame, layout::Rect};
@@ -31,6 +32,7 @@ pub enum ActiveDialog {
     Key(key::KeyDialog),
     ModelPicker(model_picker::ModelPicker),
     CustomWizard(custom_wizard::CustomWizard),
+    RoleWizard(role::RoleWizard),
 }
 
 // ── Dispatch methods ──
@@ -44,6 +46,7 @@ impl ActiveDialog {
             Self::Key(d) => d.handle_key(state, key),
             Self::ModelPicker(d) => d.handle_key(state, key),
             Self::CustomWizard(d) => d.handle_key(state, key),
+            Self::RoleWizard(d) => d.handle_key(state, key),
         }
     }
 
@@ -54,6 +57,7 @@ impl ActiveDialog {
             Self::Key(d) => d.render(f, area, state),
             Self::ModelPicker(d) => d.render(f, area, state),
             Self::CustomWizard(d) => d.render(f, area, state),
+            Self::RoleWizard(d) => d.render(f, area, state),
         }
     }
 
@@ -80,7 +84,7 @@ impl ActiveDialog {
     /// Provider and Key dialogs render inline; ModelPicker and CustomWizard
     /// use the full-screen overlay.
     pub fn is_overlay(&self) -> bool {
-        matches!(self, Self::ModelPicker(_) | Self::CustomWizard(_))
+        matches!(self, Self::ModelPicker(_) | Self::CustomWizard(_) | Self::RoleWizard(_))
     }
 }
 
