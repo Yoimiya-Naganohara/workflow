@@ -46,6 +46,13 @@ pub enum Effect {
         runtime: Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
         abort_registration: futures::future::AbortRegistration,
     },
+    /// Compute embeddings for all roles missing them.
+    ComputeRoleEmbeddings,
+    /// Run prompt optimization for a role.
+    OptimizeRole {
+        role_name: String,
+        runtime: std::sync::Arc<tokio::sync::RwLock<crate::runtime::AgentRuntime>>,
+    },
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -98,6 +105,19 @@ pub enum AppEvent {
     ChatCancelled {
         response_index: usize,
         request_id: u64,
+    },
+    /// Result of a role optimization.
+    OptimizationResult {
+        role_name: String,
+        original: String,
+        improved: String,
+        summary: String,
+        stats: crate::runtime::optimizer::OptimizationStats,
+    },
+    /// Error during role optimization.
+    OptimizationError {
+        role_name: String,
+        error: String,
     },
 }
 
@@ -307,6 +327,61 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                             });
                         }
                     }
+                }
+            }
+        }
+
+        Effect::ComputeRoleEmbeddings => {
+            // ComputeRoleEmbeddings is handled directly in the TUI commands
+            // via runtime.compute_role_embeddings_async() — no async effect needed.
+            tracing::info!("Role embeddings computed via /role embed command");
+        }
+
+        Effect::OptimizeRole { role_name, runtime } => {
+            // Read role and experiences from runtime
+            let (role, experiences, provider, model_id) = {
+                let rt = runtime.read().await;
+                let role = match rt.get_role_template(&role_name) {
+                    Some(r) => r,
+                    None => {
+                        let _ = tx.send(AppEvent::OptimizationError {
+                            role_name: role_name.clone(),
+                            error: format!("Role '{}' not found", role_name),
+                        });
+                        return;
+                    }
+                };
+                let experiences = rt.get_experiences_by_role(role.template_id);
+                let provider = match &rt.provider {
+                    Some(p) => p.clone(),
+                    None => {
+                        let _ = tx.send(AppEvent::OptimizationError {
+                            role_name: role_name.clone(),
+                            error: "No LLM provider configured".to_string(),
+                        });
+                        return;
+                    }
+                };
+                (role, experiences, provider, rt.model_id.clone())
+            };
+
+            match crate::runtime::optimizer::optimize_role(
+                &role, &experiences, &provider, &model_id,
+            ).await {
+                Ok(result) => {
+                    let _ = tx.send(AppEvent::OptimizationResult {
+                        role_name: result.role_name.clone(),
+                        original: result.original_prompt,
+                        improved: result.improved_prompt,
+                        summary: result.summary,
+                        stats: result.stats,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::OptimizationError {
+                        role_name: role_name.clone(),
+                        error: e.to_string(),
+                    });
                 }
             }
         }

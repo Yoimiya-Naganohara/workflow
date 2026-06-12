@@ -278,6 +278,24 @@ impl AppState {
                 self.ui.active_chat_requests = 0;
                 self.ui.active_chat_abort = None;
             }
+            AppEvent::OptimizationResult {
+                role_name,
+                original: _,
+                improved,
+                summary,
+                stats: _,
+            } => {
+                self.core.messages.push(ChatMessage::system(format!(
+                    "Role '{}' optimization complete.\n\n{}  \n\nProposed new prompt:\n{}\n\nTo apply: /role edit {} and paste the new prompt.",
+                    role_name, summary, improved, role_name
+                )));
+            }
+            AppEvent::OptimizationError { role_name, error } => {
+                self.core.messages.push(ChatMessage::system(format!(
+                    "Role '{}' optimization failed: {}",
+                    role_name, error
+                )));
+            }
         }
     }
 }

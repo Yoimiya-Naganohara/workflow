@@ -340,6 +340,7 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                 "  /role edit <name>             - Edit an existing role template (wizard)",
                 "  /role delete <name>           - Delete a role template",
                 "  /role embed                    - Compute embeddings for all roles missing them",
+                "  /role optimize <name>           - Optimize role prompt from experience",
             ]
             .join("\n");
             core.messages.push(ChatMessage::system(help));
@@ -470,6 +471,56 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                         n
                     )));
                     rt.compute_role_embeddings_async();
+                } else {
+                    core.messages.push(ChatMessage::system("Runtime locked"));
+                }
+            } else {
+                core.messages.push(ChatMessage::system("Runtime not available"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/role optimize ") => {
+            let role_name = trimmed.strip_prefix("/role optimize ").unwrap().trim().to_string();
+            if role_name.is_empty() {
+                core.messages.push(ChatMessage::system("Usage: /role optimize <name>"));
+            } else if let Some(runtime) = &core.runtime {
+                if let Ok(rt) = runtime.try_read() {
+                    match rt.get_role_template(&role_name) {
+                        Some(role) => {
+                            let experiences = rt.get_experiences_by_role(role.template_id);
+                            if experiences.len() < crate::runtime::optimizer::MIN_EXPERIENCES {
+                                core.messages.push(ChatMessage::system(format!(
+                                    "Need at least {} experiences for '{}', have {}. Keep using the role to gather more data.",
+                                    crate::runtime::optimizer::MIN_EXPERIENCES,
+                                    role_name,
+                                    experiences.len()
+                                )));
+                            } else if rt.provider.is_some() {
+                                core.messages.push(ChatMessage::system(format!(
+                                    "Optimizing role '{}' from {} experiences...",
+                                    role_name,
+                                    experiences.len()
+                                )));
+                                state.effects.push(Effect::OptimizeRole {
+                                    role_name: role_name.clone(),
+                                    runtime: core.runtime.clone().unwrap(),
+                                });
+                            } else {
+                                core.messages.push(ChatMessage::system(
+                                    "No LLM provider configured. Connect a provider first via /connect.",
+                                ));
+                            }
+                        }
+                        None => {
+                            core.messages.push(ChatMessage::system(format!(
+                                "Role '{}' not found.",
+                                role_name
+                            )));
+                        }
+                    }
                 } else {
                     core.messages.push(ChatMessage::system("Runtime locked"));
                 }

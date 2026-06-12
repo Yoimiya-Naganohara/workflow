@@ -1,6 +1,7 @@
 #![allow(clippy::module_inception)]
 
 pub mod config;
+pub mod optimizer;
 pub mod pipeline;
 pub mod runtime;
 
