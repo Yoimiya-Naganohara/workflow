@@ -337,7 +337,7 @@ impl DualTrackMemory {
             // confidence so the system can bootstrap. Once agents run and produce
             // experiences, subsequent spawns use real similarity data.
             return Ok(L1Assessment {
-                confidence: 0.3,
+                confidence: 0.6,
                 recommended_tools: 0,
                 matched_experiences: 0,
             });
@@ -638,7 +638,7 @@ mod tests {
         // Cold start: empty pool returns low confidence, not rejection.
         assert!(result.is_ok(), "empty pool should allow cold-start spawn");
         if let Ok(assessment) = result {
-            assert!(assessment.confidence < 0.5, "cold-start confidence should be below normal threshold");
+            assert!(assessment.confidence > 0.5, "cold-start confidence should be above threshold");
             assert_eq!(assessment.recommended_tools, 0);
         }
         std::fs::remove_file(&path).ok();

@@ -53,7 +53,7 @@ impl L1Retriever {
             // Cold start: pool is empty — allow spawn with a reasonable baseline
             // confidence so the system can bootstrap.
             return Ok(L1Assessment {
-                confidence: 0.3,
+                confidence: 0.6,
                 recommended_tools: 0,
                 matched_experiences: 0,
             });
