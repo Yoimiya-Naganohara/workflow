@@ -22,9 +22,6 @@ pub struct AgentRuntimeConfig {
     /// Path to the bedrock experience pool mmap file.
     /// Defaults to `~/.workflow/experience_a.bin`.
     pub bedrock_path: Option<std::path::PathBuf>,
-    /// Minimum experiences per role before L1 uses similarity.
-    /// Below this count, spawns pass with full tool access.
-    pub min_experiences: usize,
 }
 
 impl Default for AgentRuntimeConfig {
@@ -38,7 +35,6 @@ impl Default for AgentRuntimeConfig {
             semantic_conflict_threshold: crate::core::types::DEFAULT_SEMANTIC_THRESHOLD,
             suspend_timeout_ms: crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS,
             bedrock_path: None,
-            min_experiences: 5,
         }
     }
 }
@@ -53,9 +49,40 @@ pub struct RoleTemplate {
     pub label: String,
     pub system_prompt: String,
     pub template_id: u32,
+    /// Minimum experiences for this role before L1 uses similarity.
+    /// Below this count, spawns pass unconditionally with full tools.
+    #[serde(default = "default_min_experiences")]
+    pub min_experiences: usize,
+    /// Optimisation version, incremented on each /role optimize.
+    #[serde(default)]
+    pub version: u32,
+    /// Unix timestamp of creation.
+    #[serde(default)]
+    pub created_at: u64,
+    /// Unix timestamp of last update.
+    #[serde(default)]
+    pub updated_at: u64,
     #[serde(with = "opt_big_array_384")]
     pub embedding: Option<[f32; crate::core::types::EMBEDDING_DIM]>,
 }
+
+impl Default for RoleTemplate {
+    fn default() -> Self {
+        Self {
+            role: String::new(),
+            label: String::new(),
+            system_prompt: String::new(),
+            template_id: 0,
+            min_experiences: default_min_experiences(),
+            version: 0,
+            created_at: 0,
+            updated_at: 0,
+            embedding: None,
+        }
+    }
+}
+
+fn default_min_experiences() -> usize { 5 }
 
 /// Serde helpers for `Option<[f32; EMBEDDING_DIM]>`.
 ///

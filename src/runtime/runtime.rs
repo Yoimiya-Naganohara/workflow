@@ -82,8 +82,7 @@ impl AgentRuntime {
         // Open dual-track memory with mmap persistence (creates file if needed)
         let dual_track = Box::new(
             DualTrackMemory::open(&bedrock_path, 512, config.l1_confidence_threshold)
-                .expect("Failed to open experience pool")
-                .with_min_experiences(config.min_experiences),
+                .expect("Failed to open experience pool"),
         );
 
         let pipeline = DecisionPipelineBuilder::new()
@@ -204,6 +203,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 0,
             embedding: None,
+            ..Default::default()
             },
             RoleTemplate {
                 role: "tester".to_string(),
@@ -212,6 +212,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 1,
             embedding: None,
+            ..Default::default()
             },
             RoleTemplate {
                 role: "developer".to_string(),
@@ -220,6 +221,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 2,
             embedding: None,
+            ..Default::default()
             },
             RoleTemplate {
                 role: "reviewer".to_string(),
@@ -228,6 +230,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 3,
             embedding: None,
+            ..Default::default()
             },
             RoleTemplate {
                 role: "planner".to_string(),
@@ -236,6 +239,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 4,
             embedding: None,
+            ..Default::default()
             },
             RoleTemplate {
                 role: "security_auditor".to_string(),
@@ -244,6 +248,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 5,
             embedding: None,
+            ..Default::default()
             },
             RoleTemplate {
                 role: "researcher".to_string(),
@@ -252,6 +257,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 6,
             embedding: None,
+            ..Default::default()
             },
             RoleTemplate {
                 role: "devops".to_string(),
@@ -260,6 +266,7 @@ impl AgentRuntime {
                     .to_string(),
                 template_id: 7,
             embedding: None,
+            ..Default::default()
             },
         ]);
 
@@ -515,6 +522,7 @@ impl AgentRuntime {
             system_prompt: format!("You are a {}. Execute the given goal.", role),
             template_id: 0,
             embedding: None,
+            ..Default::default()
         });
 
         let agent_id: AgentId = rand::random();
@@ -553,7 +561,8 @@ impl AgentRuntime {
                 label: role.to_string(),
                 system_prompt: format!("You are a {}. Execute the given goal.", role),
                 template_id: 0,
-            embedding: None,
+                embedding: None,
+                ..Default::default()
             });
 
         let agent_id: AgentId = rand::random();
@@ -629,6 +638,7 @@ impl AgentRuntime {
                 system_prompt: format!("You are a {}. Execute the given goal.", role),
                 template_id: 0,
             embedding: None,
+            ..Default::default()
             });
 
         let agent_id: AgentId = rand::random();

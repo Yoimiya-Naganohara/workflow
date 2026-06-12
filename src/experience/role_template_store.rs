@@ -159,6 +159,7 @@ mod tests {
                 system_prompt: "You are a senior architect.".into(),
                 template_id: 0,
                 embedding: None,
+                ..Default::default()
             },
             RoleTemplate {
                 role: "tester".into(),
@@ -166,6 +167,7 @@ mod tests {
                 system_prompt: "You are a QA engineer.".into(),
                 template_id: 1,
                 embedding: None,
+                ..Default::default()
             },
         ]
     }
@@ -199,6 +201,7 @@ mod tests {
             system_prompt: "extra".into(),
             template_id: 99,
             embedding: None,
+                ..Default::default()
         }]);
         assert_eq!(store.all().len(), 2);
     }
@@ -247,6 +250,7 @@ mod tests {
                 system_prompt: "alpha prompt".into(),
                 template_id: 10,
                 embedding: Some(emb_a),
+                ..Default::default()
             },
             RoleTemplate {
                 role: "beta".into(),
@@ -254,6 +258,7 @@ mod tests {
                 system_prompt: "beta prompt".into(),
                 template_id: 11,
                 embedding: Some(emb_b),
+                ..Default::default()
             },
         ]);
 
@@ -283,6 +288,7 @@ mod tests {
             system_prompt: "original".into(),
             template_id: 10,
             embedding: None,
+                ..Default::default()
         };
 
         // Insert new.

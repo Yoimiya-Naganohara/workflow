@@ -37,6 +37,7 @@ futures = "0.3"
 fastembed = "4"
 ort = "=2.0.0-rc.9"
 pulldown-cmark = "0.13"
+moka = { version = "0.12", features = ["sync"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

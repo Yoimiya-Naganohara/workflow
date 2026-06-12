@@ -8870,6 +8870,7 @@ dependencies = [
  "fastembed",
  "futures",
  "memmap2",
+ "moka",
  "ort",
  "pulldown-cmark",
  "rand 0.10.1",
