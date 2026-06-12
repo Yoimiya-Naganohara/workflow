@@ -4,6 +4,21 @@
 
 ---
 
+## 当前进度
+
+| 阶段 | 状态 | Commit |
+|------|------|--------|
+| P0-1 Agent `role_template_id` 字段 | ✅ 已完成 | `b71cccd` |
+| P0-2 经验记录传入 `role_template_id` | ✅ 已完成 | `cac7527` |
+| P0-3 按角色搜索 (`search_by_role` / `get_experiences_by_role`) | ✅ 已完成 | `b704e02` |
+| P0-4 Cluster 跟踪 `role_template_ids` | ✅ 已完成 | `d0fc9c9` |
+| P0-5 `/role` TUI 命令 (list/show/create/edit/delete) | ✅ 已完成 | `f4c27e3` |
+| P1 角色 embedding 自动计算 | ⏳ 待实现 | -
+| P2 Prompt 优化引擎 | ⏳ 待实现 | -
+| P3 副作用与反馈 | ⏳ 待实现 | -
+
+---
+
 ## 总体架构
 
 ```
