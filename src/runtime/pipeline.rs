@@ -281,6 +281,14 @@ impl DecisionPipeline {
             .expect("experience mutex poisoned")
             .retrieve(query, k)
     }
+
+    /// Collect all experiences belonging to a specific role.
+    pub fn get_experiences_by_role(&self, role_id: u32) -> Vec<ExperienceEntry> {
+        self.experience
+            .lock()
+            .expect("experience mutex poisoned")
+            .get_experiences_by_role(role_id)
+    }
 }
 
 // ============================================================================

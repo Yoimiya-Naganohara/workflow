@@ -137,6 +137,22 @@ pub trait ExperienceRetrieval: Send + Sync {
     fn fluid_count(&self) -> usize {
         0
     }
+
+    /// Search by role ID — only experiences with matching role_template_id.
+    fn search_by_role(
+        &self,
+        query: &[f32; EMBEDDING_DIM],
+        _role_id: u32,
+        k: usize,
+    ) -> Vec<(ExperienceEntry, f32)> {
+        // Default: fall back to regular search (no role filter).
+        self.retrieve(query, k)
+    }
+
+    /// Collect all experiences belonging to a specific role.
+    fn get_experiences_by_role(&self, _role_id: u32) -> Vec<ExperienceEntry> {
+        Vec::new()
+    }
 }
 
 impl ExperienceRetrieval for L1Retriever {

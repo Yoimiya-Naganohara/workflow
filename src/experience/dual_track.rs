@@ -365,6 +365,53 @@ impl DualTrackMemory {
         }
     }
 
+    /// Search by role ID — only return experiences with matching role_template_id.
+    pub fn search_by_role(
+        &self,
+        query: &[f32; EMBEDDING_DIM],
+        role_id: u32,
+        k: usize,
+    ) -> Vec<(ExperienceEntry, f32)> {
+        let mut results = Vec::new();
+
+        // Bedrock: filter by role, then score × credibility.
+        for (entry, score) in self.bedrock.search(query, k * 2) {
+            if entry.role_template_id == Some(role_id) {
+                results.push((entry, score * self.bedrock_credibility));
+            }
+        }
+
+        // Fluid: filter by role, then score × credibility.
+        for (entry, score) in self.fluid.search(query, k * 2) {
+            if entry.role_template_id == Some(role_id) {
+                results.push((entry, score * self.fluid_credibility));
+            }
+        }
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(k);
+        results
+    }
+
+    /// Collect all experiences belonging to a specific role (unordered).
+    pub fn get_experiences_by_role(&self, role_id: u32) -> Vec<ExperienceEntry> {
+        let mut results = Vec::new();
+
+        for entry in self.bedrock.entries() {
+            if entry.role_template_id == Some(role_id) {
+                results.push(entry.clone());
+            }
+        }
+
+        for entry in self.fluid.entries() {
+            if entry.role_template_id == Some(role_id) {
+                results.push(entry.clone());
+            }
+        }
+
+        results
+    }
+
     fn infer_tools(&self, matches: &[(ExperienceEntry, f32)]) -> u64 {
         let mut tool_votes = [0u32; 64];
         for (entry, score) in matches {
@@ -421,6 +468,19 @@ impl crate::l1::ExperienceRetrieval for DualTrackMemory {
 
     fn fluid_count(&self) -> usize {
         self.fluid_len()
+    }
+
+    fn search_by_role(
+        &self,
+        query: &[f32; EMBEDDING_DIM],
+        role_id: u32,
+        k: usize,
+    ) -> Vec<(ExperienceEntry, f32)> {
+        self.search_by_role(query, role_id, k)
+    }
+
+    fn get_experiences_by_role(&self, role_id: u32) -> Vec<ExperienceEntry> {
+        self.get_experiences_by_role(role_id)
     }
 }
 

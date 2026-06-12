@@ -314,6 +314,11 @@ impl AgentRuntime {
         self.pipeline.search_experience(query, k)
     }
 
+    /// Collect all experiences belonging to a specific role.
+    pub fn get_experiences_by_role(&self, role_id: u32) -> Vec<ExperienceEntry> {
+        self.pipeline.get_experiences_by_role(role_id)
+    }
+
     // ── Resource status ──
 
     pub fn available_permits(&self) -> usize {
