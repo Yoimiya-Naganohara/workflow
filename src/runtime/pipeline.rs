@@ -197,11 +197,18 @@ impl DecisionPipeline {
             *slot = guard;
         }
 
+        // Default: all tools available. L1's recommendation only restricts.
+        let allowed_tools = if l1_assessment.recommended_tools == 0 {
+            !0u64
+        } else {
+            l1_assessment.recommended_tools
+        };
+
         Ok(SpawnDecision::Approved(ChildAgentConfig {
             agent_id,
             task_id,
             allocated_budget,
-            allowed_tools: l1_assessment.recommended_tools,
+            allowed_tools,
             role_template_id: None,
         }))
     }
