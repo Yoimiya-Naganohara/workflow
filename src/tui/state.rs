@@ -297,8 +297,20 @@ impl AppState {
                     role_name, error
                 )));
             }
-            AppEvent::ChatToolCall { .. } => {
-                // Tool calls are handled silently — no chat message displayed.
+            AppEvent::ChatToolCall {
+                response_index,
+                name,
+                args,
+                timestamp: _,
+            } => {
+                // Show tool call inline in the streaming response.
+                let slot = find_streaming_slot_response(&self.core.messages, response_index);
+                if let Some(msg) = self.core.messages.get_mut(slot) {
+                    msg.content.push_str(&format!(
+                        "\n\n> **Tool**: {} — {}",
+                        name, args
+                    ));
+                }
             }
         }
     }
