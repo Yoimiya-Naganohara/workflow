@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Paragraph, Row, Table, TableState},
 };
 
-use crate::tui::chat_lines::{char_idx_to_byte_idx, display_width_up_to};
+use crate::tui::chat_lines::char_idx_to_byte_idx;
 use crate::tui::controller;
 use crate::tui::state::{ChatMessage, CoreState, SelectedModel};
 

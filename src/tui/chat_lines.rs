@@ -60,7 +60,7 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize, think_frame: u8)
 }
 
 fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::ChatMessage) {
-    let bar = Span::styled("┃", Style::default().fg(style::OVERLAY0));
+    let bar = Span::styled("┃", Style::default().fg(style::TEXT_MUTED));
     let content = &message.content;
     let (name, args) = if let Some(pos) = content.find(" — ") {
         (&content[..pos], &content[pos + 5..])
@@ -72,14 +72,14 @@ fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::
         bar,
         Span::styled(
             name.trim().to_string(),
-            Style::default().fg(style::MAUVE).add_modifier(Modifier::BOLD),
+            Style::default().fg(style::PURPLE).add_modifier(Modifier::BOLD),
         ),
     ];
 
     if !args.is_empty() {
         parts.push(Span::styled(
             format!(" {}", args.trim()),
-            Style::default().fg(style::TEXT3),
+            Style::default().fg(style::TEXT_MUTED),
         ));
     }
 
@@ -301,13 +301,13 @@ where
 
 fn render_heading(out: &mut Vec<Line<'static>>, spans: &[Span<'static>], level: HeadingLevel, body_width: usize) {
     let level_num: u8 = match level { HeadingLevel::H1 => 1, HeadingLevel::H2 => 2, _ => 3 };
-    let header_color = match level_num { 1 => style::YELLOW, 2 => style::BLUE, _ => style::TEXT3 };
+    let header_color = match level_num { 1 => style::YELLOW, 2 => style::BLUE, _ => style::TEXT_MUTED };
     let prefix = format!("  {} ", "#".repeat(level_num as usize));
     let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
     let wrapped = wrap_line(&text, body_width);
     for w in wrapped {
         out.push(Line::from(vec![
-            Span::styled(prefix.clone(), Style::default().fg(style::TEXT3)),
+            Span::styled(prefix.clone(), Style::default().fg(style::TEXT_MUTED)),
             Span::styled(w, Style::default().fg(header_color).add_modifier(Modifier::BOLD)),
         ]));
     }
@@ -317,23 +317,23 @@ fn render_hr(out: &mut Vec<Line<'static>>, body_width: usize) {
     let hr_width = body_width.min(40);
     out.push(Line::from(vec![
         Span::raw("  "),
-        Span::styled("─".repeat(hr_width), Style::default().fg(style::OVERLAY0)),
+        Span::styled("─".repeat(hr_width), Style::default().fg(style::TEXT_MUTED)),
     ]));
 }
 
 fn flush_code_block(out: &mut Vec<Line<'static>>, lang: &str, code_lines: &[String]) {
     if !lang.is_empty() {
-        out.push(Line::from(vec![Span::raw("  "), Span::styled(format!("┌─ {} ", lang), Style::default().fg(style::TEXT3))]));
+        out.push(Line::from(vec![Span::raw("  "), Span::styled(format!("┌─ {} ", lang), Style::default().fg(style::TEXT_MUTED))]));
     } else {
-        out.push(Line::from(vec![Span::raw("  "), Span::styled("┌───", Style::default().fg(style::TEXT3))]));
+        out.push(Line::from(vec![Span::raw("  "), Span::styled("┌───", Style::default().fg(style::TEXT_MUTED))]));
     }
     for code_line in code_lines {
         out.push(Line::from(vec![
-            Span::styled("  │ ", Style::default().fg(style::TEXT3)),
-            Span::styled(code_line.clone(), Style::default().fg(style::TEXT)),
+            Span::styled("  │ ", Style::default().fg(style::TEXT_MUTED)),
+            Span::styled(code_line.clone(), Style::default().fg(style::TEXT_PRIMARY)),
         ]));
     }
-    out.push(Line::from(Span::styled("  └───", Style::default().fg(style::TEXT3))));
+    out.push(Line::from(Span::styled("  └───", Style::default().fg(style::TEXT_MUTED))));
 }
 
 fn wrap_spans(out: &mut Vec<Line<'static>>, spans: &[Span<'static>], max_width: usize, indent: &str) {

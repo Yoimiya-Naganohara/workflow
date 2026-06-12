@@ -35,14 +35,14 @@ pub(crate) fn render_chat(f: &mut Frame, area: Rect, state: &AppState, visible_l
     let input_area = chunks[input_idx];
     let is_focused = state.ui.focus == crate::tui::state::Focus::Input;
 
-    let prompt = Span::styled("> ", Style::default().fg(if is_focused { style::BLUE } else { style::OVERLAY0 }).add_modifier(ratatui::style::Modifier::BOLD));
+    let prompt = Span::styled("> ", Style::default().fg(if is_focused { style::BLUE } else { style::TEXT_MUTED }).add_modifier(ratatui::style::Modifier::BOLD));
     let input_style = if is_focused { style::value_style() } else { style::hint_style() };
     let placeholder = "type / for commands";
 
     let input_display = if state.ui.input.is_empty() && is_focused {
         Paragraph::new(Line::from(vec![prompt, Span::styled(placeholder, input_style)]))
     } else if state.ui.input.is_empty() {
-        Paragraph::new(Line::from(vec![Span::styled("> ", Style::default().fg(style::OVERLAY0)), Span::styled(placeholder, style::hint_style())]))
+        Paragraph::new(Line::from(vec![Span::styled("> ", Style::default().fg(style::TEXT_MUTED)), Span::styled(placeholder, style::hint_style())]))
     } else {
         Paragraph::new(Line::from(vec![prompt, Span::styled(state.ui.input.as_str(), input_style)]))
     };

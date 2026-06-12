@@ -1,4 +1,4 @@
-//! Status bar — original format: ↑tokens ↓tokens Rtokens $cost ctx% (auto)
+//! Status bar — clean, minimal design with model info and key metrics.
 
 use ratatui::{
     Frame,
@@ -22,21 +22,41 @@ pub(crate) fn render_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
     } else { 0 };
     let ctx_pct = (budget_pct as f64 / 100.0).min(99.9);
 
-    let left_text = format!("↑{}k ↓{}k R{}M ${:.3} {:.1}%/1.0M (auto)", up_k, down_k, r_m, 1.176, ctx_pct);
+    // Left side: model + context usage
+    let model_name = state.core.selected_models.first()
+        .map(|m| m.model_name.as_str())
+        .unwrap_or("no model");
+
+    let left_text = format!("{} • {:.1}%/1.0M (auto)", model_name, ctx_pct);
     let left_width = left_text.len() as u16;
-    let remaining = area.width.saturating_sub(left_width + 26);
+    let remaining = area.width.saturating_sub(left_width + 40);
 
     let mut spans = vec![
-        Span::styled(format!("↑{}k ", up_k), Style::default().fg(style::TEXT2)),
-        Span::styled(format!("↓{}k ", down_k), Style::default().fg(style::TEXT2)),
-        Span::styled(format!("R{}M ", r_m), Style::default().fg(style::TEXT2)),
-        Span::styled(format!("${:.3} ", 1.176), Style::default().fg(style::TEXT2)),
-        Span::styled(format!("{:.1}%", ctx_pct), Style::default().fg(style::TEXT)),
-        Span::styled("/1.0M (auto)", Style::default().fg(style::TEXT3)),
+        Span::styled(model_name, Style::default().fg(style::BLUE).add_modifier(ratatui::style::Modifier::BOLD)),
+        Span::styled(" • ", Style::default().fg(style::TEXT_MUTED)),
+        Span::styled(format!("{:.1}%", ctx_pct), Style::default().fg(style::TEXT_PRIMARY)),
+        Span::styled("/1.0M (auto)", Style::default().fg(style::TEXT_MUTED)),
     ];
 
+    // Middle: metrics
+    spans.push(Span::styled("  ", Style::default()));
+    spans.push(Span::styled(format!("↑{}k", up_k), Style::default().fg(style::TEXT_SECONDARY)));
+    spans.push(Span::styled(" ", Style::default()));
+    spans.push(Span::styled(format!("↓{}k", down_k), Style::default().fg(style::TEXT_SECONDARY)));
+    spans.push(Span::styled(" ", Style::default()));
+    spans.push(Span::styled(format!("R{}M", r_m), Style::default().fg(style::TEXT_SECONDARY)));
+    spans.push(Span::styled(" ", Style::default()));
+    spans.push(Span::styled(format!("${:.3}", 1.176), Style::default().fg(style::TEXT_SECONDARY)));
+
+    // Fill remaining space
     for _ in 0..remaining { spans.push(Span::raw(" ")); }
-    spans.push(Span::styled(" Ctrl+A providers  / cmds", Style::default().fg(style::TEXT3)));
+
+    // Right side: key hints
+    spans.push(Span::styled("Ctrl+A ", Style::default().fg(style::TEXT_MUTED)));
+    spans.push(Span::styled("providers", Style::default().fg(style::BLUE)));
+    spans.push(Span::styled("  ", Style::default()));
+    spans.push(Span::styled("/", Style::default().fg(style::TEXT_MUTED)));
+    spans.push(Span::styled(" cmds", Style::default().fg(style::BLUE)));
 
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
