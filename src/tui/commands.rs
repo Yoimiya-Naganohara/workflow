@@ -498,6 +498,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                                     role_name,
                                     experiences.len()
                                 )));
+                            } else if let Some(reason) = rt.optimization_tracker.lock().unwrap().can_optimize(role.template_id, experiences.len()) {
+                                core.messages.push(ChatMessage::system(format!(
+                                    "Cannot optimize '{}': {}",
+                                    role_name, reason
+                                )));
                             } else if rt.provider.is_some() {
                                 core.messages.push(ChatMessage::system(format!(
                                     "Optimizing role '{}' from {} experiences...",
@@ -508,6 +513,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                                     role_name: role_name.clone(),
                                     runtime: core.runtime.clone().unwrap(),
                                 });
+                                // Mark optimization to prevent immediate re-run
+                                if let Ok(mut tracker) = rt.optimization_tracker.lock() {
+                                    tracker.mark_optimized(role.template_id, experiences.len());
+                                }
                             } else {
                                 core.messages.push(ChatMessage::system(
                                     "No LLM provider configured. Connect a provider first via /connect.",

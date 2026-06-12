@@ -51,6 +51,8 @@ pub struct AgentRuntime {
     pub model_id: String,
     /// Role template store backed by persistent JSON.
     role_template_store: Arc<RoleTemplateStore>,
+    /// Tracks optimization frequency per role.
+    pub optimization_tracker: std::sync::Mutex<super::optimizer::OptimizationTracker>,
 }
 
 impl AgentRuntime {
@@ -233,6 +235,9 @@ impl AgentRuntime {
             provider: None,
             model_id: String::new(),
             role_template_store: Arc::new(store),
+            optimization_tracker: std::sync::Mutex::new(
+                crate::runtime::optimizer::OptimizationTracker::new(),
+            ),
         };
 
         // Compute role embeddings in background (non-blocking).
@@ -533,7 +538,7 @@ impl AgentRuntime {
 
         let decision = self.pipeline.process_request(request).await?;
         match decision {
-            SpawnDecision::Approved(_config) => {
+            SpawnDecision::Approved(config) => {
                 // Attach budget guard to the agent (ownership transferred).
                 if let Some(guard) = self.pipeline.take_pending_guard() {
                     agent_pool.attach_budget_guard(agent_id, guard);
@@ -550,6 +555,7 @@ impl AgentRuntime {
                     config: crate::agent::AgentConfig {
                         system_prompt: role_tpl.system_prompt,
                         model_id: self.model_id.clone(),
+                        allowed_tools: config.allowed_tools,
                         ..Default::default()
                     },
                     status: AgentStatus::Idle,
@@ -613,7 +619,7 @@ impl AgentRuntime {
 
         let decision = self.pipeline.process_request(request).await?;
         match decision {
-            SpawnDecision::Approved(_config) => {
+            SpawnDecision::Approved(config) => {
                 // Attach budget guard to the child agent.
                 if let Some(guard) = self.pipeline.take_pending_guard() {
                     agent_pool.attach_budget_guard(agent_id, guard);
@@ -630,6 +636,7 @@ impl AgentRuntime {
                     config: crate::agent::AgentConfig {
                         system_prompt: role_tpl.system_prompt,
                         model_id: self.model_id.clone(),
+                        allowed_tools: config.allowed_tools,
                         ..Default::default()
                     },
                     status: AgentStatus::Idle,
@@ -799,16 +806,17 @@ impl AgentRuntime {
         };
 
         // Leaf agent — response is the result
-        let role_template_id = {
+        let (role_template_id, allowed_tools) = {
             let mut pool = agent_pool.write().await;
             let role_tpl_id = pool.get_agent(&agent_id).and_then(|a| a.role_template_id);
+            let tools = pool.get_agent(&agent_id).map(|a| a.config.allowed_tools).unwrap_or(0);
             if let Some(agent) = pool.get_agent_mut(&agent_id) {
                 agent.result = Some(response);
                 agent.status = AgentStatus::Completed;
                 pool.release_budget_guard(&agent_id);
                 pool.notify_completed(&agent_id);
             }
-            role_tpl_id
+            (role_tpl_id, tools)
         };
 
         // Record experience entry (feedback loop).
@@ -816,7 +824,7 @@ impl AgentRuntime {
             self.pipeline.record_experience(ExperienceEntry {
                 embedding: emb,
                 applicability_vector: [0.0f32; 128],
-                tool_bitmap: 0,
+                tool_bitmap: allowed_tools,
                 role_template_id,
                 weight: 0.8,
                 domain_version: 0,

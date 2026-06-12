@@ -14,6 +14,8 @@ pub struct AgentConfig {
     pub system_prompt: String,
     pub max_tokens: u64,
     pub temperature: f64,
+    /// Bitmap of tools this agent is allowed to use.
+    pub allowed_tools: u64,
 }
 
 impl Default for AgentConfig {
@@ -24,6 +26,7 @@ impl Default for AgentConfig {
             system_prompt: String::new(),
             max_tokens: 4000,
             temperature: 0.7,
+            allowed_tools: 0,
         }
     }
 }

@@ -8,12 +8,60 @@
 //! 4. Return the improved prompt for user review.
 //! 5. User confirms → new prompt is saved to the role template.
 
+use std::collections::HashMap;
+use std::time::Instant;
+
 use crate::core::types::ExperienceEntry;
 use crate::llm::LlmProvider;
 use crate::runtime::config::RoleTemplate;
 
 /// Minimum number of experiences required before optimization is meaningful.
 pub const MIN_EXPERIENCES: usize = 5;
+
+/// Tracks optimization frequency to prevent repeated optimization of the same role.
+pub struct OptimizationTracker {
+    last_optimized: HashMap<u32, Instant>,
+    pub min_interval_secs: u64,
+    pub min_new_experiences: usize,
+    experience_snapshot: HashMap<u32, usize>,
+}
+
+impl OptimizationTracker {
+    pub fn new() -> Self {
+        Self {
+            last_optimized: HashMap::new(),
+            min_interval_secs: 3600,
+            min_new_experiences: 3,
+            experience_snapshot: HashMap::new(),
+        }
+    }
+
+    pub fn can_optimize(&self, role_id: u32, current_count: usize) -> Option<&'static str> {
+        if let Some(last) = self.last_optimized.get(&role_id) {
+            let elapsed = last.elapsed().as_secs();
+            if elapsed < self.min_interval_secs {
+                return Some("optimized too recently");
+            }
+        }
+        if let Some(&prev_count) = self.experience_snapshot.get(&role_id) {
+            if current_count < prev_count + self.min_new_experiences {
+                return Some("not enough new experiences since last optimization");
+            }
+        }
+        None
+    }
+
+    pub fn mark_optimized(&mut self, role_id: u32, experience_count: usize) {
+        self.last_optimized.insert(role_id, Instant::now());
+        self.experience_snapshot.insert(role_id, experience_count);
+    }
+}
+
+impl Default for OptimizationTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Statistics about a role's experience pool.
 #[derive(Debug, Clone)]
@@ -53,26 +101,18 @@ pub async fn optimize_role(
         );
     }
 
-    // 1. Compute stats
     let stats = compute_stats(experiences);
-
-    // 2. Split into successful and low-quality
     let (successful, low_quality): (Vec<&ExperienceEntry>, Vec<&ExperienceEntry>) =
         experiences.iter().partition(|e| e.weight >= 0.7);
-
-    // 3. Build the analysis prompt
     let analysis_prompt = build_prompt(role, &stats, &successful, &low_quality);
 
-    // 4. Call LLM
     let response = llm
         .chat(model_id, "", &analysis_prompt)
         .await
         .map_err(|e| anyhow::anyhow!("LLM optimization call failed: {}", e))?;
 
-    // 5. Clean the response
     let improved_prompt = clean_output(&response);
 
-    // 6. Build summary
     let summary = format!(
         "Analyzed {} experiences ({} successful, {} low-quality). \
          Tools used across all: {:016b}. Average weight: {:.2}.",
@@ -88,7 +128,6 @@ pub async fn optimize_role(
     })
 }
 
-/// Compute aggregate stats from a slice of experiences.
 fn compute_stats(experiences: &[ExperienceEntry]) -> OptimizationStats {
     let total = experiences.len();
     let (high, low): (Vec<_>, Vec<_>) = experiences.iter().partition(|e| e.weight >= 0.7);
@@ -111,7 +150,6 @@ fn compute_stats(experiences: &[ExperienceEntry]) -> OptimizationStats {
     }
 }
 
-/// Build the LLM prompt that asks for an improved system prompt.
 fn build_prompt(
     role: &RoleTemplate,
     stats: &OptimizationStats,
@@ -120,18 +158,11 @@ fn build_prompt(
 ) -> String {
     let mut successes = Vec::new();
     for e in successful.iter().take(8) {
-        successes.push(format!(
-            "  weight={:.2}  tools={:016b}",
-            e.weight, e.tool_bitmap
-        ));
+        successes.push(format!("  weight={:.2}  tools={:016b}", e.weight, e.tool_bitmap));
     }
-
     let mut failures = Vec::new();
     for e in low_quality.iter().take(4) {
-        failures.push(format!(
-            "  weight={:.2}  tools={:016b}",
-            e.weight, e.tool_bitmap
-        ));
+        failures.push(format!("  weight={:.2}  tools={:016b}", e.weight, e.tool_bitmap));
     }
 
     format!(
@@ -186,11 +217,9 @@ Improved system prompt for role "{role_name}":
     )
 }
 
-/// Remove markdown fences and trim the LLM response.
 fn clean_output(output: &str) -> String {
     let s = output.trim();
     if s.starts_with("```") {
-        // Find the first newline after ```
         let after = s
             .lines()
             .skip(1)
@@ -264,5 +293,29 @@ mod tests {
     #[test]
     fn test_min_experiences_constant() {
         assert!(MIN_EXPERIENCES >= 3, "Need at least 3 for meaningful analysis");
+    }
+
+    #[test]
+    fn test_tracker_new_allows_optimization() {
+        let tracker = OptimizationTracker::new();
+        assert!(tracker.can_optimize(1, 5).is_none());
+    }
+
+    #[test]
+    fn test_tracker_blocks_immediate_reoptimize() {
+        let mut tracker = OptimizationTracker::new();
+        tracker.mark_optimized(1, 5);
+        assert!(tracker.can_optimize(1, 5).is_some());
+        assert!(tracker.can_optimize(1, 10).is_some(), "should still block due to time");
+    }
+
+    #[test]
+    fn test_tracker_blocks_insufficient_new_experiences() {
+        let mut tracker = OptimizationTracker::new();
+        tracker.min_interval_secs = 0;
+        tracker.mark_optimized(1, 10);
+        assert!(tracker.can_optimize(1, 11).is_some(), "need 3 new, got 1");
+        assert!(tracker.can_optimize(1, 12).is_some(), "need 3 new, got 2");
+        assert!(tracker.can_optimize(1, 13).is_none(), "got 3 new, should be allowed");
     }
 }
