@@ -432,6 +432,7 @@ impl Plan {
                     id: rand::random(),
                     name: format!("Worker {}", pool.agents().len() + 1),
                     role: "worker".to_string(),
+                    role_template_id: None,
                     parent_id: None,
                     children: Vec::new(),
                     depth: 0,
