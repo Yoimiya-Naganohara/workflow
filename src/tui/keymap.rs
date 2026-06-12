@@ -5,7 +5,6 @@ pub enum Action {
     // Global
     Quit,
     CancelResponse,
-    ToggleStatusPanel,
 
     // Navigation
     MoveUp,
@@ -169,7 +168,6 @@ pub fn format_action(action: &Action) -> String {
     match action {
         Action::Quit => "Quit the application",
         Action::CancelResponse => "Cancel current response",
-        Action::ToggleStatusPanel => "Show/hide status panel",
         Action::MoveUp => "Move up / Previous item",
         Action::MoveDown => "Move down / Next item",
         Action::MoveLeft => "Move cursor left",

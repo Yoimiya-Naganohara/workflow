@@ -1,7 +1,6 @@
 //! Unified design system for the TUI.
 //!
-//! Clean, minimal design inspired by Claude Code's aesthetic.
-//! Uses standard terminal colors for maximum compatibility.
+//! Catppuccin Mocha palette, opencode-inspired layout.
 
 use ratatui::{
     Frame,
@@ -11,72 +10,67 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
-// ── Color Palette (standard terminal colors) ──
+// ── Catppuccin Mocha Palette ──
 
-/// Border color for panels and dialogs.
-pub const BORDER: Color = Color::DarkGray;
-/// Title text color.
-pub const TITLE: Color = Color::Cyan;
-/// Foreground for highlighted list items.
-pub const HIGHLIGHT_FG: Color = Color::Cyan;
-/// Background for highlighted list items.
-pub const HIGHLIGHT_BG: Color = Color::DarkGray;
-/// Active input / search border color.
-pub const ACTIVE: Color = Color::Cyan;
-/// Inactive / subtle border color.
-pub const INACTIVE: Color = Color::DarkGray;
-/// Metadata label color.
-pub const LABEL: Color = Color::DarkGray;
-/// Primary value / content color.
-pub const VALUE: Color = Color::White;
-/// Success / confirm color.
-pub const SUCCESS: Color = Color::Green;
-/// Warning / in-progress color.
-pub const WARNING: Color = Color::Yellow;
-/// Error / failure color.
-pub const ERROR: Color = Color::Red;
-/// Hint / instruction text color.
-pub const HINT: Color = Color::DarkGray;
-/// Purple accent for tool calls.
-pub const PURPLE: Color = Color::Magenta;
-/// Light purple for tool call content.
-pub const PURPLE_LIGHT: Color = Color::LightMagenta;
+pub const BG: Color = Color::Rgb(33, 33, 33);
+pub const BG2: Color = Color::Rgb(44, 44, 44);
+pub const BG3: Color = Color::Rgb(24, 24, 24);
+pub const TEXT: Color = Color::Rgb(205, 214, 244);
+pub const TEXT2: Color = Color::Rgb(166, 173, 200);
+pub const TEXT3: Color = Color::Rgb(127, 132, 156);
+pub const BORDER: Color = Color::Rgb(75, 76, 92);
+pub const BORDER_D: Color = Color::Rgb(49, 50, 68);
+pub const BLUE: Color = Color::Rgb(137, 180, 250);
+pub const MAUVE: Color = Color::Rgb(203, 166, 247);
+pub const GREEN: Color = Color::Rgb(166, 227, 161);
+pub const RED: Color = Color::Rgb(243, 139, 168);
+pub const YELLOW: Color = Color::Rgb(249, 226, 175);
+pub const OVERLAY0: Color = Color::Rgb(108, 112, 134);
+
+// ── Backward-compatible aliases ──
+
+pub const TITLE: Color = BLUE;
+pub const HIGHLIGHT_FG: Color = BLUE;
+pub const HIGHLIGHT_BG: Color = BG2;
+pub const ACTIVE: Color = BLUE;
+pub const INACTIVE: Color = OVERLAY0;
+pub const LABEL: Color = TEXT3;
+pub const VALUE: Color = TEXT;
+pub const SUCCESS: Color = GREEN;
+pub const WARNING: Color = YELLOW;
+pub const ERROR: Color = RED;
+pub const HINT: Color = TEXT3;
+pub const PURPLE: Color = MAUVE;
+pub const PROPOSAL_WIDTH: u16 = 36;
 
 // ── Style Helpers ──
 
-/// Style for panel / dialog titles.
 pub fn title_style() -> Style {
-    Style::default().fg(TITLE).add_modifier(Modifier::BOLD)
+    Style::default().fg(BLUE).add_modifier(Modifier::BOLD)
 }
 
-/// Style for a highlighted (selected) list item foreground.
 pub fn highlight_fg() -> Style {
-    Style::default().fg(HIGHLIGHT_FG).add_modifier(Modifier::BOLD)
+    Style::default().fg(BLUE).add_modifier(Modifier::BOLD)
 }
 
-/// Style for a highlighted (selected) list item background.
 pub fn highlight_bg() -> Style {
-    Style::default().bg(HIGHLIGHT_BG)
+    Style::default().bg(BG2)
 }
 
-/// Style for metadata labels.
 pub fn label_style() -> Style {
-    Style::default().fg(LABEL)
+    Style::default().fg(TEXT3)
 }
 
-/// Style for primary values.
 pub fn value_style() -> Style {
-    Style::default().fg(VALUE)
+    Style::default().fg(TEXT)
 }
 
-/// Style for hint / instruction text.
 pub fn hint_style() -> Style {
-    Style::default().fg(HINT)
+    Style::default().fg(TEXT3)
 }
 
 // ── Widget Builders ──
 
-/// A bordered panel with a title, using unified colors.
 pub fn panel<'a>(title: &str) -> Block<'a> {
     Block::default()
         .borders(Borders::ALL)
@@ -84,17 +78,15 @@ pub fn panel<'a>(title: &str) -> Block<'a> {
         .title(Span::styled(format!(" {} ", title), title_style()))
 }
 
-/// A search / input box with an optional label.
 pub fn input_box<'a>(active: bool) -> Block<'a> {
-    let border_color = if active { ACTIVE } else { INACTIVE };
+    let border_color = if active { BLUE } else { BORDER };
     Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
 }
 
-/// Input bar with an `Input` label on the left.
 pub fn input_bar<'a>(active: bool) -> Block<'a> {
-    let border_color = if active { ACTIVE } else { INACTIVE };
+    let border_color = if active { BLUE } else { BORDER };
     Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
@@ -104,7 +96,6 @@ pub fn input_bar<'a>(active: bool) -> Block<'a> {
         ))
 }
 
-/// Chat panel border — plain corners.
 pub fn panel_chat<'a>(title: &str) -> Block<'a> {
     Block::default()
         .borders(Borders::ALL)
@@ -112,40 +103,23 @@ pub fn panel_chat<'a>(title: &str) -> Block<'a> {
         .title(Span::styled(format!(" {} ", title), title_style()))
 }
 
-/// Proposal/context panel border — rounded corners.
-pub fn panel_proposal<'a>(title: &str) -> Block<'a> {
-    use ratatui::widgets::BorderType;
-    Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(BORDER))
-        .title(Span::styled(format!(" {} ", title), title_style()))
-}
-
-/// Width of the proposal / context panel on the right.
-pub const PROPOSAL_WIDTH: u16 = 36;
-
-/// Style for diff additions.
 pub fn diff_add_style() -> Style {
-    Style::default().fg(SUCCESS)
+    Style::default().fg(GREEN)
 }
 
-/// Style for diff deletions.
 pub fn diff_del_style() -> Style {
-    Style::default().fg(ERROR)
+    Style::default().fg(RED)
 }
 
-/// Render a hint/instruction line at the bottom of a dialog or panel.
 pub fn render_hint(f: &mut Frame, area: Rect, text: &str) {
     f.render_widget(Paragraph::new(Span::styled(text, hint_style())), area);
 }
 
-/// Render a thin horizontal separator line.
 pub fn render_separator(f: &mut Frame, area: Rect) {
     let width = area.width as usize;
     if width > 0 {
         f.render_widget(
-            Paragraph::new(Span::styled("─".repeat(width), Style::default().fg(INACTIVE))).wrap(Wrap { trim: false }),
+            Paragraph::new(Span::styled("─".repeat(width), Style::default().fg(OVERLAY0))).wrap(Wrap { trim: false }),
             area,
         );
     }

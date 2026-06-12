@@ -130,7 +130,6 @@ pub struct UiState {
     pub command_popup_selection: usize,
     pub input_history: Vec<String>,
     pub input_history_idx: Option<usize>,
-    pub show_status_panel: bool,
     pub active_chat_request_id: u64,
     pub active_chat_abort: Option<AbortHandle>,
     pub active_chat_requests: usize,
@@ -226,10 +225,9 @@ impl AppState {
                 args,
                 timestamp,
             } => {
-                let tool_msg = format!("🔧 {} — {}", name, args);
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::Decision,
-                    content: tool_msg,
+                    content: format!("{} — {}", name, args),
                     timestamp,
                     status: MessageStatus::Completed,
                 });
@@ -370,7 +368,6 @@ impl Default for UiState {
             command_popup_selection: 0,
             input_history: Vec::new(),
             input_history_idx: None,
-            show_status_panel: true,
             active_chat_request_id: 0,
             active_chat_abort: None,
             active_chat_requests: 0,

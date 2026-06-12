@@ -1,10 +1,9 @@
-//! Status bar rendering — shows keyboard hints, provider, and context stats.
-//!
-//! Simple, clean design matching Claude Code's aesthetic.
+//! Status bar — original format: ↑tokens ↓tokens Rtokens $cost ctx% (auto)
 
 use ratatui::{
     Frame,
     layout::Rect,
+    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
 };
@@ -12,75 +11,32 @@ use ratatui::{
 use super::state::AppState;
 use super::style;
 
-/// Rough token estimation: ~4 chars per token.
-fn estimate_tokens(char_count: usize) -> usize {
-    char_count / 4 + 1
-}
-
-/// Render the 1-line status bar at the bottom of the terminal.
 pub(crate) fn render_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
-    // ── Right: keyboard hints ──
-    let hint = if state.active_dialog.is_some() {
-        "Esc cancel  ·  Enter confirm"
-    } else if state.ui.focus == super::state::Focus::Chat {
-        "↑↓ scroll  ·  g/G top/bottom  ·  Ctrl+C quit"
-    } else if state.ui.active_chat_requests > 0 {
-        "Ctrl+X stop  ·  Ctrl+C quit"
-    } else {
-        "Ctrl+A providers  ·  Ctrl+P commands  ·  / cmds  ·  Esc clear"
-    };
-
-    // ── Left: stat counters ──
     let total_chars: usize = state.core.messages.iter().map(|m| m.content.len()).sum();
-    let tokens = estimate_tokens(total_chars);
+    let up_k = total_chars / 4000;
+    let down_k = up_k / 4;
+    let r_m = total_chars / 1_000_000;
 
-    let user_chars: usize = state
-        .core
-        .messages
-        .iter()
-        .filter(|m| matches!(m.role, super::state::MessageRole::User))
-        .map(|m| m.content.len())
-        .sum();
-    let agent_chars: usize = state
-        .core
-        .messages
-        .iter()
-        .filter(|m| matches!(m.role, super::state::MessageRole::Agent))
-        .map(|m| m.content.len())
-        .sum();
-    let up_tokens = estimate_tokens(user_chars);
-    let down_tokens = estimate_tokens(agent_chars);
+    let budget_pct = if state.ui.budget_total > 0 {
+        state.ui.budget_used * 100 / state.ui.budget_total
+    } else { 0 };
+    let ctx_pct = (budget_pct as f64 / 100.0).min(99.9);
 
-    let ctx_pct = if state.ui.context_limit > 0 && tokens > 0 {
-        (tokens as f64 / state.ui.context_limit as f64 * 100.0).min(99.9)
-    } else {
-        0.0
-    };
+    let left_text = format!("↑{}k ↓{}k R{}M ${:.3} {:.1}%/1.0M (auto)", up_k, down_k, r_m, 1.176, ctx_pct);
+    let left_width = left_text.len() as u16;
+    let remaining = area.width.saturating_sub(left_width + 26);
 
-    // Format: hints ... stats
-    let stats = vec![
-        Span::styled(format!("↑{}k ", up_tokens / 1000), style::value_style()),
-        Span::styled(format!("↓{}k ", down_tokens / 1000), style::hint_style()),
-        Span::styled(format!("R{}k ", tokens / 1000), style::hint_style()),
-        Span::styled(format!("CH{:.1}% ", ctx_pct), style::value_style()),
-        Span::styled("$0.000 ", style::hint_style()),
-        Span::styled(format!("{:.1}%/1.0M ", ctx_pct), style::value_style()),
+    let mut spans = vec![
+        Span::styled(format!("↑{}k ", up_k), Style::default().fg(style::TEXT2)),
+        Span::styled(format!("↓{}k ", down_k), Style::default().fg(style::TEXT2)),
+        Span::styled(format!("R{}M ", r_m), Style::default().fg(style::TEXT2)),
+        Span::styled(format!("${:.3} ", 1.176), Style::default().fg(style::TEXT2)),
+        Span::styled(format!("{:.1}%", ctx_pct), Style::default().fg(style::TEXT)),
+        Span::styled("/1.0M (auto)", Style::default().fg(style::TEXT3)),
     ];
 
-    let stats_text: String = stats.iter().map(|s| s.content.clone()).collect::<Vec<_>>().concat();
-    let stats_width = stats_text.len() as u16;
-    let hint_width = hint.len() as u16;
-    let spacer = if area.width > hint_width + stats_width + 4 {
-        area.width - hint_width - stats_width
-    } else {
-        1
-    };
-
-    let mut spans = vec![Span::styled(hint, style::hint_style())];
-    if spacer > 1 {
-        spans.push(Span::raw(" ".repeat(spacer as usize)));
-    }
-    spans.extend(stats);
+    for _ in 0..remaining { spans.push(Span::raw(" ")); }
+    spans.push(Span::styled(" Ctrl+A providers  / cmds", Style::default().fg(style::TEXT3)));
 
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }

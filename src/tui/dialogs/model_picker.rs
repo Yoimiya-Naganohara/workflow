@@ -153,9 +153,8 @@ impl ModelPicker {
         }
 
         let dialog_w = 64u16.min(area.width.saturating_sub(4));
-        let search_h = 3u16;
         let list_h = (results.len() as u16).min(12);
-        let dialog_h = (list_h + 5 + search_h).min(area.height.saturating_sub(4));
+        let dialog_h = (list_h + 5 + 1).min(area.height.saturating_sub(4));
         let x = area.x + (area.width.saturating_sub(dialog_w)) / 2;
         let y = area.y + (area.height.saturating_sub(dialog_h)) / 2;
         let dialog_area = Rect::new(x, y, dialog_w, dialog_h);
@@ -166,20 +165,19 @@ impl ModelPicker {
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(search_h), Constraint::Length(1), Constraint::Min(0)])
+            .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)])
             .split(inner);
 
-        // Search box
+        // Search line — reads from dialog.search_query (synced from main input)
+        let search_text = if self.search_query.is_empty() {
+            "⌕ search models...".to_string()
+        } else {
+            format!("search: {}", self.search_query)
+        };
         f.render_widget(
-            Paragraph::new(self.search_query.as_str())
-                .style(style::value_style())
-                .block(style::input_box(true)),
+            Paragraph::new(search_text).style(if self.search_query.is_empty() { style::hint_style() } else { style::value_style() }),
             chunks[0],
         );
-        let prefix_width = display_width_up_to(&self.search_query, self.search_cursor);
-        let cursor_x = chunks[0].x + prefix_width as u16 + 1;
-        let cursor_y = chunks[0].y + 1;
-        f.set_cursor_position((cursor_x, cursor_y));
 
         style::render_separator(f, chunks[1]);
 

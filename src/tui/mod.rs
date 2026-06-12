@@ -7,7 +7,6 @@ pub mod effect;
 pub mod handler;
 pub mod keymap;
 pub mod popup;
-pub mod proposal;
 pub mod render;
 pub mod state;
 pub mod status;
@@ -93,7 +92,42 @@ impl Tui {
 
                                     // Dialog dispatch
                                     if let Some(mut dialog) = state.active_dialog.take() {
+                                        // Sync main input ↔ dialog search/input field
+                                        match &mut dialog {
+                                            crate::tui::dialogs::ActiveDialog::Provider(d) => {
+                                                d.search_query = state.ui.input.clone();
+                                                d.search_cursor = state.ui.input_cursor;
+                                            }
+                                            crate::tui::dialogs::ActiveDialog::Key(d) => {
+                                                d.input = state.ui.input.clone();
+                                                d.cursor = state.ui.input_cursor;
+                                            }
+                                            crate::tui::dialogs::ActiveDialog::ModelPicker(d) => {
+                                                d.search_query = state.ui.input.clone();
+                                                d.search_cursor = state.ui.input_cursor;
+                                            }
+                                            _ => {}
+                                        }
+
                                         let transition = dialog.handle_key(&mut state.core, key);
+
+                                        // Sync back after handle_key
+                                        match &dialog {
+                                            crate::tui::dialogs::ActiveDialog::Provider(d) => {
+                                                state.ui.input = d.search_query.clone();
+                                                state.ui.input_cursor = d.search_cursor;
+                                            }
+                                            crate::tui::dialogs::ActiveDialog::Key(d) => {
+                                                state.ui.input = d.input.clone();
+                                                state.ui.input_cursor = d.cursor;
+                                            }
+                                            crate::tui::dialogs::ActiveDialog::ModelPicker(d) => {
+                                                state.ui.input = d.search_query.clone();
+                                                state.ui.input_cursor = d.search_cursor;
+                                            }
+                                            _ => {}
+                                        }
+
                                         match transition {
                                             DialogTransition::None => {
                                                 state.active_dialog = Some(dialog);

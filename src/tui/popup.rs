@@ -133,40 +133,12 @@ fn render_provider_popup(
     let show_custom = dialog.show_custom();
     let total_items = filtered.len() + if show_custom { 1 } else { 0 };
 
-    // Layout: search line (1) + separator (1) + list+separator+custom (min)
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // search line
-            Constraint::Length(1), // separator
-            Constraint::Min(0),    // list + custom
-        ])
-        .split(inner);
-
-    let list_area = chunks[2];
-    // ── Search line ──
-    let search_text = format!("⌕ {}", dialog.search_query);
-    let search_para = Paragraph::new(Span::styled(
-        &search_text,
-        if dialog.search_query.is_empty() {
-            style::hint_style()
-        } else {
-            style::value_style()
-        },
-    ));
-    f.render_widget(search_para, chunks[0]);
-    // Cursor after the search text
-    let cursor_x = chunks[0].x + 2 + dialog.search_query.chars().count() as u16; // +2 for "⌕ "
-    f.set_cursor_position((cursor_x.min(chunks[0].right().saturating_sub(1)), chunks[0].y));
-
-    // ── Separator ──
-    style::render_separator(f, chunks[1]);
-
-    // ── Provider list + custom row ──
+    // No search box — main input IS the search field.
+    // Just show the list directly.
     if filtered.is_empty() && !show_custom {
         f.render_widget(
             Paragraph::new("No matching providers.").style(style::hint_style()),
-            list_area,
+            inner,
         );
         return;
     }
@@ -227,7 +199,7 @@ fn render_provider_popup(
             ],
         )
         .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
-        list_area,
+        inner,
         &mut table_state,
     );
 }
@@ -281,9 +253,7 @@ fn render_key_popup(f: &mut Frame, area: Rect, state: &AppState, dialog: &crate:
         )),
         chunks[1],
     );
-    // Cursor after "sk- "
-    let cursor_x = chunks[1].x + 4 + dialog.input.chars().count() as u16;
-    f.set_cursor_position((cursor_x.min(chunks[1].right().saturating_sub(1)), chunks[1].y));
+    // Cursor handled by main input — don't set cursor here
 
     // Hint line
     let hint = if dialog.return_to_picker {

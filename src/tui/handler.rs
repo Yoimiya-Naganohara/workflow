@@ -44,10 +44,6 @@ impl Tui {
                 ui.command_popup_selection = 0;
             }
 
-            Action::ToggleStatusPanel => {
-                ui.show_status_panel = !ui.show_status_panel;
-            }
-
             Action::CancelResponse => {
                 if let Some(abort) = ui.active_chat_abort.take() {
                     abort.abort();
@@ -156,8 +152,6 @@ impl Tui {
                     if !matches.is_empty() {
                         ui.command_popup_selection = (ui.command_popup_selection + 1) % matches.len();
                     }
-                } else {
-                    ui.show_status_panel = !ui.show_status_panel;
                 }
             }
 
