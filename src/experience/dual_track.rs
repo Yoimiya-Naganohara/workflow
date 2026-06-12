@@ -350,10 +350,11 @@ impl DualTrackMemory {
             .as_secs();
 
         // Search task matches across both tracks (role-aware when possible).
+        let mut task_has_role_data = false;
         let task_matches = if let Some(role_id) = role_template_id {
-            // Role-specific task search: use search_by_role for better precision.
             let role_task = self.search_by_role(task_embedding, role_id, 5);
             if !role_task.is_empty() {
+                task_has_role_data = true;
                 role_task
             } else {
                 self.search(task_embedding, 5)
@@ -362,10 +363,11 @@ impl DualTrackMemory {
             self.search(task_embedding, 5)
         };
 
-        // Search role matches.
+        let mut role_has_role_data = false;
         let role_matches = if let Some(role_id) = role_template_id {
             let role_role = self.search_by_role(role_embedding, role_id, 5);
             if !role_role.is_empty() {
+                role_has_role_data = true;
                 role_role
             } else {
                 self.search(role_embedding, 5)
@@ -374,21 +376,15 @@ impl DualTrackMemory {
             self.search(role_embedding, 5)
         };
 
-        // Multi-score aggregation: weighted sum of Top-5, not just Top-1.
         let task_score = Self::aggregate_top_k(&task_matches, now);
         let role_score = Self::aggregate_top_k(&role_matches, now);
 
-        // Combined score.
-        let combined = (task_score + role_score) / 2.0;
-
-        // Bayesian blending: initial_confidence acts as a prior that gets
-        // diluted as real experiences accumulate.
-        let combined = if let Some(init_conf) = initial_confidence {
-            let n = (task_matches.len() + role_matches.len()) as f32;
-            let prior_weight = 1.0;
-            (combined * n + init_conf * prior_weight) / (n + prior_weight)
+        // New role without any experiences yet → use initial confidence directly.
+        // Existing role with data → use real similarity scores.
+        let combined = if role_template_id.is_some() && !task_has_role_data && !role_has_role_data {
+            initial_confidence.unwrap_or(0.6)
         } else {
-            combined
+            (task_score + role_score) / 2.0
         };
 
         if combined >= self.confidence_threshold {
