@@ -20,7 +20,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::Span,
-    widgets::{Block, Borders, Paragraph, Row, Table, TableState},
+    widgets::{Paragraph, Row, Table, TableState},
 };
 
 use crate::models::filter_providers;
@@ -33,7 +33,6 @@ use crate::tui::style;
 /// Height reserved for the inline popup. 0 when no popup is shown.
 pub(crate) fn popup_height(state: &AppState) -> u16 {
     if has_command_popup(state) {
-        // Count matching commands (capped at 6) + header + border
         let prefix = state.ui.input.trim().to_lowercase();
         let count = COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).count();
         (count.min(6) as u16 + 2).min(8)
@@ -42,12 +41,12 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
             use crate::tui::dialogs::ActiveDialog::*;
             match dialog {
                 Provider(d) => {
-                    // Search box (3) + separator (1) + list rows (capped) + border (2)
                     let items = filter_providers(state.core.models.providers(), &d.search_query).len();
-                    let list_h = (items.min(6) as u16).max(1);
-                    (list_h + 4 + 2).min(12) // +4 for header+search+sep, +2 border
+                    let list_h = (items.min(6) as u16).max(1) + 1; // providers + custom row
+                    // 1 search + 1 separator + list_h + 2 borders
+                    (list_h + 4).min(12)
                 }
-                Key(_) => 10, // fixed height
+                Key(_) => 5, // 1 provider line + 1 input + 1 hint + 2 borders
                 _ => 0,
             }
         } else {
@@ -130,43 +129,44 @@ fn render_provider_popup(
     let inner = style::panel("Configure Provider").inner(area);
     f.render_widget(style::panel("Configure Provider"), area);
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // search box
-            Constraint::Length(1), // separator
-            Constraint::Min(0),    // provider list
-        ])
-        .split(inner);
-
-    // ── Search box ──
-    let search_input = Paragraph::new(dialog.search_query.as_str())
-        .style(style::value_style())
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(style::ACTIVE)));
-    f.render_widget(search_input, chunks[0]);
-    // Cursor in search box
-    let prefix_width = crate::tui::chat_lines::display_width_up_to(
-        &dialog.search_query,
-        dialog.search_cursor,
-    );
-    f.set_cursor_position((
-        (chunks[0].x + prefix_width as u16 + 1).min(chunks[0].right().saturating_sub(2)),
-        chunks[0].y + 1,
-    ));
-
-    style::render_separator(f, chunks[1]);
-
-    // ── Provider list ──
     let filtered = filter_providers(state.core.models.providers(), &dialog.search_query);
     let show_custom = dialog.show_custom();
     let total_items = filtered.len() + if show_custom { 1 } else { 0 };
 
+    // Layout: search line (1) + separator (1) + list+separator+custom (min)
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // search line
+            Constraint::Length(1), // separator
+            Constraint::Min(0),    // list + custom
+        ])
+        .split(inner);
+
+    let list_area = chunks[2];
+    // ── Search line ──
+    let search_text = format!("⌕ {}", dialog.search_query);
+    let search_para = Paragraph::new(Span::styled(
+        &search_text,
+        if dialog.search_query.is_empty() {
+            style::hint_style()
+        } else {
+            style::value_style()
+        },
+    ));
+    f.render_widget(search_para, chunks[0]);
+    // Cursor after the search text
+    let cursor_x = chunks[0].x + 2 + dialog.search_query.chars().count() as u16; // +2 for "⌕ "
+    f.set_cursor_position((cursor_x.min(chunks[0].right().saturating_sub(1)), chunks[0].y));
+
+    // ── Separator ──
+    style::render_separator(f, chunks[1]);
+
+    // ── Provider list + custom row ──
     if filtered.is_empty() && !show_custom {
         f.render_widget(
             Paragraph::new("No matching providers.").style(style::hint_style()),
-            chunks[2],
+            list_area,
         );
         return;
     }
@@ -178,17 +178,29 @@ fn render_provider_popup(
         .max()
         .unwrap_or(8);
 
+    // Status badge labels
+    let status_conf = "configured";
+    let status_key = "needs key";
+    let status_na = "no auth";
+    let max_status = status_conf.len().max(status_key.len()).max(status_na.len());
+
     let mut rows: Vec<Row> = filtered
         .iter()
         .map(|p| {
             let is_configured = state.core.configured_providers.iter().any(|id| id == &p.id);
+            let needs_key = !p.env.is_empty();
+            let (icon, status_label, status_style) = if is_configured {
+                ("✓", status_conf, Style::default().fg(style::SUCCESS))
+            } else if needs_key {
+                ("", status_key, Style::default().fg(style::HINT))
+            } else {
+                ("", status_na, Style::default().fg(style::ACTIVE))
+            };
             Row::new(vec![
-                Span::styled(
-                    if is_configured { "✓" } else { "" },
-                    Style::default().fg(style::SUCCESS),
-                ),
+                Span::styled(icon, Style::default().fg(style::SUCCESS)),
                 Span::styled(&p.name, style::value_style()),
                 Span::styled(format!("{} models", p.models.len()), style::hint_style()),
+                Span::styled(status_label, status_style),
             ])
         })
         .collect();
@@ -197,6 +209,7 @@ fn render_provider_popup(
         rows.push(Row::new(vec![
             Span::raw(""),
             Span::styled("+ Add Custom Provider", Style::default().fg(style::ACTIVE)),
+            Span::raw(""),
             Span::raw(""),
         ]));
     }
@@ -207,13 +220,14 @@ fn render_provider_popup(
         Table::new(
             rows,
             [
-                Constraint::Length(1),
-                Constraint::Length(max_name as u16 + 1),
-                Constraint::Length(max_count as u16),
+                Constraint::Length(1),                           // icon
+                Constraint::Length(max_name as u16 + 1),         // name
+                Constraint::Length(max_count as u16),            // model count
+                Constraint::Length(max_status as u16),           // status badge
             ],
         )
         .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
-        chunks[2],
+        list_area,
         &mut table_state,
     );
 }
@@ -243,38 +257,47 @@ fn render_key_popup(
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Length(3)])
+        .constraints([
+            Constraint::Length(1), // "Enter API key for ..."
+            Constraint::Length(1), // input line
+            Constraint::Length(1), // hint
+        ])
         .split(inner);
 
-    // Input field
-    let masked: String = dialog.input.chars().map(|_| '•').collect();
-    let has_input = !dialog.input.is_empty();
-    let display = Paragraph::new(if has_input {
-        masked.as_str()
-    } else {
-        " Type or paste your API key…"
-    })
-    .style(if has_input {
-        Style::default().fg(style::WARNING)
-    } else {
-        style::hint_style()
-    })
-    .block(style::input_box(has_input));
-    f.render_widget(display, chunks[0]);
-
-    // Cursor
-    let cx = chunks[0].x + dialog.input.chars().count() as u16 + 1;
-    let cy = chunks[0].y + 1;
-    f.set_cursor_position((cx.min(chunks[0].right().saturating_sub(2)), cy));
-
-    // Hint
-    style::render_hint(
-        f,
-        chunks[1],
-        if dialog.return_to_picker {
-            "Enter to confirm (returns to model picker)  ·  Esc to cancel"
-        } else {
-            "Enter to confirm  ·  Esc to cancel"
-        },
+    // Provider name line
+    let info_line = format!("Enter API key for {}", provider_name);
+    f.render_widget(
+        Paragraph::new(Span::styled(info_line, style::hint_style())),
+        chunks[0],
     );
+
+    // Input line: "sk- <masked text>"
+    let masked: String = dialog.input.chars().map(|_| '•').collect();
+    let display_text = if dialog.input.is_empty() {
+        "sk- …".to_string()
+    } else {
+        format!("sk- {}", masked)
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            &display_text,
+            if dialog.input.is_empty() {
+                style::hint_style()
+            } else {
+                Style::default().fg(style::WARNING)
+            },
+        )),
+        chunks[1],
+    );
+    // Cursor after "sk- "
+    let cursor_x = chunks[1].x + 4 + dialog.input.chars().count() as u16;
+    f.set_cursor_position((cursor_x.min(chunks[1].right().saturating_sub(1)), chunks[1].y));
+
+    // Hint line
+    let hint = if dialog.return_to_picker {
+        "Enter to confirm (returns to model picker)  ·  Esc to cancel"
+    } else {
+        "Enter to confirm  ·  Esc to back to providers"
+    };
+    f.render_widget(Paragraph::new(Span::styled(hint, style::hint_style())), chunks[2]);
 }
