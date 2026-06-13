@@ -114,6 +114,7 @@ pub struct CoreState {
     pub runtime: Option<Arc<RwLock<AgentRuntime>>>,
     pub tool_server: ToolServerHandle,
     pub responsible_agent_id: Option<AgentId>,
+    pub default_role: String,
 }
 
 /// Transient UI state — reset on restart.
@@ -156,20 +157,18 @@ pub struct AppState {
     pub effects: Vec<crate::tui::effect::Effect>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum PopupMode {
+    #[default]
     None,
     Commands,
-    SubCommand { parent: String, items: Vec<(String, String)> },
+    SubCommand {
+        parent: String,
+        items: Vec<(String, String)>,
+    },
     Providers,
     KeyInput,
     ModelPicker,
-}
-
-impl Default for PopupMode {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl AppState {
@@ -231,10 +230,11 @@ impl AppState {
                 });
             }
             AppEvent::ChatToken { response_index, text } => {
-                let slot = find_streaming_slot_response(&self.core.messages, response_index);
-                if let Some(msg) = self.core.messages.get_mut(slot) {
-                    msg.content.push_str(&text);
-                    msg.status = MessageStatus::Streaming;
+                if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
+                    if let Some(msg) = self.core.messages.get_mut(slot) {
+                        msg.content.push_str(&text);
+                        msg.status = MessageStatus::Streaming;
+                    }
                 }
             }
             AppEvent::ChatCompleted {
@@ -244,12 +244,30 @@ impl AppState {
                 input: _,
                 runtime: _,
             } => {
-                let slot = find_streaming_slot_response(&self.core.messages, response_index);
-                if let Some(msg) = self.core.messages.get_mut(slot) {
-                    if !full_response.is_empty() {
-                        msg.content = full_response;
+                // Prepend any tool call annotations that were streamed during the response
+                if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
+                    if let Some(msg) = self.core.messages.get_mut(slot) {
+                        // Preserve tool call annotations that were appended during streaming
+                        let tool_annotations = if !full_response.is_empty() && msg.content != full_response {
+                            // Extract any text that was added after full_response content
+                            if msg.content.starts_with(&full_response) {
+                                msg.content[full_response.len()..].to_string()
+                            } else {
+                                // Content diverged — keep what we have and annotate
+                                String::new()
+                            }
+                        } else {
+                            String::new()
+                        };
+
+                        if !full_response.is_empty() {
+                            msg.content = full_response;
+                        }
+                        if !tool_annotations.is_empty() {
+                            msg.content.push_str(&tool_annotations);
+                        }
+                        msg.status = MessageStatus::Completed;
                     }
-                    msg.status = MessageStatus::Completed;
                 }
                 if self.ui.active_chat_requests > 0 {
                     self.ui.active_chat_requests -= 1;
@@ -261,10 +279,11 @@ impl AppState {
                 request_id: _,
                 error,
             } => {
-                let slot = find_streaming_slot_response(&self.core.messages, response_index);
-                if let Some(msg) = self.core.messages.get_mut(slot) {
-                    msg.content = error;
-                    msg.status = MessageStatus::Error;
+                if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
+                    if let Some(msg) = self.core.messages.get_mut(slot) {
+                        msg.content = error;
+                        msg.status = MessageStatus::Error;
+                    }
                 }
                 self.ui.active_chat_requests = 0;
                 self.ui.active_chat_abort = None;
@@ -273,10 +292,11 @@ impl AppState {
                 response_index,
                 request_id: _,
             } => {
-                let slot = find_streaming_slot_response(&self.core.messages, response_index);
-                if let Some(msg) = self.core.messages.get_mut(slot) {
-                    msg.content += " (cancelled)";
-                    msg.status = MessageStatus::Completed;
+                if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
+                    if let Some(msg) = self.core.messages.get_mut(slot) {
+                        msg.content += " (cancelled)";
+                        msg.status = MessageStatus::Completed;
+                    }
                 }
                 self.ui.active_chat_requests = 0;
                 self.ui.active_chat_abort = None;
@@ -321,28 +341,40 @@ impl AppState {
                 args,
                 timestamp: _,
             } => {
-                // Show tool call inline in the streaming response.
-                let slot = find_streaming_slot_response(&self.core.messages, response_index);
-                if let Some(msg) = self.core.messages.get_mut(slot) {
-                    msg.content.push_str(&format!("\n\n> **Tool**: {} — {}", name, args));
-                }
+                // Insert tool call right after the streaming agent message
+                let insert_pos = find_streaming_slot_response(&self.core.messages, response_index)
+                    .map(|s| s + 1)
+                    .unwrap_or_else(|| self.core.messages.len());
+                self.core.messages.insert(
+                    insert_pos,
+                    ChatMessage {
+                        role: MessageRole::Decision,
+                        content: format!("{} — {}", name, args),
+                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                        status: MessageStatus::Completed,
+                    },
+                );
             }
         }
     }
 }
 
-/// Find the slot index of a streaming message (fallback to last thinking/streaming).
-fn find_streaming_slot_response(messages: &[ChatMessage], preferred: usize) -> usize {
-    messages
+/// Find the slot index of a streaming message.
+/// Returns `None` if no streaming/thinking slot is found at the preferred index
+/// or elsewhere, to prevent overwriting already-completed messages.
+fn find_streaming_slot_response(messages: &[ChatMessage], preferred: usize) -> Option<usize> {
+    // 1. Prefer the exact index if it's still in streaming/thinking state
+    if messages
         .get(preferred)
-        .filter(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
-        .map(|_| preferred)
-        .unwrap_or_else(|| {
-            messages
-                .iter()
-                .rposition(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
-                .unwrap_or(preferred)
-        })
+        .is_some_and(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
+    {
+        return Some(preferred);
+    }
+    // 2. Fall back to the last streaming/thinking message anywhere
+    messages
+        .iter()
+        .rposition(|m| matches!(m.status, MessageStatus::Thinking | MessageStatus::Streaming))
+    // 3. Return None — don't overwrite completed messages
 }
 
 impl Default for CoreState {
@@ -365,6 +397,7 @@ impl Default for CoreState {
             agent_pool: Arc::new(RwLock::new(crate::agent::AgentPool::new())),
             runtime: None,
             tool_server: crate::tools::create_tool_server(),
+            default_role: "general_business_analyst".to_string(),
             responsible_agent_id: None,
         }
     }

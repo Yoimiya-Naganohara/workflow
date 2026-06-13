@@ -14,6 +14,16 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize, think_frame: u8)
 
     for message in &state.messages {
         if matches!(message.role, MessageRole::System) {
+            // Render system messages as muted inline text with · prefix
+            let content_lines = render_markdown(&message.content, body_width);
+            for cl in content_lines {
+                let mut styled = vec![Span::styled("· ", Style::default().fg(style::TEXT_MUTED))];
+                styled.extend(cl.spans.into_iter().map(|s| {
+                    Span::styled(s.content, s.style.fg(style::TEXT_MUTED))
+                }));
+                lines.push(Line::from(styled));
+            }
+            lines.push(Line::from(String::new()));
             continue;
         }
 
@@ -24,18 +34,36 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize, think_frame: u8)
             continue;
         }
 
-        if message.content.is_empty() && matches!(message.status, MessageStatus::Thinking) {
+        // Thinking indicator — show when status is Thinking (before any content)
+        if matches!(message.status, MessageStatus::Thinking) && message.content.is_empty() {
             let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let phase = (think_frame as usize / 2) % spinner.len();
             let ch = spinner[phase];
-            lines.push(Line::from(vec![Span::styled(
-                format!("{} Generating...", ch),
-                Style::default().fg(style::BLUE).add_modifier(Modifier::ITALIC),
-            )]));
+            lines.push(Line::from(vec![
+                Span::styled("┃ ", Style::default().fg(style::BLUE)),
+                Span::styled(
+                    format!("{} thinking...", ch),
+                    Style::default().fg(style::YELLOW).add_modifier(Modifier::ITALIC),
+                ),
+            ]));
             lines.push(Line::from(String::new()));
-            continue;
         }
 
+        // Streaming indicator — show when content is being streamed
+        if matches!(message.status, MessageStatus::Streaming) && !message.content.is_empty() {
+            let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let phase = (think_frame as usize / 2) % spinner.len();
+            let ch = spinner[phase];
+            lines.push(Line::from(vec![
+                Span::styled("┃ ", Style::default().fg(style::BLUE)),
+                Span::styled(
+                    format!("{} streaming...", ch),
+                    Style::default().fg(style::YELLOW).add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+        }
+
+        // Render message content (always, even if thinking/streaming)
         let is_user = matches!(message.role, MessageRole::User);
         let bar_color = if is_user { style::GREEN } else { style::BLUE };
         let bar_char = "┃";
@@ -377,11 +405,9 @@ where
 {
     // Collect all rows: first is header, rest are data.
     let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut depth = 0;
     loop {
         match events.next() {
             Some(Event::Start(Tag::Table(_) | Tag::TableHead | Tag::TableRow)) => {
-                depth += 1;
                 let mut cells = Vec::new();
                 loop {
                     match events.next() {
@@ -392,7 +418,6 @@ where
                                     Some(Event::Text(t)) => text.push_str(&t),
                                     Some(Event::End(TagEnd::TableCell | TagEnd::TableRow | TagEnd::TableHead)) => break,
                                     Some(Event::End(TagEnd::Table)) => {
-                                        depth -= 1;
                                         break;
                                     }
                                     _ => {}

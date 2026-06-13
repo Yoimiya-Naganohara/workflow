@@ -305,27 +305,27 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
             }
 
             // Record experience in background (fire and forget)
+            // Uses blocking read().await to NEVER silently drop the experience.
             if !full_response.is_empty() {
                 if let Some(rt) = &runtime {
-                    if let Ok(rt) = rt.try_read() {
-                        if let Ok(emb) = rt.embed(&input).await {
-                            // TUI chat lacks agent context — role_template_id is None
-                            // (agent-executed experiences set this in runtime.rs)
-                            rt.record_experience(ExperienceEntry {
-                                embedding: emb,
-                                applicability_vector: [0.0f32; 128],
-                                tool_bitmap: 0,
-                                role_template_id: None,
-                                weight: 0.6,
-                                domain_version: 0,
-                                timestamp: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_secs(),
-                                l2_override_weight: 0.0,
-                                l2_override_created_at: 0,
-                            });
-                        }
+                    let rt = rt.read().await;
+                    if let Ok(emb) = rt.embed(&input).await {
+                        // TUI chat lacks agent context — role_template_id is None
+                        // (agent-executed experiences set this in runtime.rs)
+                        rt.record_experience(ExperienceEntry {
+                            embedding: emb,
+                            applicability_vector: [0.0f32; 128],
+                            tool_bitmap: 0,
+                            role_template_id: None,
+                            weight: 0.6,
+                            domain_version: 0,
+                            timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                            l2_override_weight: 0.0,
+                            l2_override_created_at: 0,
+                        });
                     }
                 }
             }

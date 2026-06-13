@@ -42,7 +42,7 @@ pub fn ensure_initial_agent_sync(core: &mut CoreState, goal_hint: &str) -> Optio
 
     let agent_id = match runtime.try_read() {
         Ok(rt) => match core.agent_pool.try_write() {
-            Ok(mut pool) => Some(rt.bootstrap_root_agent(goal, "general_business_analyst", &mut pool)),
+            Ok(mut pool) => Some(rt.bootstrap_root_agent(goal, &core.default_role, &mut pool)),
             Err(_) => return None,
         },
         Err(_) => return None,

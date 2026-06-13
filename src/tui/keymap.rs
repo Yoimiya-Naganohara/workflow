@@ -95,14 +95,6 @@ impl Default for Keymap {
         km.bind(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), Action::MoveDown);
         km.bind(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), Action::MoveLeft);
         km.bind(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), Action::MoveRight);
-        km.bind(
-            KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
-            Action::ScrollToTop,
-        );
-        km.bind(
-            KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT),
-            Action::ScrollToBottom,
-        );
 
         // Dialog
         // Note: Enter is intentionally NOT bound here — dialogs handle Enter
@@ -112,16 +104,6 @@ impl Default for Keymap {
         km.bind(
             KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
             Action::DeleteChar,
-        );
-
-        // Provider / command picker
-        km.bind(
-            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
-            Action::OpenProviderPicker,
-        );
-        km.bind(
-            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
-            Action::OpenCommandPicker,
         );
 
         // Chat input

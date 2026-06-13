@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::models::filter_providers;
-use crate::tui::commands::COMMANDS;
+use crate::tui::commands::{COMMANDS, resolve_dynamic_items};
 use crate::tui::state::{AppState, PopupMode};
 
 use crate::tui::style;
@@ -23,8 +23,19 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
             let count = COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).count();
             (count.min(6) as u16 + 2).min(8)
         }
-        PopupMode::SubCommand { items, .. } => {
-            (items.len().min(8) as u16 + 2).min(10)
+        PopupMode::SubCommand { parent, items } => {
+            let resolved = resolve_subcommand_items_owned(parent, items, state);
+            let filter = filter_text_for_subcommand(&state.ui.input, parent);
+            let count = if filter.is_empty() {
+                resolved.len()
+            } else {
+                let fl = filter.to_lowercase();
+                resolved
+                    .iter()
+                    .filter(|(name, _)| name.to_lowercase().contains(&fl))
+                    .count()
+            };
+            (count.min(8) as u16 + 2).min(10)
         }
         PopupMode::Providers => {
             let count = filter_providers(state.core.models.providers(), &state.ui.input).len();
@@ -32,7 +43,11 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
         }
         PopupMode::KeyInput => 5,
         PopupMode::ModelPicker => {
-            let count = state.core.models.search_configured_models(&state.ui.input, &state.core.configured_providers).len();
+            let count = state
+                .core
+                .models
+                .search_configured_models(&state.ui.input, &state.core.configured_providers)
+                .len();
             ((count.min(8) as u16) + 1).min(10)
         }
     }
@@ -47,6 +62,26 @@ pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
         PopupMode::Providers => render_provider_popup(f, area, state),
         PopupMode::KeyInput => render_key_popup(f, area, state),
         PopupMode::ModelPicker => render_model_popup(f, area, state),
+    }
+}
+
+/// Resolve owned items for popup_height / filtering when items are empty.
+fn resolve_subcommand_items_owned(parent: &str, items: &[(String, String)], state: &AppState) -> Vec<(String, String)> {
+    if !items.is_empty() {
+        return items.to_vec();
+    }
+    resolve_dynamic_items(parent, &state.core)
+}
+
+/// Extract filter text for subcommand popup.
+/// If input starts with parent+space, extract the suffix.
+/// Otherwise use the whole input (dispatch cleared the parent).
+fn filter_text_for_subcommand<'a>(input: &'a str, parent: &str) -> &'a str {
+    if input.starts_with(parent) {
+        let after = &input[parent.len()..];
+        if after.starts_with(' ') { &after[1..] } else { "" }
+    } else {
+        input
     }
 }
 
@@ -90,12 +125,34 @@ fn render_command_popup(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn render_subcommand_popup(f: &mut Frame, area: Rect, state: &AppState, parent: &str, items: &[(String, String)]) {
-    if items.is_empty() {
+    // Resolve items: use stored items, or fetch dynamic items
+    let resolved = if items.is_empty() {
+        resolve_dynamic_items(parent, &state.core)
+    } else {
+        items.to_vec()
+    };
+
+    if resolved.is_empty() {
         return;
     }
 
-    let max_name_len = items.iter().map(|(name, _)| name.len()).max().unwrap_or(10);
-    let rows: Vec<Row> = items
+    let filter = filter_text_for_subcommand(&state.ui.input, parent);
+    let fl = filter.to_lowercase();
+    let filtered: Vec<_> = if filter.is_empty() {
+        resolved.iter().collect()
+    } else {
+        resolved
+            .iter()
+            .filter(|(name, _)| name.to_lowercase().contains(&fl))
+            .collect()
+    };
+
+    if filtered.is_empty() {
+        return;
+    }
+
+    let max_name_len = filtered.iter().map(|(name, _)| name.len()).max().unwrap_or(10);
+    let rows: Vec<Row> = filtered
         .iter()
         .map(|(name, desc)| {
             Row::new(vec![
@@ -106,10 +163,18 @@ fn render_subcommand_popup(f: &mut Frame, area: Rect, state: &AppState, parent: 
         .collect();
 
     let mut table_state = TableState::default();
-    let sel = state.popup_selected.min(items.len().saturating_sub(1));
+    let sel = state.popup_selected.min(filtered.len().saturating_sub(1));
     table_state.select(Some(sel));
 
-    let title = format!("{} · sub-commands", parent);
+    let title = if items.is_empty() && !resolved.is_empty() {
+        // Dynamic items — derive title from parent
+        let parts: Vec<&str> = parent.rsplitn(2, ' ').collect();
+        let sub = parts[0];
+        let capitalized = sub[..1].to_uppercase() + &sub[1..];
+        format!("{} · {}", parts.get(1).unwrap_or(&""), capitalized)
+    } else {
+        format!("{} · sub-commands", parent)
+    };
     f.render_stateful_widget(
         Table::new(
             rows,

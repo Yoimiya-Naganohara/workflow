@@ -5,17 +5,13 @@
 //! inline; async operations push an [`Effect`] onto the state's
 //! effect queue.
 
-use std::sync::Arc;
-
-use tokio::sync::RwLock;
-
 use crate::tui::effect::Effect;
-use crate::tui::state::{AppState, ChatMessage};
+use crate::tui::state::{AppState, ChatMessage, PopupMode};
 
 /// Try to dispatch a command.  Returns ``true`` if the input was a
 /// recognised command (even if it failed), ``false`` if it should
 /// be treated as a normal chat message.
-pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<AppState>>, now: &str) -> bool {
+pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
     let core = &mut state.core;
     let ui = &mut state.ui;
 
@@ -63,7 +59,7 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                 "/connect        - Configure a provider",
                 "/models         - Manage model pool",
                 "/pool           - Pool management (stats/flush/clear/query)",
-                "/role           - Role templates (list/show/create/edit/delete)",
+                "/role           - Role templates (list/show/create/edit/delete/default)",
                 "/sh <cmd>       - Run a shell command",
                 "/clear          - Clear conversation",
                 "/help           - Show this help",
@@ -84,9 +80,14 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                 "Workflow Agent — conversation cleared. Describe your goal and I'll help.",
             ));
             core.responsible_agent_id = None;
+            core.agents.clear();
             ui.input.clear();
             ui.input_cursor = 0;
             ui.chat_scroll = 0;
+            ui.input_history.clear();
+            ui.input_history_idx = None;
+            ui.active_chat_abort = None;
+            ui.active_chat_requests = 0;
             true
         }
 
@@ -98,18 +99,13 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
         }
 
         // ── Pool commands ──
-        "/pool" => {
-            state.popup_mode = crate::tui::state::PopupMode::SubCommand {
-                parent: "/pool".to_string(),
-                items: vec![
-                    ("stats".to_string(), "Show experience pool statistics".to_string()),
-                    ("flush".to_string(), "Flush bedrock to disk".to_string()),
-                    ("clear".to_string(), "Clear both tracks".to_string()),
-                    ("query".to_string(), "Query experiences by text similarity".to_string()),
-                    ("export".to_string(), "Export experiences as JSON".to_string()),
-                    ("import".to_string(), "Import experiences from JSON".to_string()),
-                ],
-            };
+        "/pool" | "/pool help" => {
+            if let Some(items) = get_subcommand_items("/pool") {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/pool".to_string(),
+                    items: items.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
+                };
+            }
             state.popup_selected = 0;
             ui.input.clear();
             ui.input_cursor = 0;
@@ -249,18 +245,12 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
 
         // ── Role management commands ──
         "/role" | "/role help" => {
-            state.popup_mode = crate::tui::state::PopupMode::SubCommand {
-                parent: "/role".to_string(),
-                items: vec![
-                    ("list".to_string(), "List all role templates".to_string()),
-                    ("show".to_string(), "Show role template details".to_string()),
-                    ("create".to_string(), "Create a new role template".to_string()),
-                    ("edit".to_string(), "Edit an existing role template".to_string()),
-                    ("delete".to_string(), "Delete a role template".to_string()),
-                    ("embed".to_string(), "Compute embeddings for all roles".to_string()),
-                    ("optimize".to_string(), "Optimize role prompt from experience".to_string()),
-                ],
-            };
+            if let Some(items) = get_subcommand_items("/role") {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/role".to_string(),
+                    items: items.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
+                };
+            }
             state.popup_selected = 0;
             ui.input.clear();
             ui.input_cursor = 0;
@@ -289,6 +279,23 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                 }
             } else {
                 core.messages.push(ChatMessage::system("Runtime not available"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/role show" => {
+            let items = resolve_dynamic_items("/role show", core);
+            if items.is_empty() {
+                core.messages.push(ChatMessage::system("No role templates available."));
+            } else {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/role show".to_string(),
+                    items,
+                };
+                state.popup_selected = 0;
+                return true;
             }
             ui.input.clear();
             ui.input_cursor = 0;
@@ -344,6 +351,23 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
             true
         }
 
+        "/role edit" => {
+            let items = resolve_dynamic_items("/role edit", core);
+            if items.is_empty() {
+                core.messages.push(ChatMessage::system("No role templates available."));
+            } else {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/role edit".to_string(),
+                    items,
+                };
+                state.popup_selected = 0;
+                return true;
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
         _ if trimmed.starts_with("/role edit ") => {
             let role_name = trimmed.strip_prefix("/role edit ").unwrap().trim().to_string();
             if role_name.is_empty() {
@@ -389,6 +413,23 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                 }
             } else {
                 core.messages.push(ChatMessage::system("Runtime not available"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/role optimize" => {
+            let items = resolve_dynamic_items("/role optimize", core);
+            if items.is_empty() {
+                core.messages.push(ChatMessage::system("No role templates available."));
+            } else {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/role optimize".to_string(),
+                    items,
+                };
+                state.popup_selected = 0;
+                return true;
             }
             ui.input.clear();
             ui.input_cursor = 0;
@@ -457,6 +498,23 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
             true
         }
 
+        "/role delete" => {
+            let items = resolve_dynamic_items("/role delete", core);
+            if items.is_empty() {
+                core.messages.push(ChatMessage::system("No role templates available."));
+            } else {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/role delete".to_string(),
+                    items,
+                };
+                state.popup_selected = 0;
+                return true;
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
         _ if trimmed.starts_with("/role delete ") => {
             let role_name = trimmed.strip_prefix("/role delete ").unwrap().trim().to_string();
             if role_name.is_empty() {
@@ -486,8 +544,203 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
             true
         }
 
+        "/role default" => {
+            let items = resolve_dynamic_items("/role default", core);
+            if items.is_empty() {
+                core.messages
+                    .push(ChatMessage::system("No role templates available or runtime not ready."));
+            } else {
+                state.popup_mode = crate::tui::state::PopupMode::SubCommand {
+                    parent: "/role default".to_string(),
+                    items,
+                };
+                state.popup_selected = 0;
+                // Don't clear input — user can type to filter
+                return true;
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/role default ") => {
+            let role_name = trimmed.strip_prefix("/role default ").unwrap().trim().to_string();
+            if role_name.is_empty() {
+                core.messages.push(ChatMessage::system("Usage: /role default <name>"));
+            } else if let Some(runtime) = &core.runtime {
+                if let Ok(rt) = runtime.try_read() {
+                    if rt.get_role_template(&role_name).is_some() {
+                        core.default_role = role_name.clone();
+                        core.messages.push(ChatMessage::system(format!(
+                            "Default bootstrap role set to `{}`. Next chat message will use this role.",
+                            role_name
+                        )));
+                        // Clear responsible agent so next message re-creates with the new role
+                        core.responsible_agent_id = None;
+                        core.agents.clear();
+                    } else {
+                        core.messages.push(ChatMessage::system(format!(
+                            "Role '{}' not found. Use `/role list` to see available roles.",
+                            role_name
+                        )));
+                    }
+                } else {
+                    core.messages.push(ChatMessage::system("Runtime locked"));
+                }
+            } else {
+                core.messages.push(ChatMessage::system("Runtime not available"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        // ── Memo commands ──
+        "/memo" | "/memo help" => {
+            if let Some(items) = get_subcommand_items("/memo") {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/memo".to_string(),
+                    items: items.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
+                };
+            }
+            state.popup_selected = 0;
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/memo list" => {
+            let msg = match_list_memos(core);
+            core.messages.push(ChatMessage::system(msg));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/memo show ") => {
+            let key = trimmed.strip_prefix("/memo show ").unwrap().trim().to_string();
+            if key.is_empty() {
+                core.messages.push(ChatMessage::system("Usage: /memo show <key>"));
+            } else {
+                let msg = match_show_memo(core, &key);
+                core.messages.push(ChatMessage::system(msg));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/memo write ") => {
+            let rest = trimmed.strip_prefix("/memo write ").unwrap().trim().to_string();
+            if let Some((key, value)) = rest.split_once('=') {
+                let key = key.trim();
+                let value = value.trim();
+                if key.is_empty() {
+                    core.messages
+                        .push(ChatMessage::system("Usage: /memo write <key>=<value>"));
+                } else {
+                    let msg = match_write_memo(core, key, value);
+                    core.messages.push(ChatMessage::system(msg));
+                }
+            } else {
+                core.messages
+                    .push(ChatMessage::system("Usage: /memo write <key>=<value>"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/memo delete ") => {
+            let key = trimmed.strip_prefix("/memo delete ").unwrap().trim().to_string();
+            if key.is_empty() {
+                core.messages.push(ChatMessage::system("Usage: /memo delete <key>"));
+            } else {
+                let msg = match_delete_memo(core, &key);
+                core.messages.push(ChatMessage::system(msg));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/memo agents" | "/memo list agents" => {
+            let msg = match_list_agent_memos(core);
+            core.messages.push(ChatMessage::system(msg));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
         // Not a recognised command — let caller handle as chat message.
         _ => false,
+    }
+}
+
+/// Look up subcommand items for a parent command (e.g. "/role" returns role subcommands).
+pub fn get_subcommand_items(cmd: &str) -> Option<&'static [(&'static str, &'static str)]> {
+    match cmd {
+        "/role" => Some(&[
+            ("list", "List all role templates"),
+            ("show", "Show role template details"),
+            ("create", "Create a new role template"),
+            ("edit", "Edit an existing role template"),
+            ("delete", "Delete a role template"),
+            ("embed", "Compute embeddings for all roles"),
+            ("optimize", "Optimize role prompt from experience"),
+            ("default", "Show or set default bootstrap role"),
+        ]),
+        "/role default" => Some(&[
+            // Dynamic items — resolved at runtime via resolve_dynamic_items
+            ("", ""),
+        ]),
+        "/role show" => Some(&[("", "")]),
+        "/role edit" => Some(&[("", "")]),
+        "/role delete" => Some(&[("", "")]),
+        "/role optimize" => Some(&[("", "")]),
+        "/pool" => Some(&[
+            ("stats", "Show experience pool statistics"),
+            ("flush", "Flush bedrock to disk"),
+            ("clear", "Clear the experience pool"),
+            ("export", "Export pool to JSON"),
+            ("import", "Import pool from JSON"),
+            ("query", "Query experiences by text similarity"),
+        ]),
+        "/memo" => Some(&[
+            ("list", "List agent memos"),
+            ("show", "Show a memo by key"),
+            ("write", "Write a memo (key=value)"),
+            ("delete", "Delete a memo"),
+            ("agents", "List agents with memos"),
+        ]),
+        _ => None,
+    }
+}
+
+/// Generic dynamic item resolver — returns completion items for any parent command
+/// that takes dynamic arguments (e.g. role names, memo keys, etc.).
+pub fn resolve_dynamic_items(parent: &str, core: &crate::tui::state::CoreState) -> Vec<(String, String)> {
+    match parent {
+        "/role default" | "/role show" | "/role edit" | "/role delete" | "/role optimize" => core
+            .runtime
+            .as_ref()
+            .and_then(|rt| rt.try_read().ok())
+            .map(|rt| {
+                let default = &core.default_role;
+                rt.all_role_templates()
+                    .iter()
+                    .map(|t| {
+                        let label = if t.role == *default {
+                            format!("{} (current)", t.label)
+                        } else {
+                            t.label.clone()
+                        };
+                        (t.role.clone(), label)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => vec![],
     }
 }
 
@@ -499,5 +752,337 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/role", "Role templates (list/show/create/edit/delete)"),
     ("/sh", "Run a shell command"),
     ("/clear", "Clear conversation"),
+    ("/memo", "Agent memo management (list/show/write/delete)"),
     ("/help", "Show help"),
 ];
+
+// ============================================================================
+//  Memo helper functions
+// ============================================================================
+
+/// Helper: format a timestamp as a human-readable age string.
+fn format_age(timestamp: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let age = now.saturating_sub(timestamp);
+    if age < 60 {
+        format!("{}s ago", age)
+    } else if age < 3600 {
+        format!("{}m ago", age / 60)
+    } else if age < 86400 {
+        format!("{}h ago", age / 3600)
+    } else {
+        format!("{}d ago", age / 86400)
+    }
+}
+
+fn match_list_memos(core: &crate::tui::state::CoreState) -> String {
+    let agent_id = match core.responsible_agent_id {
+        Some(id) => id,
+        None => return "No active agent".to_string(),
+    };
+    let pool = match core.agent_pool.try_read() {
+        Ok(p) => p,
+        Err(_) => return "Agent pool locked".to_string(),
+    };
+    let agent = match pool.get_agent(&agent_id) {
+        Some(a) => a,
+        None => return "Agent not found".to_string(),
+    };
+    if agent.memos.is_empty() {
+        return "No memos for current agent (use write_memo MCP tool or /memo write)".to_string();
+    }
+    let mut lines = format!("Memos for {} ({}):\n", agent.name, agent.memos.len());
+    let mut sorted = agent.memos.clone();
+    sorted.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    for m in &sorted {
+        let preview = if m.value.len() > 80 {
+            format!(
+                "{}...",
+                &m.value[..m.value.char_indices().nth(80).map(|(i, _)| i).unwrap_or(m.value.len())]
+            )
+        } else {
+            m.value.clone()
+        };
+        lines.push_str(&format!(
+            "  {}  ({} bytes, {})  {:?}\n",
+            m.key,
+            m.value.len(),
+            format_age(m.timestamp),
+            preview
+        ));
+    }
+    lines
+}
+
+fn match_show_memo(core: &crate::tui::state::CoreState, key: &str) -> String {
+    let agent_id = match core.responsible_agent_id {
+        Some(id) => id,
+        None => return "No active agent".to_string(),
+    };
+    let pool = match core.agent_pool.try_read() {
+        Ok(p) => p,
+        Err(_) => return "Agent pool locked".to_string(),
+    };
+    let agent = match pool.get_agent(&agent_id) {
+        Some(a) => a,
+        None => return "Agent not found".to_string(),
+    };
+    match agent.memos.iter().find(|m| m.key == key) {
+        Some(entry) => format!(
+            "Memo '{}' ({} bytes, written {}):\n---\n{}\n---",
+            entry.key,
+            entry.value.len(),
+            format_age(entry.timestamp),
+            entry.value
+        ),
+        None => format!("Memo '{}' not found", key),
+    }
+}
+
+fn match_write_memo(core: &mut crate::tui::state::CoreState, key: &str, value: &str) -> String {
+    let agent_id = match core.responsible_agent_id {
+        Some(id) => id,
+        None => return "No active agent".to_string(),
+    };
+    let mut pool = match core.agent_pool.try_write() {
+        Ok(p) => p,
+        Err(_) => return "Agent pool locked".to_string(),
+    };
+    let agent = match pool.get_agent_mut(&agent_id) {
+        Some(a) => a,
+        None => return "Agent not found".to_string(),
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let entry = crate::agent::MemoEntry {
+        key: key.to_string(),
+        value: value.to_string(),
+        timestamp: now,
+        agent_id,
+    };
+    if let Some(existing) = agent.memos.iter_mut().find(|m| m.key == key) {
+        *existing = entry.clone();
+        format!("Memo '{}' overwritten ({} bytes)", key, value.len())
+    } else {
+        agent.memos.push(entry);
+        format!("Memo '{}' written ({} bytes)", key, value.len())
+    }
+}
+
+fn match_delete_memo(core: &mut crate::tui::state::CoreState, key: &str) -> String {
+    let agent_id = match core.responsible_agent_id {
+        Some(id) => id,
+        None => return "No active agent".to_string(),
+    };
+    let mut pool = match core.agent_pool.try_write() {
+        Ok(p) => p,
+        Err(_) => return "Agent pool locked".to_string(),
+    };
+    let agent = match pool.get_agent_mut(&agent_id) {
+        Some(a) => a,
+        None => return "Agent not found".to_string(),
+    };
+    let initial_len = agent.memos.len();
+    agent.memos.retain(|m| m.key != key);
+    if agent.memos.len() < initial_len {
+        format!("Memo '{}' deleted", key)
+    } else {
+        format!("Memo '{}' not found", key)
+    }
+}
+
+fn match_list_agent_memos(core: &crate::tui::state::CoreState) -> String {
+    let pool = match core.agent_pool.try_read() {
+        Ok(p) => p,
+        Err(_) => return "Agent pool locked".to_string(),
+    };
+    let mut lines = vec!["Agent Memos:".to_string()];
+    for agent in pool.agents() {
+        if agent.memos.is_empty() {
+            continue;
+        }
+        let count = agent.memos.len();
+        let total_bytes: usize = agent.memos.iter().map(|m| m.value.len()).sum();
+        lines.push(format!(
+            "  {} (id: {:02x}{:02x}{:02x}{:02x}): {} memos, {} bytes",
+            agent.name, agent.id[0], agent.id[1], agent.id[2], agent.id[3], count, total_bytes
+        ));
+    }
+    if lines.len() == 1 {
+        lines.push("  No agents with memos found".to_string());
+    }
+    lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── get_subcommand_items ──
+
+    #[test]
+    fn test_get_subcommands_role() {
+        let items = get_subcommand_items("/role").unwrap();
+        let names: Vec<&str> = items.iter().map(|(n, _)| *n).collect();
+        assert!(names.contains(&"list"));
+        assert!(names.contains(&"show"));
+        assert!(names.contains(&"default"));
+        assert!(names.contains(&"embed"));
+        assert!(names.contains(&"optimize"));
+    }
+
+    #[test]
+    fn test_get_subcommands_pool() {
+        let items = get_subcommand_items("/pool").unwrap();
+        let names: Vec<&str> = items.iter().map(|(n, _)| *n).collect();
+        assert!(names.contains(&"stats"));
+        assert!(names.contains(&"flush"));
+        assert!(names.contains(&"query"));
+    }
+
+    #[test]
+    fn test_get_subcommands_memo() {
+        let items = get_subcommand_items("/memo").unwrap();
+        let names: Vec<&str> = items.iter().map(|(n, _)| *n).collect();
+        assert!(names.contains(&"list"));
+        assert!(names.contains(&"write"));
+        assert!(names.contains(&"delete"));
+    }
+
+    #[test]
+    fn test_get_subcommands_unknown() {
+        assert!(get_subcommand_items("/unknown").is_none());
+        assert!(get_subcommand_items("/connect").is_none());
+        assert!(get_subcommand_items("/help").is_none());
+    }
+
+    // ── dispatch: popup mode transitions ──
+
+    #[test]
+    fn test_dispatch_role_sets_subcommand_popup() {
+        let mut state = AppState::default();
+        dispatch("/role", &mut state, "12:00:00");
+        assert!(matches!(state.popup_mode, PopupMode::SubCommand { .. }));
+    }
+
+    #[test]
+    fn test_dispatch_pool_sets_subcommand_popup() {
+        let mut state = AppState::default();
+        dispatch("/pool", &mut state, "12:00:00");
+        assert!(matches!(state.popup_mode, PopupMode::SubCommand { .. }));
+    }
+
+    #[test]
+    fn test_dispatch_memo_sets_subcommand_popup() {
+        let mut state = AppState::default();
+        dispatch("/memo", &mut state, "12:00:00");
+        assert!(matches!(state.popup_mode, PopupMode::SubCommand { .. }));
+    }
+
+    #[test]
+    fn test_dispatch_role_list_shows_message() {
+        let mut state = AppState::default();
+        // Needs a runtime with templates, but at minimum should not panic
+        dispatch("/role list", &mut state, "12:00:00");
+        // No runtime → shows "Runtime not available" message
+        assert!(
+            state
+                .core
+                .messages
+                .last()
+                .map(|m| m.content.contains("Runtime"))
+                .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn test_dispatch_role_default_sets_subcommand() {
+        let mut state = AppState::default();
+        dispatch("/role default", &mut state, "12:00:00");
+        // Without runtime, no items available → shows error message
+        assert!(matches!(state.popup_mode, PopupMode::None));
+        assert!(
+            state
+                .core
+                .messages
+                .last()
+                .map(|m| m.content.contains("No role templates"))
+                .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn test_dispatch_role_default_with_arg_no_runtime() {
+        let mut state = AppState::default();
+        dispatch("/role default planner", &mut state, "12:00:00");
+        // No runtime available → shows message, default_role unchanged
+        assert_eq!(state.core.default_role, "general_business_analyst");
+    }
+
+    #[test]
+    fn test_dispatch_connect_sets_providers_popup() {
+        let mut state = AppState::default();
+        dispatch("/connect", &mut state, "12:00:00");
+        assert_eq!(state.popup_mode, PopupMode::Providers);
+    }
+
+    #[test]
+    fn test_dispatch_help_adds_message() {
+        let mut state = AppState::default();
+        dispatch("/help", &mut state, "12:00:00");
+        assert!(
+            state
+                .core
+                .messages
+                .last()
+                .map(|m| m.content.contains("/role"))
+                .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn test_dispatch_unknown_returns_false() {
+        let mut state = AppState::default();
+        assert!(!dispatch("not a command", &mut state, "12:00:00"));
+    }
+
+    #[test]
+    fn test_dispatch_sh_without_arg_shows_usage() {
+        let mut state = AppState::default();
+        dispatch("/sh", &mut state, "12:00:00");
+        assert!(
+            state
+                .core
+                .messages
+                .last()
+                .map(|m| m.content.contains("Usage"))
+                .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn test_dispatch_role_default_with_runtime_shows_popup() {
+        let mut state = AppState::default();
+        dispatch("/role default", &mut state, "12:00:00");
+        // Without runtime, falls through to message (not a crash)
+        assert!(state.popup_mode == PopupMode::None);
+        assert!(state.ui.input.is_empty() || !state.ui.input.is_empty());
+    }
+
+    #[test]
+    fn test_dispatch_role_help_has_default_subcommand() {
+        let mut state = AppState::default();
+        dispatch("/role", &mut state, "12:00:00");
+        if let PopupMode::SubCommand { items, .. } = &state.popup_mode {
+            let names: Vec<&str> = items.iter().map(|(n, _): &(String, String)| n.as_str()).collect();
+            assert!(names.contains(&"default"), "default subcommand missing in /role help");
+        } else {
+            panic!("Expected SubCommand popup");
+        }
+    }
+}

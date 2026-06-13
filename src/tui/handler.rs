@@ -383,7 +383,7 @@ impl Tui {
         let trimmed = input.trim();
 
         // ── Slash commands ──
-        if trimmed.starts_with('/') && commands::dispatch(trimmed, state, &self.state, &now) {
+        if trimmed.starts_with('/') && commands::dispatch(trimmed, state, &now) {
             state.ui.input.clear();
             state.ui.input_cursor = 0;
             return true;
