@@ -380,9 +380,7 @@ impl DualTrackMemory {
         let task_score = Self::aggregate_top_k(&task_matches, now);
         let role_score = Self::aggregate_top_k(&role_matches, now);
 
-        let role_count = role_template_id
-            .map(|id| self.count_by_role(id))
-            .unwrap_or(0);
+        let role_count = role_template_id.map(|id| self.count_by_role(id)).unwrap_or(0);
 
         // Few experiences → unconditional pass with all tools.
         // Enough experiences → use real similarity data.
@@ -416,12 +414,7 @@ impl DualTrackMemory {
     }
 
     /// Search by role ID — only return experiences with matching role_template_id.
-    pub fn search_by_role(
-        &self,
-        query: &[f32; EMBEDDING_DIM],
-        role_id: u32,
-        k: usize,
-    ) -> Vec<(ExperienceEntry, f32)> {
+    pub fn search_by_role(&self, query: &[f32; EMBEDDING_DIM], role_id: u32, k: usize) -> Vec<(ExperienceEntry, f32)> {
         let mut results = Vec::new();
 
         // Bedrock: filter by role, then score × credibility.
@@ -566,12 +559,7 @@ impl crate::l1::ExperienceRetrieval for DualTrackMemory {
         self.fluid_len()
     }
 
-    fn search_by_role(
-        &self,
-        query: &[f32; EMBEDDING_DIM],
-        role_id: u32,
-        k: usize,
-    ) -> Vec<(ExperienceEntry, f32)> {
+    fn search_by_role(&self, query: &[f32; EMBEDDING_DIM], role_id: u32, k: usize) -> Vec<(ExperienceEntry, f32)> {
         self.search_by_role(query, role_id, k)
     }
 
@@ -672,7 +660,10 @@ mod tests {
         // Cold start: empty pool returns low confidence, not rejection.
         assert!(result.is_ok(), "empty pool should allow cold-start spawn");
         if let Ok(assessment) = result {
-            assert!(assessment.confidence > 0.5, "cold-start confidence should be above threshold");
+            assert!(
+                assessment.confidence > 0.5,
+                "cold-start confidence should be above threshold"
+            );
             assert_eq!(assessment.recommended_tools, !0);
         }
         std::fs::remove_file(&path).ok();

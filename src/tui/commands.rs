@@ -23,9 +23,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
         "/connect" => {
             ui.input.clear();
             ui.input_cursor = 0;
-            state.active_dialog = Some(crate::tui::dialogs::ActiveDialog::Provider(
-                crate::tui::dialogs::provider::ProviderDialog::new(),
-            ));
+            state.popup_mode = crate::tui::state::PopupMode::Providers;
+            state.popup_selected = 0;
             state.effects.push(Effect::FetchModelRegistry);
             true
         }
@@ -38,9 +37,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                 ui.input_cursor = 0;
                 return true;
             }
-            state.active_dialog = Some(crate::tui::dialogs::ActiveDialog::ModelPicker(
-                crate::tui::dialogs::model_picker::ModelPicker::new(),
-            ));
+            state.popup_mode = crate::tui::state::PopupMode::ModelPicker;
+            state.popup_selected = 0;
             core.messages
                 .push(ChatMessage::system("Select models to add to your pool"));
             ui.input.clear();
@@ -62,11 +60,12 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
 
         "/help" | "/?" => {
             let help_text = [
-                "/connect        - Configure a provider (API key + custom)",
-                "/models         - Manage model pool (add/remove models)",
-                "/custom         - Add/list/remove custom providers",
-                "/clear          - Clear conversation",
+                "/connect        - Configure a provider",
+                "/models         - Manage model pool",
+                "/pool           - Pool management (stats/flush/clear/query)",
+                "/role           - Role templates (list/show/create/edit/delete)",
                 "/sh <cmd>       - Run a shell command",
+                "/clear          - Clear conversation",
                 "/help           - Show this help",
                 "",
                 "Ctrl+X          - Stop current response",
@@ -98,19 +97,20 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
             true
         }
 
-        // ── Pool commands (sync sub-commands inline, query via Effect) ──
+        // ── Pool commands ──
         "/pool" => {
-            let help = [
-                "Pool commands:",
-                "  /pool stats      - Show experience pool statistics",
-                "  /pool flush      - Flush bedrock to disk",
-                "  /pool clear      - Clear both tracks",
-                "  /pool query <q>  - Query experiences by text similarity",
-                "  /pool export     - Export experiences as JSON",
-                "  /pool import     - Import experiences from JSON",
-            ]
-            .join("\n");
-            core.messages.push(ChatMessage::system(help));
+            state.popup_mode = crate::tui::state::PopupMode::SubCommand {
+                parent: "/pool".to_string(),
+                items: vec![
+                    ("stats".to_string(), "Show experience pool statistics".to_string()),
+                    ("flush".to_string(), "Flush bedrock to disk".to_string()),
+                    ("clear".to_string(), "Clear both tracks".to_string()),
+                    ("query".to_string(), "Query experiences by text similarity".to_string()),
+                    ("export".to_string(), "Export experiences as JSON".to_string()),
+                    ("import".to_string(), "Import experiences from JSON".to_string()),
+                ],
+            };
+            state.popup_selected = 0;
             ui.input.clear();
             ui.input_cursor = 0;
             true
@@ -199,62 +199,6 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
             true
         }
 
-        // ── Custom provider commands (all sync) ──
-        "/custom" => {
-            let help = [
-                "Custom Provider Commands:",
-                "  /custom add                              - Add a new custom provider (wizard)",
-                "  /custom list                             - List configured custom providers",
-                "  /custom remove <name>                    - Remove a custom provider",
-            ]
-            .join("\n");
-            core.messages.push(ChatMessage::system(help));
-            ui.input.clear();
-            ui.input_cursor = 0;
-            true
-        }
-
-        "/custom add" => {
-            state.active_dialog = Some(crate::tui::dialogs::ActiveDialog::CustomWizard(
-                crate::tui::dialogs::custom_wizard::CustomWizard::new(),
-            ));
-            ui.input.clear();
-            ui.input_cursor = 0;
-            true
-        }
-
-        "/custom list" => {
-            let custom: Vec<_> = core
-                .models
-                .providers()
-                .iter()
-                .filter(|p| p.id.starts_with("custom-"))
-                .collect();
-            if custom.is_empty() {
-                core.messages
-                    .push(ChatMessage::system("No custom providers configured."));
-            } else {
-                let mut lines = vec![format!("Custom Providers ({}):", custom.len())];
-                for p in &custom {
-                    let model_count = p.models.len();
-                    let has_key = if let Some(env) = p.env.first() {
-                        if core.api_keys.contains_key(env) { "✓" } else { "⌁" }
-                    } else {
-                        ""
-                    };
-                    let api_url = p.api.as_deref().unwrap_or("-");
-                    lines.push(format!(
-                        "  {}  {} ({} model(s)) — {}",
-                        has_key, p.name, model_count, api_url
-                    ));
-                }
-                core.messages.push(ChatMessage::system(lines.join("\n")));
-            }
-            ui.input.clear();
-            ui.input_cursor = 0;
-            true
-        }
-
         // ── Sub-commands with arguments ──
         _ if trimmed.starts_with("/sh ") => {
             let arg = trimmed.strip_prefix("/sh ").unwrap().trim();
@@ -289,33 +233,6 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
             true
         }
 
-        _ if trimmed.starts_with("/custom remove ") => {
-            let name = trimmed.strip_prefix("/custom remove ").unwrap().trim().to_string();
-            if !name.is_empty() {
-                let custom_id = crate::models::CustomProvider::slug(&name);
-                // Sync: remove from persistence
-                if let Err(e) = crate::persistence::remove_custom_provider(&custom_id) {
-                    core.messages
-                        .push(ChatMessage::system(format!("Failed to remove custom provider: {}", e)));
-                } else {
-                    // Sync: update state
-                    let provider_id = format!("custom-{}", custom_id);
-                    core.models.remove_custom_provider(&custom_id);
-                    core.configured_providers
-                        .retain(|p| p != &provider_id && p != &custom_id);
-                    core.provider_clients.remove(&provider_id);
-                    let env_key = format!("CUSTOM_{}_API_KEY", custom_id.to_uppercase());
-                    core.api_keys.remove(&env_key);
-                    core.selected_models.retain(|sm| sm.provider_id != provider_id);
-                    core.messages
-                        .push(ChatMessage::system(format!("Custom provider \"{}\" removed", name)));
-                }
-            }
-            ui.input.clear();
-            ui.input_cursor = 0;
-            true
-        }
-
         // ── Pool sub-commands (catch-all: /pool <something>) ──
         // These should be caught by the specific matches above.
         // If we get here, it's an unknown sub-command.
@@ -332,18 +249,19 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
 
         // ── Role management commands ──
         "/role" | "/role help" => {
-            let help = [
-                "Role Template Commands:",
-                "  /role list                    - List all role templates",
-                "  /role show <name>             - Show role template details",
-                "  /role create                  - Create a new role template (wizard)",
-                "  /role edit <name>             - Edit an existing role template (wizard)",
-                "  /role delete <name>           - Delete a role template",
-                "  /role embed                    - Compute embeddings for all roles missing them",
-                "  /role optimize <name>           - Optimize role prompt from experience",
-            ]
-            .join("\n");
-            core.messages.push(ChatMessage::system(help));
+            state.popup_mode = crate::tui::state::PopupMode::SubCommand {
+                parent: "/role".to_string(),
+                items: vec![
+                    ("list".to_string(), "List all role templates".to_string()),
+                    ("show".to_string(), "Show role template details".to_string()),
+                    ("create".to_string(), "Create a new role template".to_string()),
+                    ("edit".to_string(), "Edit an existing role template".to_string()),
+                    ("delete".to_string(), "Delete a role template".to_string()),
+                    ("embed".to_string(), "Compute embeddings for all roles".to_string()),
+                    ("optimize".to_string(), "Optimize role prompt from experience".to_string()),
+                ],
+            };
+            state.popup_selected = 0;
             ui.input.clear();
             ui.input_cursor = 0;
             true
@@ -361,10 +279,7 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                             let embedded = if t.embedding.is_some() { "✓" } else { "✗" };
                             lines.push(format!(
                                 "  id={:<3}  {:<30}  label={:<20}  embedded={}",
-                                t.template_id,
-                                t.role,
-                                t.label,
-                                embedded
+                                t.template_id, t.role, t.label, embedded
                             ));
                         }
                         core.messages.push(ChatMessage::system(lines.join("\n")));
@@ -421,10 +336,9 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
         }
 
         "/role create" => {
-            state.active_dialog = Some(crate::tui::dialogs::ActiveDialog::RoleWizard(
-                crate::tui::dialogs::role::RoleWizard::new(),
+            core.messages.push(ChatMessage::system(
+                "Role creation — edit role templates in ~/.workflow/role_templates.json",
             ));
-            core.messages.push(ChatMessage::system("Creating new role template..."));
             ui.input.clear();
             ui.input_cursor = 0;
             true
@@ -438,11 +352,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                 if let Ok(rt) = runtime.try_read() {
                     match rt.get_role_template(&role_name) {
                         Some(t) => {
-                            state.active_dialog = Some(
-                                crate::tui::dialogs::ActiveDialog::RoleWizard(
-                                    crate::tui::dialogs::role::RoleWizard::from_template(t),
-                                ),
-                            );
+                            core.messages.push(ChatMessage::system(format!(
+                                "Role '{}' found. Edit in ~/.workflow/role_templates.json",
+                                t.role
+                            )));
                         }
                         None => {
                             core.messages.push(ChatMessage::system(format!(
@@ -498,7 +411,12 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                                     role_name,
                                     experiences.len()
                                 )));
-                            } else if let Some(reason) = rt.optimization_tracker.lock().unwrap().can_optimize(role.template_id, experiences.len()) {
+                            } else if let Some(reason) = rt
+                                .optimization_tracker
+                                .lock()
+                                .unwrap()
+                                .can_optimize(role.template_id, experiences.len())
+                            {
                                 core.messages.push(ChatMessage::system(format!(
                                     "Cannot optimize '{}': {}",
                                     role_name, reason
@@ -524,10 +442,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                             }
                         }
                         None => {
-                            core.messages.push(ChatMessage::system(format!(
-                                "Role '{}' not found.",
-                                role_name
-                            )));
+                            core.messages
+                                .push(ChatMessage::system(format!("Role '{}' not found.", role_name)));
                         }
                     }
                 } else {
@@ -551,16 +467,12 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
                         Some(t) => {
                             // Delete via the role template store
                             rt.delete_role_template(t.template_id);
-                            core.messages.push(ChatMessage::system(format!(
-                                "Role '{}' deleted.",
-                                role_name
-                            )));
+                            core.messages
+                                .push(ChatMessage::system(format!("Role '{}' deleted.", role_name)));
                         }
                         None => {
-                            core.messages.push(ChatMessage::system(format!(
-                                "Role '{}' not found.",
-                                role_name
-                            )));
+                            core.messages
+                                .push(ChatMessage::system(format!("Role '{}' not found.", role_name)));
                         }
                     }
                 } else {
@@ -581,13 +493,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _self_state: &Arc<RwLock<Ap
 
 /// List of all registered commands, used by the command popup.
 pub const COMMANDS: &[(&str, &str)] = &[
-    ("/connect", "Configure a provider (API key + custom)"),
-    ("/models", "Manage model pool (add/remove models)"),
-    ("/clear", "Clear conversation"),
+    ("/connect", "Configure a provider"),
+    ("/models", "Open model picker"),
+    ("/pool", "Pool management (stats/flush/clear/query)"),
+    ("/role", "Role templates (list/show/create/edit/delete)"),
     ("/sh", "Run a shell command"),
-    ("/pool", "Manage experience pool (flush/clear/stats/export/import)"),
-    ("/keymap", "Show keyboard shortcuts"),
-    ("/custom", "Add/list/remove custom providers"),
+    ("/clear", "Clear conversation"),
     ("/help", "Show help"),
-    ("/role", "Manage role templates (list/show/create/edit/delete)"),
 ];

@@ -365,9 +365,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                 (role, experiences, provider, rt.model_id.clone())
             };
 
-            match crate::runtime::optimizer::optimize_role(
-                &role, &experiences, &provider, &model_id,
-            ).await {
+            match crate::runtime::optimizer::optimize_role(&role, &experiences, &provider, &model_id).await {
                 Ok(result) => {
                     let _ = tx.send(AppEvent::OptimizationResult {
                         role_name: result.role_name.clone(),

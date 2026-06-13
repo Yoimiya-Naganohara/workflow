@@ -131,7 +131,12 @@ pub struct DecisionPipeline {
 
 impl DecisionPipeline {
     /// Run a [`SpawnRequest`] through the full pipeline.
-    pub async fn process_request(&self, request: SpawnRequest, role_template_id: Option<u32>, role_min_experiences: Option<usize>) -> Result<SpawnDecision> {
+    pub async fn process_request(
+        &self,
+        request: SpawnRequest,
+        role_template_id: Option<u32>,
+        role_min_experiences: Option<usize>,
+    ) -> Result<SpawnDecision> {
         // ── L-1: Admission ──
         let _permit: AdmissionPermit = self
             .admission

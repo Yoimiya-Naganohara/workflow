@@ -82,7 +82,9 @@ impl Default for RoleTemplate {
     }
 }
 
-fn default_min_experiences() -> usize { 5 }
+fn default_min_experiences() -> usize {
+    5
+}
 
 /// Serde helpers for `Option<[f32; EMBEDDING_DIM]>`.
 ///

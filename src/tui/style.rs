@@ -13,26 +13,26 @@ use ratatui::{
 // ── Modern Color Palette ──
 
 // Backgrounds
-pub const BG_PRIMARY: Color = Color::Rgb(30, 30, 46);    // Main background
-pub const BG_SECONDARY: Color = Color::Rgb(36, 36, 54);  // Panel backgrounds
-pub const BG_TERTIARY: Color = Color::Rgb(24, 24, 38);   // Input, status bar
+pub const BG_PRIMARY: Color = Color::Rgb(30, 30, 46); // Main background
+pub const BG_SECONDARY: Color = Color::Rgb(36, 36, 54); // Panel backgrounds
+pub const BG_TERTIARY: Color = Color::Rgb(24, 24, 38); // Input, status bar
 
 // Text
-pub const TEXT_PRIMARY: Color = Color::Rgb(205, 214, 244);   // Main text
+pub const TEXT_PRIMARY: Color = Color::Rgb(205, 214, 244); // Main text
 pub const TEXT_SECONDARY: Color = Color::Rgb(166, 173, 200); // Secondary text
-pub const TEXT_MUTED: Color = Color::Rgb(108, 112, 134);     // Muted text
+pub const TEXT_MUTED: Color = Color::Rgb(108, 112, 134); // Muted text
 
 // Borders
 pub const BORDER_DEFAULT: Color = Color::Rgb(69, 71, 90);
 pub const BORDER_FOCUSED: Color = Color::Rgb(137, 180, 250);
 
 // Semantic Colors
-pub const BLUE: Color = Color::Rgb(137, 180, 250);      // Links, interactive
-pub const GREEN: Color = Color::Rgb(166, 227, 161);     // Success, added
-pub const RED: Color = Color::Rgb(243, 139, 168);       // Error, removed
-pub const YELLOW: Color = Color::Rgb(249, 226, 175);    // Warning
-pub const PURPLE: Color = Color::Rgb(203, 166, 247);    // Special, tool calls
-pub const CYAN: Color = Color::Rgb(137, 220, 235);      // Info, highlights
+pub const BLUE: Color = Color::Rgb(137, 180, 250); // Links, interactive
+pub const GREEN: Color = Color::Rgb(166, 227, 161); // Success, added
+pub const RED: Color = Color::Rgb(243, 139, 168); // Error, removed
+pub const YELLOW: Color = Color::Rgb(249, 226, 175); // Warning
+pub const PURPLE: Color = Color::Rgb(203, 166, 247); // Special, tool calls
+pub const CYAN: Color = Color::Rgb(137, 220, 235); // Info, highlights
 
 // ── Backward-compatible aliases ──
 

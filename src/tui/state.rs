@@ -147,11 +147,29 @@ pub struct UiState {
 pub struct AppState {
     pub ui: UiState,
     pub core: CoreState,
-    pub active_dialog: Option<crate::tui::dialogs::ActiveDialog>,
+    pub popup_mode: PopupMode,
+    pub popup_selected: usize,
+    pub popup_key_provider: Option<String>,
     pub keymap: super::keymap::Keymap,
     pub pool_stats: ExperiencePoolStats,
     /// Effects queued for async execution (drained by event loop).
     pub effects: Vec<crate::tui::effect::Effect>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PopupMode {
+    None,
+    Commands,
+    SubCommand { parent: String, items: Vec<(String, String)> },
+    Providers,
+    KeyInput,
+    ModelPicker,
+}
+
+impl Default for PopupMode {
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 impl AppState {
@@ -306,10 +324,7 @@ impl AppState {
                 // Show tool call inline in the streaming response.
                 let slot = find_streaming_slot_response(&self.core.messages, response_index);
                 if let Some(msg) = self.core.messages.get_mut(slot) {
-                    msg.content.push_str(&format!(
-                        "\n\n> **Tool**: {} — {}",
-                        name, args
-                    ));
+                    msg.content.push_str(&format!("\n\n> **Tool**: {} — {}", name, args));
                 }
             }
         }

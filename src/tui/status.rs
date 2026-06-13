@@ -19,11 +19,16 @@ pub(crate) fn render_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
 
     let budget_pct = if state.ui.budget_total > 0 {
         state.ui.budget_used * 100 / state.ui.budget_total
-    } else { 0 };
+    } else {
+        0
+    };
     let ctx_pct = (budget_pct as f64 / 100.0).min(99.9);
 
     // Left side: model + context usage
-    let model_name = state.core.selected_models.first()
+    let model_name = state
+        .core
+        .selected_models
+        .first()
         .map(|m| m.model_name.as_str())
         .unwrap_or("no model");
 
@@ -32,7 +37,12 @@ pub(crate) fn render_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
     let remaining = area.width.saturating_sub(left_width + 40);
 
     let mut spans = vec![
-        Span::styled(model_name, Style::default().fg(style::BLUE).add_modifier(ratatui::style::Modifier::BOLD)),
+        Span::styled(
+            model_name,
+            Style::default()
+                .fg(style::BLUE)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        ),
         Span::styled(" • ", Style::default().fg(style::TEXT_MUTED)),
         Span::styled(format!("{:.1}%", ctx_pct), Style::default().fg(style::TEXT_PRIMARY)),
         Span::styled("/1.0M (auto)", Style::default().fg(style::TEXT_MUTED)),
@@ -40,16 +50,30 @@ pub(crate) fn render_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
 
     // Middle: metrics
     spans.push(Span::styled("  ", Style::default()));
-    spans.push(Span::styled(format!("↑{}k", up_k), Style::default().fg(style::TEXT_SECONDARY)));
+    spans.push(Span::styled(
+        format!("↑{}k", up_k),
+        Style::default().fg(style::TEXT_SECONDARY),
+    ));
     spans.push(Span::styled(" ", Style::default()));
-    spans.push(Span::styled(format!("↓{}k", down_k), Style::default().fg(style::TEXT_SECONDARY)));
+    spans.push(Span::styled(
+        format!("↓{}k", down_k),
+        Style::default().fg(style::TEXT_SECONDARY),
+    ));
     spans.push(Span::styled(" ", Style::default()));
-    spans.push(Span::styled(format!("R{}M", r_m), Style::default().fg(style::TEXT_SECONDARY)));
+    spans.push(Span::styled(
+        format!("R{}M", r_m),
+        Style::default().fg(style::TEXT_SECONDARY),
+    ));
     spans.push(Span::styled(" ", Style::default()));
-    spans.push(Span::styled(format!("${:.3}", 1.176), Style::default().fg(style::TEXT_SECONDARY)));
+    spans.push(Span::styled(
+        format!("${:.3}", 1.176),
+        Style::default().fg(style::TEXT_SECONDARY),
+    ));
 
     // Fill remaining space
-    for _ in 0..remaining { spans.push(Span::raw(" ")); }
+    for _ in 0..remaining {
+        spans.push(Span::raw(" "));
+    }
 
     // Right side: key hints
     spans.push(Span::styled("Ctrl+A ", Style::default().fg(style::TEXT_MUTED)));

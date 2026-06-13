@@ -1,33 +1,29 @@
 //! Keyboard and mouse event handler.
 //!
-//! Handles input events and mutates UI-level state (cursor position,
-//! scroll, selection, dialog opens).  Dialog dispatch is handled by
-//! the event loop in [`mod.rs`] — handler only runs when NO dialog
-//! is active.
-//!
-//! Key events are resolved through [`keymap`] so changing a keybinding
-//! only requires editing `keymap.rs`.
-//! Business logic (provider config, shell, persistence) is delegated
-//! to [`crate::tui::controller`] and [`commands`].
+//! Handles all key events including popup navigation.
+//! Business logic delegated to [`crate::tui::controller`] and [`commands`].
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::Tui;
 use super::commands;
 use super::keymap::Action;
-use super::state::{AppState, ChatMessage, Focus, MessageRole, MessageStatus};
+use super::state::{AppState, ChatMessage, Focus, MessageRole, MessageStatus, PopupMode};
 use crate::tui::chat_lines::char_idx_to_byte_idx;
-use crate::tui::dialogs::ActiveDialog;
 use crate::tui::effect::Effect;
 
 impl Tui {
-    /// Handle a key event when no dialog is active.
-    /// Returns `true` to continue the event loop, `false` to quit.
+    /// Handle a key event. Returns `true` to continue, `false` to quit.
     pub(crate) fn handle_chat_keys(&self, state: &mut AppState, key: crossterm::event::KeyEvent) -> bool {
+        // ── Popup navigation (highest priority) ──
+        if state.popup_mode != PopupMode::None {
+            return self.handle_popup_keys(state, key);
+        }
+
         let ui = &mut state.ui;
         let core = &mut state.core;
 
-        // ── Alt+Enter: insert newline (special case not in keymap) ──
+        // ── Alt+Enter: insert newline ──
         if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::ALT) {
             let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
             ui.input.insert(byte_idx, '\n');
@@ -47,12 +43,7 @@ impl Tui {
             Action::CancelResponse => {
                 if let Some(abort) = ui.active_chat_abort.take() {
                     abort.abort();
-                    core.messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: "Stopped current response".to_string(),
-                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                        status: MessageStatus::Completed,
-                    });
+                    core.messages.push(ChatMessage::system("Stopped current response"));
                 }
             }
 
@@ -80,10 +71,8 @@ impl Tui {
             }
 
             Action::OpenProviderPicker => {
-                use crate::tui::dialogs::provider::ProviderDialog;
-                core.messages
-                    .push(ChatMessage::system("Select a provider to configure"));
-                state.active_dialog = Some(ActiveDialog::Provider(ProviderDialog::new()));
+                state.popup_mode = PopupMode::Providers;
+                state.popup_selected = 0;
                 state.effects.push(Effect::FetchModelRegistry);
                 ui.input.clear();
                 ui.input_cursor = 0;
@@ -94,6 +83,7 @@ impl Tui {
                 ui.input = "/".to_string();
                 ui.input_cursor = 1;
                 ui.command_popup_selection = 0;
+                state.popup_mode = PopupMode::Commands;
             }
 
             Action::HistoryPrev
@@ -160,7 +150,8 @@ impl Tui {
                 ui.input.insert(byte_idx, c);
                 ui.input_cursor += 1;
                 ui.input_history_idx = None;
-                if ui.input.starts_with('/') {
+                if ui.input.starts_with('/') && state.popup_mode == PopupMode::None {
+                    state.popup_mode = PopupMode::Commands;
                     ui.command_popup_selection = 0;
                 }
             }
@@ -171,8 +162,8 @@ impl Tui {
                     let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
                     ui.input.remove(byte_idx);
                     ui.input_history_idx = None;
-                    if ui.input.starts_with('/') {
-                        ui.command_popup_selection = 0;
+                    if ui.input.is_empty() || !ui.input.starts_with('/') {
+                        state.popup_mode = PopupMode::None;
                     }
                 }
             }
@@ -187,30 +178,202 @@ impl Tui {
                 }
             }
 
-            // Tab without command prefix — handled at top of call (keymap returns None for bare Tab)
-            // Fall through to default match below.
             _ => {}
         }
         true
     }
 
+    /// Handle keys when a popup is active.
+    fn handle_popup_keys(&self, state: &mut AppState, key: crossterm::event::KeyEvent) -> bool {
+        let ui = &mut state.ui;
+        let core = &mut state.core;
+
+        match key.code {
+            KeyCode::Esc => {
+                state.popup_mode = PopupMode::None;
+                ui.command_popup_selection = 0;
+                state.popup_selected = 0;
+                return true;
+            }
+
+            KeyCode::Up => {
+                state.popup_selected = state.popup_selected.saturating_sub(1);
+                return true;
+            }
+
+            KeyCode::Down => {
+                state.popup_selected += 1;
+                return true;
+            }
+
+            KeyCode::Enter => {
+                match &state.popup_mode {
+                    PopupMode::Commands => {
+                        let prefix = ui.input.trim().to_lowercase();
+                        let matches: Vec<_> = commands::COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).collect();
+                        if let Some((cmd, _)) = matches.get(state.popup_selected.min(matches.len().saturating_sub(1))) {
+                            ui.input = cmd.to_string();
+                            ui.input_cursor = Self::char_count(&ui.input);
+                            state.popup_mode = PopupMode::None;
+                            ui.command_popup_selection = 0;
+                            return self.handle_input_submit(state);
+                        }
+                    }
+                    PopupMode::SubCommand { parent, items } => {
+                        if let Some((name, _)) = items.get(state.popup_selected) {
+                            let full_cmd = format!("{} {}", parent, name);
+                            ui.input = full_cmd;
+                            ui.input_cursor = Self::char_count(&ui.input);
+                            state.popup_mode = PopupMode::None;
+                            state.popup_selected = 0;
+                            return self.handle_input_submit(state);
+                        }
+                    }
+                    PopupMode::Providers => {
+                        // Select provider from filtered list.
+                        // Clone all needed data BEFORE any mutable access.
+                        let selected: Option<(String, String, bool)> = {
+                            let filtered = crate::models::filter_providers(core.models.providers(), &ui.input);
+                            filtered.get(state.popup_selected).copied().map(|provider| {
+                                (
+                                    provider.id.clone(),
+                                    provider.name.clone(),
+                                    crate::tui::controller::is_no_auth_provider(&provider.id),
+                                )
+                            })
+                        };
+                        if let Some((provider_id, name, is_no_auth)) = selected {
+                            if is_no_auth {
+                                if !core.configured_providers.contains(&provider_id) {
+                                    core.configured_providers.push(provider_id.clone());
+                                }
+                                core.models.select_provider(&provider_id);
+                                let _ = crate::tui::controller::get_or_create_provider_client(core, &provider_id);
+                                core.messages.push(ChatMessage::system(format!("{} configured", name)));
+                            } else {
+                                state.popup_mode = PopupMode::KeyInput;
+                                state.popup_key_provider = Some(provider_id);
+                                state.popup_selected = 0;
+                                ui.input.clear();
+                                ui.input_cursor = 0;
+                                return true;
+                            }
+                        }
+                        state.popup_mode = PopupMode::None;
+                    }
+                    PopupMode::KeyInput => {
+                        // Set API key
+                        if let Some(ref provider_id) = state.popup_key_provider.clone() {
+                            let key_value = ui.input.clone();
+                            if !key_value.is_empty() {
+                                // Clone provider info before any mutable access
+                                let provider_info: Option<(String, String)> =
+                                    core.models.providers().iter().find(|p| p.id == *provider_id).map(|p| {
+                                        let env_key = p.env.first().cloned().unwrap_or_default();
+                                        let name = p.name.clone();
+                                        (env_key, name)
+                                    });
+                                if let Some((env_key, name)) = provider_info {
+                                    if !env_key.is_empty() {
+                                        core.api_keys.insert(env_key.clone(), key_value);
+                                        core.models.select_provider(provider_id);
+                                        if !core.configured_providers.contains(provider_id) {
+                                            core.configured_providers.push(provider_id.clone());
+                                        }
+                                        core.provider_clients.remove(provider_id);
+                                        let _ =
+                                            crate::tui::controller::get_or_create_provider_client(core, provider_id);
+                                        core.messages.push(ChatMessage::system(format!("{} key set", name)));
+                                        let _ = crate::tui::controller::save_api_key(provider_id, &env_key, &ui.input);
+                                    }
+                                }
+                            }
+                        }
+                        state.popup_mode = PopupMode::None;
+                        state.popup_key_provider = None;
+                    }
+                    PopupMode::ModelPicker => {
+                        // Toggle model selection
+                        let results = {
+                            let configured = &core.configured_providers;
+                            core.models.search_configured_models(&ui.input, configured)
+                        };
+                        if let Some((p, m)) = results.get(state.popup_selected) {
+                            let pid = p.id.clone();
+                            let mid = m.id.clone();
+                            let pname = p.name.clone();
+                            let mname = m.name.clone();
+                            if let Some(pos) = core
+                                .selected_models
+                                .iter()
+                                .position(|sm| sm.provider_id == pid && sm.model_id == mid)
+                            {
+                                core.selected_models.remove(pos);
+                                core.messages
+                                    .push(ChatMessage::system(format!("Removed: {} / {}", pname, mname)));
+                            } else {
+                                core.selected_models.push(crate::tui::state::SelectedModel {
+                                    provider_id: pid,
+                                    model_id: mid,
+                                    provider_name: pname.clone(),
+                                    model_name: mname.clone(),
+                                });
+                                core.messages
+                                    .push(ChatMessage::system(format!("Added: {} / {}", pname, mname)));
+                            }
+                        }
+                        // Don't close — allow multi-select
+                        return true;
+                    }
+                    PopupMode::None => {}
+                }
+                state.popup_mode = PopupMode::None;
+                state.popup_selected = 0;
+                return true;
+            }
+
+            // All other keys: let the input handle them (typing, backspace, etc.)
+            _ => {
+                // Forward to normal input handling
+                match key.code {
+                    KeyCode::Char(c) => {
+                        let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
+                        ui.input.insert(byte_idx, c);
+                        ui.input_cursor += 1;
+                        state.popup_selected = 0;
+                    }
+                    KeyCode::Backspace => {
+                        if ui.input_cursor > 0 {
+                            ui.input_cursor -= 1;
+                            let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
+                            ui.input.remove(byte_idx);
+                            state.popup_selected = 0;
+                            // Close popup if input no longer matches
+                            if ui.input.is_empty()
+                                || (!ui.input.starts_with('/') && state.popup_mode == PopupMode::Commands)
+                            {
+                                state.popup_mode = PopupMode::None;
+                            }
+                        }
+                    }
+                    KeyCode::Left => {
+                        ui.input_cursor = ui.input_cursor.saturating_sub(1);
+                    }
+                    KeyCode::Right => {
+                        if ui.input_cursor < Self::char_count(&ui.input) {
+                            ui.input_cursor += 1;
+                        }
+                    }
+                    _ => {}
+                }
+                true
+            }
+        }
+    }
+
     // ── Input submit ──
 
     fn handle_input_submit(&self, state: &mut AppState) -> bool {
-        // Auto-complete partial command from popup
-        if state.ui.input.starts_with('/') && !state.ui.input.trim().is_empty() {
-            let prefix = state.ui.input.trim().to_lowercase();
-            let matches: Vec<_> = commands::COMMANDS
-                .iter()
-                .filter(|(cmd, _)| cmd.starts_with(&prefix))
-                .collect();
-            if let Some((cmd, _)) = matches.get(state.ui.command_popup_selection.min(matches.len().saturating_sub(1))) {
-                state.ui.input = cmd.to_string();
-                state.ui.input_cursor = Self::char_count(&state.ui.input);
-                state.ui.command_popup_selection = 0;
-            }
-        }
-
         let input = state.ui.input.clone();
         if input.is_empty() {
             return true;
@@ -219,8 +382,10 @@ impl Tui {
         let now = chrono::Local::now().format("%H:%M:%S").to_string();
         let trimmed = input.trim();
 
-        // ── Slash commands — delegated to commands module ──
+        // ── Slash commands ──
         if trimmed.starts_with('/') && commands::dispatch(trimmed, state, &self.state, &now) {
+            state.ui.input.clear();
+            state.ui.input_cursor = 0;
             return true;
         }
 
@@ -260,15 +425,14 @@ impl Tui {
         ui.active_chat_request_id = request_id;
         ui.active_chat_requests = 1;
 
-        // Collect data for the chat effect
         let default_tool_prompt = concat!(
             "You are a helpful assistant with access to tools. ",
             "You can read/write files, execute shell commands, and list directories. ",
             "Always use the appropriate tool when asked. ",
             "Produce a concrete result."
         );
+
         let (provider, model_id, system_prompt) = {
-            // ── Configure runtime provider from selected model ──
             let selected_model = core.selected_models.first().cloned();
             if let Some(ref sel) = selected_model {
                 let pid = sel.provider_id.clone();
@@ -284,10 +448,7 @@ impl Tui {
                 }
             }
 
-            // Try to get an initial agent
             let agent_id = crate::tui::controller::ensure_initial_agent_sync(core, &input);
-
-            // Read provider + model from the (now-configured) runtime
             let provider = core
                 .runtime
                 .as_ref()
@@ -319,7 +480,6 @@ impl Tui {
         let (abort_handle, abort_registration) = futures::future::AbortHandle::new_pair();
         ui.active_chat_abort = Some(abort_handle);
 
-        // Build conversation history (exclude current turn's messages)
         let history = {
             let mut hist: Vec<(String, String)> = Vec::new();
             for (i, msg) in core.messages.iter().enumerate() {
@@ -327,12 +487,8 @@ impl Tui {
                     break;
                 }
                 match msg.role {
-                    crate::tui::state::MessageRole::User => {
-                        hist.push(("user".to_string(), msg.content.clone()));
-                    }
-                    crate::tui::state::MessageRole::Agent => {
-                        hist.push(("assistant".to_string(), msg.content.clone()));
-                    }
+                    MessageRole::User => hist.push(("user".to_string(), msg.content.clone())),
+                    MessageRole::Agent => hist.push(("assistant".to_string(), msg.content.clone())),
                     _ => {}
                 }
             }
@@ -363,11 +519,8 @@ impl Tui {
 
         ui.input.clear();
         ui.input_cursor = 0;
-        // Don't reset chat_scroll — auto_scroll = true already pins to bottom.
         true
     }
-
-    // ── Utility ──
 
     fn char_count(s: &str) -> usize {
         s.chars().count()

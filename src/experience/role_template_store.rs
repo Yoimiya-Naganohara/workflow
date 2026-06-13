@@ -201,7 +201,7 @@ mod tests {
             system_prompt: "extra".into(),
             template_id: 99,
             embedding: None,
-                ..Default::default()
+            ..Default::default()
         }]);
         assert_eq!(store.all().len(), 2);
     }
@@ -288,7 +288,7 @@ mod tests {
             system_prompt: "original".into(),
             template_id: 10,
             embedding: None,
-                ..Default::default()
+            ..Default::default()
         };
 
         // Insert new.

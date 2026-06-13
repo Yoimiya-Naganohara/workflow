@@ -151,12 +151,7 @@ pub trait ExperienceRetrieval: Send + Sync {
     }
 
     /// Search by role ID — only experiences with matching role_template_id.
-    fn search_by_role(
-        &self,
-        query: &[f32; EMBEDDING_DIM],
-        _role_id: u32,
-        k: usize,
-    ) -> Vec<(ExperienceEntry, f32)> {
+    fn search_by_role(&self, query: &[f32; EMBEDDING_DIM], _role_id: u32, k: usize) -> Vec<(ExperienceEntry, f32)> {
         // Default: fall back to regular search (no role filter).
         self.retrieve(query, k)
     }
