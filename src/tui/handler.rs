@@ -503,7 +503,9 @@ impl Tui {
         ui.active_chat_request_id = request_id;
         ui.active_chat_requests = 1;
 
-        let default_tool_prompt = concat!("Must follow user instructions and use available tools.");
+        const MEMO_INSTRUCTIONS: &str = "\n\n## Memo System\n\nYou have access to write_memo, read_memo, list_memos, and delete_memo tools.\n\nUse memos to: \n- Record intermediate findings during multi-step tasks\n- Save decisions and their rationale for future reference\n- Share context with other agents of the same role (memos are role-scoped)\n- Track progress across conversation turns\n\nWhen to write: After completing a significant step, discovering an important detail, or making a decision.\nWhen to read: At the start of a task, check if relevant context already exists.\nUse namespaced keys like \"task/findings\", \"decision/approach\", \"summary/progress\".";
+
+        let default_tool_prompt = "Must follow user instructions and use available tools.";
 
         let (provider, model_id, system_prompt) = {
             let selected_model = core.selected_models.first().cloned();
@@ -545,6 +547,8 @@ impl Tui {
                     rt.get_role_template(&role).map(|t| t.system_prompt.clone())
                 })
                 .unwrap_or_else(|| default_tool_prompt.to_string());
+
+            let agent_prompt = format!("{}\n\n{}", agent_prompt, MEMO_INSTRUCTIONS);
 
             (provider, mid, agent_prompt)
         };
