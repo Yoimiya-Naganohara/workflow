@@ -9,7 +9,7 @@ use anyhow::Result;
 use tokio::sync::RwLock;
 
 use crate::config::ProviderConfig;
-use crate::llm::LlmProvider;
+use crate::llm::{LlmProvider, LlmRequest, LlmResponse};
 
 // ============================================================================
 //  ProviderClient — a tracked LLM provider client
@@ -100,6 +100,27 @@ impl ProviderClient {
         self.inner = new_client;
         self.reset_health();
         Ok(())
+    }
+
+    /// Call complete() with health tracking.
+    /// On success: calls mark_success(). On failure: calls mark_failure().
+    pub async fn complete(&self, request: LlmRequest) -> Result<LlmResponse> {
+        let result = self.inner.complete(request).await;
+        match &result {
+            Ok(_) => self.mark_success(),
+            Err(_) => self.mark_failure(),
+        }
+        result
+    }
+
+    /// Call chat() with health tracking.
+    pub async fn chat(&self, model: &str, system: &str, message: &str) -> Result<String> {
+        let result = self.inner.chat(model, system, message).await;
+        match &result {
+            Ok(_) => self.mark_success(),
+            Err(_) => self.mark_failure(),
+        }
+        result
     }
 }
 

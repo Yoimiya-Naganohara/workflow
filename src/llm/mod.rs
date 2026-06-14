@@ -156,7 +156,6 @@ impl LlmProvider {
                     last_error = Some(e);
                 }
                 Err(_elapsed) => {
-                    // Timeout elapsed
                     let timeout_err = anyhow::anyhow!(
                         "LLM request timed out after {}s (attempt {}/{})",
                         timeout_secs,

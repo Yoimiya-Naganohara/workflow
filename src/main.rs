@@ -58,7 +58,7 @@ async fn run_tui() -> Result<()> {
 
     // Load persisted role memos into the agent pool
     {
-        let mut state = state.write().await;
+        let state = state.write().await;
         let persisted_memos = workflow::persistence::load_role_memos();
         if !persisted_memos.is_empty() {
             if let Ok(mut pool) = state.core.agent_pool.try_write() {
