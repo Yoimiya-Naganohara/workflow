@@ -944,7 +944,10 @@ fn match_list_memos(core: &crate::tui::state::CoreState) -> String {
     };
     let memos = pool.get_role_memos(&agent.role);
     if memos.is_empty() {
-        return format!("No memos for role '{}' (use write_memo MCP tool or /memo write)", agent.role);
+        return format!(
+            "No memos for role '{}' (use write_memo MCP tool or /memo write)",
+            agent.role
+        );
     }
     let mut lines = format!("Memos for role '{}' ({}):\n", agent.role, memos.len());
     let mut sorted = memos.to_vec();

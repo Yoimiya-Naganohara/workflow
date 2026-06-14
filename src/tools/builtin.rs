@@ -8,6 +8,18 @@ use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::Deserialize;
 use std::time::Duration;
+use tokio::task::spawn_blocking;
+
+/// Execute a blocking I/O operation on the blocking thread pool.
+/// Prevents `std::fs` calls from starving the Tokio async runtime.
+async fn spawn_blocking_fs<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, ToolCallError> {
+    spawn_blocking(f)
+        .await
+        .map_err(|e| ToolCallError(format!("Blocking pool join failed: {}", e)))?
+        .map_err(ToolCallError)
+}
 
 /// Register all built-in tools on a `ToolServer`.
 pub fn register_tools(server: crate::tools::ToolServer) -> crate::tools::ToolServer {
@@ -76,7 +88,9 @@ impl Tool for ReadFile {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let content = std::fs::read_to_string(&args.path).map_err(|e| ToolCallError(e.to_string()))?;
+        // Offload blocking I/O to the blocking thread pool.
+        let path = args.path.clone();
+        let content = spawn_blocking_fs(move || std::fs::read_to_string(&path).map_err(|e| e.to_string())).await?;
         let bytes_len = content.len();
         let total_lines = content.lines().count();
         let lines: Vec<&str> = content.lines().collect();
@@ -437,69 +451,77 @@ impl Tool for Grep {
     }
 }
 
-/// Recursive directory grep, factored out to avoid code duplication.
+/// Recursive directory grep, offloaded to the blocking thread pool.
 async fn grep_directory(args: GrepArgs, re: &regex::Regex, max_results: usize) -> Result<String, ToolCallError> {
     use std::io::{BufRead, Read};
-    let path = std::path::Path::new(&args.path);
-    let mut matches: Vec<(String, usize, String)> = Vec::new();
-    let mut file_count = 0u32;
-    for entry in walkdir::WalkDir::new(path).into_iter().filter_entry(|e| {
-        let name = e.file_name().to_string_lossy();
-        if e.depth() == 0 {
-            return true;
-        }
-        !name.starts_with('.') && name != "node_modules" && name != "target" && name != "dist" && name != "build"
-    }) {
-        let entry = entry.map_err(|e| ToolCallError(e.to_string()))?;
-        if !entry.file_type().is_file() || entry.path_is_symlink() {
-            continue;
-        }
-        let fpath = entry.path().to_path_buf();
-        file_count += 1;
-        let Ok(file) = std::fs::File::open(&fpath) else {
-            continue;
-        };
+    let re = re.clone();
+    spawn_blocking(move || {
+        let path = std::path::Path::new(&args.path);
+        let mut matches: Vec<(String, usize, String)> = Vec::new();
+        let mut file_count = 0u32;
+        for entry in walkdir::WalkDir::new(path).into_iter().filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            if e.depth() == 0 {
+                return true;
+            }
+            !name.starts_with('.') && name != "node_modules" && name != "target" && name != "dist" && name != "build"
+        }) {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            if !entry.file_type().is_file() || entry.path_is_symlink() {
+                continue;
+            }
+            let fpath = entry.path().to_path_buf();
+            file_count += 1;
+            let Ok(file) = std::fs::File::open(&fpath) else {
+                continue;
+            };
 
-        // Binary detection
-        let mut buf = [0u8; 8192];
-        let n = (&file).read(&mut buf).unwrap_or(0);
-        if buf[..n].contains(&0) {
-            continue;
-        }
+            // Binary detection
+            let mut buf = [0u8; 8192];
+            let n = (&file).read(&mut buf).unwrap_or(0);
+            if buf[..n].contains(&0) {
+                continue;
+            }
 
-        // Re-open and search
-        let Ok(file) = std::fs::File::open(&fpath) else {
-            continue;
-        };
-        let reader = std::io::BufReader::new(file);
-        for (i, line) in reader.lines().enumerate() {
+            // Re-open and search
+            let Ok(file) = std::fs::File::open(&fpath) else {
+                continue;
+            };
+            let reader = std::io::BufReader::new(file);
+            for (i, line) in reader.lines().enumerate() {
+                if matches.len() >= max_results {
+                    break;
+                }
+                let line = match line {
+                    Ok(l) => l,
+                    Err(_) => continue,
+                };
+                if re.is_match(&line) {
+                    matches.push((fpath.to_string_lossy().to_string(), i + 1, line));
+                }
+            }
             if matches.len() >= max_results {
                 break;
             }
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-            if re.is_match(&line) {
-                matches.push((fpath.to_string_lossy().to_string(), i + 1, line));
-            }
         }
-        if matches.len() >= max_results {
-            break;
+        let total = matches.len();
+        let mut result = format!(
+            "Grep '{}' in '{}' — {} match(es) across {} file(s)\n",
+            args.pattern, args.path, total, file_count
+        );
+        for (fpath, lineno, line) in &matches {
+            result.push_str(&format!("  {}:{}:{}\n", fpath, lineno, line));
         }
-    }
-    let total = matches.len();
-    let mut result = format!(
-        "Grep '{}' in '{}' — {} match(es) across {} file(s)\n",
-        args.pattern, args.path, total, file_count
-    );
-    for (fpath, lineno, line) in &matches {
-        result.push_str(&format!("  {}:{}:{}\n", fpath, lineno, line));
-    }
-    if total >= max_results {
-        result.push_str(&format!("... truncated at {} matches", max_results));
-    }
-    Ok(result)
+        if total >= max_results {
+            result.push_str(&format!("... truncated at {} matches", max_results));
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|e| ToolCallError(format!("Blocking pool join failed: {}", e)))?
 }
 
 // ── FindFiles ──
@@ -1132,15 +1154,13 @@ impl Tool for PatchFile {
             // Limited replacements via match_indices
             let mut result = String::with_capacity(content.len());
             let mut last_end = 0;
-            let mut replaced = 0;
-            for (start, _) in content.match_indices(&args.old_text) {
+            for (replaced, (start, _)) in content.match_indices(&args.old_text).enumerate() {
                 if replaced >= effective_count {
                     break;
                 }
                 result.push_str(&content[last_end..start]);
                 result.push_str(&args.new_text);
                 last_end = start + args.old_text.len();
-                replaced += 1;
             }
             result.push_str(&content[last_end..]);
             result
@@ -1447,7 +1467,7 @@ impl Tool for LineEdit {
             let before_count = lines.len();
             match apply_operation(&mut lines, op, ends_with_newline) {
                 Ok(desc) => {
-                    stats.record(&desc);
+                    stats.record(desc);
                     if args.dry_run {
                         let after_count = lines.len();
                         let change = if after_count > before_count {

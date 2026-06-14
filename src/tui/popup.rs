@@ -90,9 +90,12 @@ fn resolve_subcommand_items_owned(parent: &str, items: &[(String, String)], stat
 /// If input starts with parent+space, extract the suffix.
 /// Otherwise use the whole input (dispatch cleared the parent).
 fn filter_text_for_subcommand<'a>(input: &'a str, parent: &str) -> &'a str {
-    if input.starts_with(parent) {
-        let after = &input[parent.len()..];
-        if after.starts_with(' ') { &after[1..] } else { after }
+    if let Some(after) = input.strip_prefix(parent) {
+        if let Some(stripped) = after.strip_prefix(' ') {
+            stripped
+        } else {
+            after
+        }
     } else {
         input
     }

@@ -28,8 +28,23 @@ impl TaskResourceState {
         })
     }
 
+    /// Spin-wait backoff counter for CAS contention.
+    /// Stalls briefly after `rounds` failed attempts to reduce cache-line ping-pong.
+    fn cas_backoff(rounds: u32) {
+        if rounds <= 8 {
+            // Linear backoff: spin-loop with pause hint
+            for _ in 0..1u32 << rounds {
+                std::hint::spin_loop();
+            }
+        } else {
+            // Exponential backoff: yield to OS scheduler
+            std::thread::yield_now();
+        }
+    }
+
     pub fn try_acquire_budget(&self, requested: u64) -> Option<u64> {
         let mut current = self.remaining_budget.load(Ordering::Acquire);
+        let mut rounds = 0u32;
         loop {
             if current < requested as i64 {
                 return None;
@@ -40,13 +55,18 @@ impl TaskResourceState {
                 .compare_exchange_weak(current, new, Ordering::AcqRel, Ordering::Acquire)
             {
                 Ok(_) => return Some(requested),
-                Err(actual) => current = actual,
+                Err(actual) => {
+                    current = actual;
+                    Self::cas_backoff(rounds);
+                    rounds = rounds.saturating_add(1);
+                }
             }
         }
     }
 
     pub fn try_acquire_tools(&self, tool_bitmap: u64) -> Result<(), u64> {
         let mut current = self.tool_bitmap.load(Ordering::Acquire);
+        let mut rounds = 0u32;
         loop {
             if current & tool_bitmap != 0 {
                 return Err(current);
@@ -57,7 +77,11 @@ impl TaskResourceState {
                 .compare_exchange_weak(current, new, Ordering::AcqRel, Ordering::Acquire)
             {
                 Ok(_) => return Ok(()),
-                Err(actual) => current = actual,
+                Err(actual) => {
+                    current = actual;
+                    Self::cas_backoff(rounds);
+                    rounds = rounds.saturating_add(1);
+                }
             }
         }
     }

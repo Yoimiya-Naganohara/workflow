@@ -244,6 +244,15 @@ impl AgentPool {
         memos.len() < initial_len
     }
 
+    /// Find an agent with the given role that is Completed or Idle (reusable).
+    /// Returns the agent ID if found.
+    pub fn find_idle_agent_by_role(&self, role: &str) -> Option<AgentId> {
+        self.agents
+            .iter()
+            .find(|a| a.role == role && matches!(a.status, AgentStatus::Completed | AgentStatus::Idle))
+            .map(|a| a.id)
+    }
+
     /// Migrate any per-agent memos (legacy) into role-scoped memos.
     /// After calling this, individual agents' memos are cleared.
     /// This is safe to call multiple times — it only copies memos
@@ -277,12 +286,13 @@ impl AgentPool {
             if Some(&a.id) == protect.as_ref() {
                 return true;
             }
-            // Only evict Completed or Failed agents past TTL
+            // Evict Completed, Failed, or Idle agents past TTL.
+            // Idle agents are kept for reuse but must not accumulate forever.
             match a.status {
-                crate::agent::AgentStatus::Completed | crate::agent::AgentStatus::Failed => {
-                    now.saturating_sub(a.last_active_at) < ttl
-                }
-                // Idle/Planning/etc. agents are kept (reusable)
+                crate::agent::AgentStatus::Completed
+                | crate::agent::AgentStatus::Failed
+                | crate::agent::AgentStatus::Idle => now.saturating_sub(a.last_active_at) < ttl,
+                // Planning/AwaitingChildren — still active, keep
                 _ => true,
             }
         });

@@ -312,6 +312,7 @@ impl AgentRuntime {
     }
 
     /// Embed text and run through the decision pipeline.
+    #[allow(clippy::too_many_arguments)]
     pub async fn process_with_text(
         &self,
         task_description: &str,
@@ -640,6 +641,7 @@ impl AgentRuntime {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn_child(
         &self,
         parent_id: AgentId,
@@ -870,6 +872,8 @@ impl AgentRuntime {
             "write_memo" => 1 << 14,
             "delete_memo" => 1 << 15,
             "list_memos" => 1 << 16,
+            "call_agent" => 1 << 17,
+            "list_agents" => 1 << 18,
             _ => 0,
         }
     }
@@ -920,10 +924,11 @@ impl AgentRuntime {
             .map(|t| t.system_prompt)
             .unwrap_or_else(|| format!("You are a {}. Execute the given goal.", role));
         let system_prompt = format!(
-            "{}\n\nYour goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\n{}",
+            "{}\n\nYour goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\n{}\n\n{}",
             role_system_prompt,
             goal,
-            crate::core::types::MEMO_INSTRUCTIONS
+            crate::core::types::MEMO_INSTRUCTIONS,
+            crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
         );
 
         let (response, tool_bitmap) = if let Some(handle) = &tool_server {

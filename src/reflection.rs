@@ -140,8 +140,8 @@ fn rule_code_complete(input: &str, response: &str) -> RuleVerdict {
 
     // Balance-check: count opening { } [ ] ( ) inside code blocks
     // Simple check: count total braces in response
-    let opens: usize = response.matches(|c: char| matches!(c, '{' | '[' | '(')).count();
-    let closes: usize = response.matches(|c: char| matches!(c, '}' | ']' | ')')).count();
+    let opens: usize = response.matches(['{', '[', '(']).count();
+    let closes: usize = response.matches(['}', ']', ')']).count();
     if opens != closes {
         return RuleVerdict::Fail;
     }
@@ -185,7 +185,7 @@ fn rule_multi_question_coverage(input: &str, response: &str) -> RuleVerdict {
         return RuleVerdict::Skip;
     }
 
-    let min_len = (total_questions as usize) * 50;
+    let min_len = total_questions * 50;
     if response.len() < min_len {
         return RuleVerdict::Fail;
     }

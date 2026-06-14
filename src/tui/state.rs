@@ -5,7 +5,8 @@ use futures::future::AbortHandle;
 use tokio::sync::RwLock;
 
 use crate::core::types::AgentId;
-use crate::models::ModelRegistry;
+use crate::models::{ModelCapabilities, ModelRegistry};
+use crate::provider::ProviderClient;
 use crate::reflection::ReflectionConfig;
 use crate::runtime::AgentRuntime;
 use crate::tools::ToolServerHandle;
@@ -108,7 +109,7 @@ pub struct CoreState {
     pub models: ModelRegistry,
     pub configured_providers: Vec<String>,
     pub api_keys: HashMap<String, String>,
-    pub provider_clients: HashMap<String, Arc<crate::llm::LlmProvider>>,
+    pub provider_clients: HashMap<String, Arc<ProviderClient>>,
     pub selected_models: Vec<SelectedModel>,
     pub agents: Vec<AgentEntry>,
     pub agent_pool: Arc<RwLock<crate::agent::AgentPool>>,
@@ -143,7 +144,27 @@ pub struct UiState {
     pub permits_available: usize,
     pub permits_total: usize,
     pub context_limit: u64,
+    /// Cached token counts (recalculated on message changes).
+    pub cached_input_tokens: u32,
+    pub cached_output_tokens: u32,
+    /// Number of messages at last token recalc (to detect new messages).
+    pub cached_message_count: usize,
+    /// Whether the tiktoken BPE file has been downloaded.
+    pub tokenizer_initialized: bool,
     pub current_plan: Option<crate::agent::plan::Plan>,
+
+    // ── Phase 1: Agent diagnostic tree ──
+    /// Bumped every time the agent tree topology or statuses change.
+    /// Used by `render.rs` to decide whether to rebuild tree lines.
+    pub agent_tree_version: u64,
+    /// Cached tree lines from last render (avoids rebuilding every 50 ms tick).
+    pub cached_tree_lines: Vec<String>,
+    /// Currently selected agent index within the diagnostic tree.
+    /// Used for keyboard navigation and detail popup (Phase 3).
+    pub selected_agent_idx: usize,
+    /// When true, the input field is greyed out and keyboard input is
+    /// discarded.  Set when the root agent transitions to AwaitingChildren.
+    pub input_disabled: bool,
 }
 
 // ── AppState ──
@@ -239,8 +260,13 @@ impl AppState {
             AppEvent::ChatToken { response_index, text } => {
                 if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
+                        let was_thinking = msg.status == MessageStatus::Thinking;
                         msg.content.push_str(&text);
                         msg.status = MessageStatus::Streaming;
+                        // Recalc on first token so output count appears promptly
+                        if was_thinking {
+                            self.recalc_tokens();
+                        }
                     }
                 }
             }
@@ -294,6 +320,17 @@ impl AppState {
                         }
                     }
                 }
+
+                // ── Sync budget from runtime ──
+                if let Some(rt) = &runtime {
+                    if let Ok(r) = rt.try_read() {
+                        let remaining = r.remaining_budget() as u64;
+                        self.ui.budget_used = self.ui.budget_total.saturating_sub(remaining);
+                    }
+                }
+
+                // ── Recalculate token cache ──
+                self.recalc_tokens();
             }
             AppEvent::ChatError {
                 response_index,
@@ -308,6 +345,7 @@ impl AppState {
                 }
                 self.ui.active_chat_requests = 0;
                 self.ui.active_chat_abort = None;
+                self.recalc_tokens();
             }
             AppEvent::ChatCancelled {
                 response_index,
@@ -321,6 +359,7 @@ impl AppState {
                 }
                 self.ui.active_chat_requests = 0;
                 self.ui.active_chat_abort = None;
+                self.recalc_tokens();
             }
             AppEvent::OptimizationResult {
                 role_name,
@@ -379,6 +418,7 @@ impl AppState {
                         status: MessageStatus::Completed,
                     });
                 }
+                self.recalc_tokens();
             }
             AppEvent::SelfCheckResult {
                 response_index: _,
@@ -458,6 +498,36 @@ impl AppState {
         }
     }
 
+    /// Recalculate cached token counts from all messages.
+    /// Uses the tiktoken-based tokenizer; falls back to char/4 estimate.
+    pub fn recalc_tokens(&mut self) {
+        use crate::tui::tokenizer;
+        let mut input_tokens = 0u32;
+        let mut output_tokens = 0u32;
+        for msg in &self.core.messages {
+            let tokens = tokenizer::count_tokens(&msg.content);
+            match msg.role {
+                MessageRole::User | MessageRole::System => {
+                    input_tokens = input_tokens.saturating_add(tokens);
+                }
+                MessageRole::Agent | MessageRole::Decision => {
+                    output_tokens = output_tokens.saturating_add(tokens);
+                }
+            }
+        }
+        self.ui.cached_input_tokens = input_tokens;
+        self.ui.cached_output_tokens = output_tokens;
+        self.ui.cached_message_count = self.core.messages.len();
+        self.ui.tokenizer_initialized = tokenizer::is_initialised();
+    }
+
+    /// Get capabilities for the currently selected model (if any).
+    pub fn model_capabilities(&self) -> Option<ModelCapabilities> {
+        let sel = self.core.selected_models.first()?;
+        let model = self.core.models.get_model(&sel.provider_id, &sel.model_id)?;
+        Some(model.capabilities())
+    }
+
     /// Trigger a self-check reflection after a completed chat.
     fn trigger_self_check(
         &mut self,
@@ -474,6 +544,12 @@ impl AppState {
 
         // Get provider and model_id from the current selection
         let (provider, model_id, system_prompt) = self.get_chat_context(runtime, input);
+        let system_prompt = format!(
+            "{}\n\n{}\n\n{}",
+            system_prompt,
+            crate::core::types::MEMO_INSTRUCTIONS,
+            crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
+        );
 
         let provider = match provider {
             Some(p) => p,
@@ -520,8 +596,7 @@ impl AppState {
         _runtime: &Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
         _input: &str,
     ) -> (Option<std::sync::Arc<crate::llm::LlmProvider>>, String, String) {
-        let default_tool_prompt =
-            concat!("Must follow user instructions and use available tools. Remember preferences");
+        let default_tool_prompt = "Must follow user instructions and use available tools. Remember preferences";
 
         let provider = self
             .core
@@ -544,7 +619,10 @@ impl AppState {
             self.core.selected_models.first().and_then(|sel| {
                 if self.core.configured_providers.iter().any(|id| id == &sel.provider_id) {
                     // Try to get existing client
-                    self.core.provider_clients.get(&sel.provider_id).cloned()
+                    self.core
+                        .provider_clients
+                        .get(&sel.provider_id)
+                        .map(|pc| Arc::new(pc.inner.clone()))
                 } else {
                     None
                 }
@@ -596,6 +674,7 @@ impl Default for CoreState {
             configured_providers: Vec::new(),
             api_keys: HashMap::new(),
             provider_clients: HashMap::new(),
+            // provider_clients populated by load_initial_state
             selected_models: Vec::new(),
             agents: vec![AgentEntry {
                 id: "agent-000".to_string(),
@@ -630,6 +709,10 @@ impl Default for UiState {
             input_history: Vec::new(),
             input_history_idx: None,
             active_chat_request_id: 0,
+            cached_input_tokens: 0,
+            cached_output_tokens: 0,
+            cached_message_count: 0,
+            tokenizer_initialized: false,
             active_chat_abort: None,
             active_chat_requests: 0,
             budget_used: 0,
@@ -638,6 +721,10 @@ impl Default for UiState {
             permits_total: 10,
             context_limit: 0,
             current_plan: None,
+            agent_tree_version: 0,
+            cached_tree_lines: Vec::new(),
+            selected_agent_idx: 0,
+            input_disabled: false,
         }
     }
 }

@@ -13,6 +13,7 @@ use rig::providers::{llamafile, ollama};
 use crate::core::types::AgentId;
 use crate::llm::LlmProvider;
 use crate::models::CustomProvider;
+use crate::provider::ProviderClient;
 use crate::tui::state::{AgentEntry, AppState, ChatMessage, CoreState, MessageRole, MessageStatus, SelectedModel};
 
 // ============================================================================
@@ -96,7 +97,7 @@ pub fn is_custom_provider(provider_id: &str) -> bool {
     provider_id.starts_with("custom-")
 }
 
-pub fn get_or_create_provider_client(state: &mut CoreState, provider_id: &str) -> Result<Arc<LlmProvider>> {
+pub fn get_or_create_provider_client(state: &mut CoreState, provider_id: &str) -> Result<Arc<ProviderClient>> {
     if let Some(client) = state.provider_clients.get(provider_id) {
         return Ok(client.clone());
     }
@@ -109,20 +110,22 @@ pub fn get_or_create_provider_client(state: &mut CoreState, provider_id: &str) -
         .ok_or_else(|| anyhow::anyhow!("Provider not found: {}", provider_id))?;
 
     if is_no_auth_provider(provider_id) {
-        let client = match provider_id {
+        let llm_provider = match provider_id {
             "ollama" => {
                 let mut builder = ollama::Client::builder().api_key(Nothing);
                 if let Some(url) = provider.api.as_deref() {
                     builder = builder.base_url(url);
                 }
-                Arc::new(LlmProvider::Ollama(builder.build()?))
+                LlmProvider::Ollama(builder.build()?)
             }
             "llamafile" => {
                 let url = provider.api.as_deref().unwrap_or("http://localhost:8080");
-                Arc::new(LlmProvider::Llamafile(llamafile::Client::from_url(url)?))
+                LlmProvider::Llamafile(llamafile::Client::from_url(url)?)
             }
             _ => anyhow::bail!("unexpected no-auth provider: {}", provider_id),
         };
+        let config = provider.to_provider_config("");
+        let client = Arc::new(ProviderClient::new(config, llm_provider));
         state.provider_clients.insert(provider_id.to_string(), client.clone());
         return Ok(client);
     }
@@ -130,11 +133,13 @@ pub fn get_or_create_provider_client(state: &mut CoreState, provider_id: &str) -
     let env_key = provider.env.first().cloned().unwrap_or_default();
 
     if is_custom_provider(provider_id) && !state.api_keys.contains_key(&env_key) {
-        let client = Arc::new(LlmProvider::from_protocol(
+        let llm_provider = LlmProvider::from_protocol(
             "",
             provider.api.as_deref(),
             crate::llm::ProviderProtocol::OpenAiCompatible,
-        )?);
+        )?;
+        let config = provider.to_provider_config("");
+        let client = Arc::new(ProviderClient::new(config, llm_provider));
         state.provider_clients.insert(provider_id.to_string(), client.clone());
         return Ok(client);
     }
@@ -147,7 +152,9 @@ pub fn get_or_create_provider_client(state: &mut CoreState, provider_id: &str) -
         .get(&env_key)
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("{} not set. Use /connect to configure.", env_key))?;
-    let client = Arc::new(LlmProvider::from_key(&api_key, provider.api.as_deref(), provider_id)?);
+    let llm_provider = LlmProvider::from_key(&api_key, provider.api.as_deref(), provider_id)?;
+    let config = provider.to_provider_config(&api_key);
+    let client = Arc::new(ProviderClient::new(config, llm_provider));
     state.provider_clients.insert(provider_id.to_string(), client.clone());
     Ok(client)
 }
@@ -165,6 +172,10 @@ pub fn save_selected_models(models: &[SelectedModel]) -> Result<()> {
 }
 
 pub async fn load_initial_state(state: &mut AppState) {
+    // Eagerly initialise the tiktoken BPE file so the status bar
+    // token display works on first render (downloads ~1 MB on first run).
+    crate::tui::tokenizer::init();
+
     let persisted = crate::persistence::load();
     state.core.selected_models = persisted.selected_models;
     state.core.configured_providers = persisted.configured_providers;

@@ -18,6 +18,22 @@ pub struct Provider {
     pub models: HashMap<String, Model>,
 }
 
+impl Provider {
+    /// Convert to a ProviderConfig with the given API key.
+    pub fn to_provider_config(&self, api_key: &str) -> crate::config::ProviderConfig {
+        let protocol = crate::llm::ProviderProtocol::from_id(&self.id);
+        crate::config::ProviderConfig {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            protocol,
+            base_url: self.api.clone().unwrap_or_default(),
+            api_key: api_key.to_string(),
+            models: self.models.keys().cloned().collect(),
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Model {
     pub id: String,

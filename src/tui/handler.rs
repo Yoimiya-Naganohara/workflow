@@ -3,6 +3,8 @@
 //! Handles all key events including popup navigation.
 //! Business logic delegated to [`crate::tui::controller`] and [`commands`].
 
+use std::sync::Arc;
+
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::Tui;
@@ -165,12 +167,11 @@ impl Tui {
                     let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
                     ui.input.remove(byte_idx);
                     ui.input_history_idx = None;
-                    if matches!(state.popup_mode, PopupMode::FilePicker { .. }) && !ui.input.contains('@') {
+                    if (matches!(state.popup_mode, PopupMode::FilePicker { .. }) && !ui.input.contains('@'))
+                        || ((ui.input.is_empty() || !ui.input.starts_with('/'))
+                            && matches!(state.popup_mode, PopupMode::Commands))
+                    {
                         state.popup_mode = PopupMode::None;
-                    } else if ui.input.is_empty() || !ui.input.starts_with('/') {
-                        if matches!(state.popup_mode, PopupMode::Commands) {
-                            state.popup_mode = PopupMode::None;
-                        }
                     }
                 }
             }
@@ -197,20 +198,26 @@ impl Tui {
 
         match key.code {
             KeyCode::Esc => {
+                let was_key_input = matches!(state.popup_mode, PopupMode::KeyInput);
                 state.popup_mode = PopupMode::None;
                 ui.command_popup_selection = 0;
                 state.popup_selected = 0;
-                return true;
+                if was_key_input {
+                    // Clear the input so the partially-typed API key doesn't remain visible.
+                    ui.input.clear();
+                    ui.input_cursor = 0;
+                }
+                true
             }
 
             KeyCode::Up => {
                 state.popup_selected = state.popup_selected.saturating_sub(1);
-                return true;
+                true
             }
 
             KeyCode::Down => {
                 state.popup_selected += 1;
-                return true;
+                true
             }
 
             KeyCode::Enter => {
@@ -233,9 +240,12 @@ impl Tui {
                         // Filter items by input text (same logic as popup.rs render)
                         let filter_text = {
                             let input = &ui.input;
-                            if input.starts_with(parent) {
-                                let after = &input[parent.len()..];
-                                if after.starts_with(' ') { &after[1..] } else { after }
+                            if let Some(after) = input.strip_prefix(parent) {
+                                if let Some(stripped) = after.strip_prefix(' ') {
+                                    stripped
+                                } else {
+                                    after
+                                }
                             } else {
                                 input.as_str()
                             }
@@ -322,6 +332,9 @@ impl Tui {
                         }
                         state.popup_mode = PopupMode::None;
                         state.popup_key_provider = None;
+                        // Clear the input so the API key doesn't remain visible in the chat box.
+                        ui.input.clear();
+                        ui.input_cursor = 0;
                     }
                     PopupMode::ModelPicker => {
                         // Toggle model selection
@@ -382,7 +395,7 @@ impl Tui {
                 }
                 state.popup_mode = PopupMode::None;
                 state.popup_selected = 0;
-                return true;
+                true
             }
 
             KeyCode::Tab => {
@@ -397,7 +410,7 @@ impl Tui {
                         state.popup_selected = (state.popup_selected + 1) % matches.len();
                     }
                 }
-                return true;
+                true
             }
 
             // All other keys: let the input handle them (typing, backspace, etc.)
@@ -417,9 +430,8 @@ impl Tui {
                             ui.input.remove(byte_idx);
                             state.popup_selected = 0;
                             // Close popup if input no longer matches
-                            if matches!(state.popup_mode, PopupMode::FilePicker { .. }) && !ui.input.contains('@') {
-                                state.popup_mode = PopupMode::None;
-                            } else if ui.input.is_empty()
+                            if (matches!(state.popup_mode, PopupMode::FilePicker { .. }) && !ui.input.contains('@'))
+                                || ui.input.is_empty()
                                 || (!ui.input.starts_with('/') && matches!(state.popup_mode, PopupMode::Commands))
                             {
                                 state.popup_mode = PopupMode::None;
@@ -515,7 +527,7 @@ impl Tui {
                     if let Ok(client) = crate::tui::controller::get_or_create_provider_client(core, &pid) {
                         if let Some(rt) = &core.runtime {
                             if let Ok(mut rt_guard) = rt.try_write() {
-                                rt_guard.set_provider_from_state(client);
+                                rt_guard.set_provider_from_state(Arc::new(client.inner.clone()));
                                 rt_guard.set_default_model(&sel.model_id);
                             }
                         }
@@ -548,7 +560,12 @@ impl Tui {
                 })
                 .unwrap_or_else(|| default_tool_prompt.to_string());
 
-            let agent_prompt = format!("{}\n\n{}", agent_prompt, crate::core::types::MEMO_INSTRUCTIONS);
+            let agent_prompt = format!(
+                "{}\n\n{}\n\n{}",
+                agent_prompt,
+                crate::core::types::MEMO_INSTRUCTIONS,
+                crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
+            );
 
             (provider, mid, agent_prompt)
         };
