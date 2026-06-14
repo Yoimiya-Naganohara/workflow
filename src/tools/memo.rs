@@ -184,6 +184,10 @@ impl Tool for WriteMemo {
 
         pool.write_role_memo(&role, entry.clone());
 
+        // Persist to disk
+        let memos = pool.get_role_memos(&role).to_vec();
+        let _ = crate::persistence::save_role_memos(&role, &memos);
+
         Ok(format!(
             "Memo written — key: '{}', {} bytes, role: '{}'",
             entry.key,
@@ -434,6 +438,9 @@ impl Tool for DeleteMemo {
         // agent borrow dropped here
 
         if pool.delete_role_memo(&role, &args.key) {
+            // Persist to disk after deletion
+            let memos = pool.get_role_memos(&role).to_vec();
+            let _ = crate::persistence::save_role_memos(&role, &memos);
             Ok(format!("Memo '{}' deleted from role '{}'", args.key, role))
         } else {
             Err(ToolCallError(format!(

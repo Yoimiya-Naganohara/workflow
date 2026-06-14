@@ -56,6 +56,19 @@ async fn run_tui() -> Result<()> {
         state.core.tool_server = tool_server;
     }
 
+    // Load persisted role memos into the agent pool
+    {
+        let mut state = state.write().await;
+        let persisted_memos = workflow::persistence::load_role_memos();
+        if !persisted_memos.is_empty() {
+            if let Ok(mut pool) = state.core.agent_pool.try_write() {
+                for (role, memos) in persisted_memos {
+                    *pool.role_memos_mut().entry(role).or_default() = memos;
+                }
+            }
+        }
+    }
+
     // Background task: periodic experience pool flush (every 30 seconds)
     let flush_state = state.clone();
     let flush_handle = tokio::spawn(async move {

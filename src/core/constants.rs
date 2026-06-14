@@ -73,7 +73,7 @@ pub const MAX_CHAIN_LENGTH: usize = 20;
 pub const DEFAULT_MAX_TOOL_TURNS: usize = 30;
 
 /// Memo usage instructions appended to every role's system prompt.
-pub const MEMO_INSTRUCTIONS: &str = "\n\n## Persistent Memory (Memos)\n\nYou MUST use write_memo to persist information the user asks you to remember, and read_memo at the start of each task to recall previously stored context.\n\nCRITICAL: When the user says anything like \"remember\", \"keep in mind\", \"note that\", \"store this\", or asks you to recall something from earlier — you MUST call write_memo immediately. This is how you remember across conversation turns.\n\nMemo tools available:\n- write_memo(key, value) — Store a note. Overwrites if key exists.\n- read_memo(key) — Retrieve a stored note.\n- list_memos(prefix) — List all stored keys, optionally filtered.\n- delete_memo(key) — Remove a stored note.\n\nKey naming convention: use slash-prefixed paths like \"task/findings\", \"decision/approach\", \"user/preferences\", \"project/deadlines\".\n\nExample: If the user says \"remember the port is 8080\", call write_memo with key=\"config/port\" and value=\"8080\". Next turn, call read_memo(\"config/port\") to recall it.";
+pub const MEMO_INSTRUCTIONS: &str = "The memo is the only way that allows agent to remember accross sessions. So when user say something important remember it";
 
 #[cfg(test)]
 mod tests {
