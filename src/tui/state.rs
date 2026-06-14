@@ -6,6 +6,7 @@ use tokio::sync::RwLock;
 
 use crate::core::types::AgentId;
 use crate::models::ModelRegistry;
+use crate::reflection::ReflectionConfig;
 use crate::runtime::AgentRuntime;
 use crate::tools::ToolServerHandle;
 use crate::tui::effect::AppEvent;
@@ -115,6 +116,9 @@ pub struct CoreState {
     pub tool_server: ToolServerHandle,
     pub responsible_agent_id: Option<AgentId>,
     pub default_role: String,
+    pub reflection: ReflectionConfig,
+    /// Track the last chat context for retry.
+    pub last_chat_request_id: u64,
 }
 
 /// Transient UI state — reset on restart.
@@ -169,6 +173,9 @@ pub enum PopupMode {
     Providers,
     KeyInput,
     ModelPicker,
+    FilePicker {
+        query: String,
+    },
 }
 
 impl AppState {
@@ -239,32 +246,17 @@ impl AppState {
             }
             AppEvent::ChatCompleted {
                 response_index,
-                request_id: _,
+                request_id,
                 full_response,
-                input: _,
-                runtime: _,
+                input,
+                runtime,
             } => {
-                // Prepend any tool call annotations that were streamed during the response
                 if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
-                        // Preserve tool call annotations that were appended during streaming
-                        let tool_annotations = if !full_response.is_empty() && msg.content != full_response {
-                            // Extract any text that was added after full_response content
-                            if msg.content.starts_with(&full_response) {
-                                msg.content[full_response.len()..].to_string()
-                            } else {
-                                // Content diverged — keep what we have and annotate
-                                String::new()
-                            }
-                        } else {
-                            String::new()
-                        };
-
-                        if !full_response.is_empty() {
-                            msg.content = full_response;
-                        }
-                        if !tool_annotations.is_empty() {
-                            msg.content.push_str(&tool_annotations);
+                        // Only overwrite if the message hasn't already been completed.
+                        // Prevents duplicate events from overwriting completed content.
+                        if matches!(msg.status, MessageStatus::Thinking | MessageStatus::Streaming) {
+                            msg.content = full_response.clone();
                         }
                         msg.status = MessageStatus::Completed;
                     }
@@ -273,6 +265,11 @@ impl AppState {
                     self.ui.active_chat_requests -= 1;
                 }
                 self.ui.active_chat_abort = None;
+
+                // ── Trigger self-check reflection if enabled ──
+                if self.core.reflection.auto_reflect {
+                    self.trigger_self_check(response_index, request_id, full_response, &input, &runtime);
+                }
             }
             AppEvent::ChatError {
                 response_index,
@@ -341,21 +338,209 @@ impl AppState {
                 args,
                 timestamp: _,
             } => {
-                // Insert tool call right after the streaming agent message
-                let insert_pos = find_streaming_slot_response(&self.core.messages, response_index)
-                    .map(|s| s + 1)
-                    .unwrap_or_else(|| self.core.messages.len());
-                self.core.messages.insert(
-                    insert_pos,
-                    ChatMessage {
+                // Append tool call to the streaming agent message
+                if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
+                    if let Some(msg) = self.core.messages.get_mut(slot) {
+                        if !msg.content.is_empty() {
+                            msg.content.push('\n');
+                        }
+                        msg.content.push_str(&format!("{} — {}", name, args));
+                    }
+                } else {
+                    // Fallback: insert as separate message if no streaming slot found
+                    self.core.messages.push(ChatMessage {
                         role: MessageRole::Decision,
                         content: format!("{} — {}", name, args),
                         timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                         status: MessageStatus::Completed,
-                    },
-                );
+                    });
+                }
+            }
+            AppEvent::SelfCheckResult {
+                response_index: _,
+                request_id,
+                passed,
+                attempt,
+                input: _,
+                system_prompt,
+                history,
+                tool_server,
+                provider,
+                model_id,
+                runtime,
+                abort_registration: _,
+                feedback,
+            } => {
+                if passed {
+                    self.core.last_chat_request_id = 0;
+                    return;
+                }
+
+                let max_attempts = self.core.reflection.max_attempts;
+                if attempt >= max_attempts {
+                    self.core.messages.push(ChatMessage::system(format!(
+                        "⚠️ Reflection: max retries ({}) reached. Final result shown above.",
+                        max_attempts
+                    )));
+                    self.core.last_chat_request_id = 0;
+                    return;
+                }
+
+                let new_attempt = attempt + 1;
+                let now = chrono::Local::now().format("%H:%M:%S").to_string();
+                let feedback_msg = format!("🔄 Reflection #{} — revisiting response\n\n{}", new_attempt, feedback);
+                self.core.messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: feedback_msg,
+                    timestamp: now,
+                    status: MessageStatus::Completed,
+                });
+
+                let mut new_history = history.clone();
+                new_history.push(("user".to_string(), feedback.clone()));
+
+                let new_response_index = self.core.messages.len();
+                self.core.messages.push(ChatMessage {
+                    role: MessageRole::Agent,
+                    content: String::new(),
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                    status: MessageStatus::Thinking,
+                });
+
+                let new_request_id = self.ui.active_chat_request_id.wrapping_add(1);
+                self.ui.active_chat_request_id = new_request_id;
+                self.ui.active_chat_requests = 1;
+                self.ui.auto_scroll = true;
+
+                let (abort_handle, new_abort_registration) = futures::future::AbortHandle::new_pair();
+                self.ui.active_chat_abort = Some(abort_handle);
+
+                self.core.last_chat_request_id = request_id;
+
+                let new_history_clone = new_history.clone();
+                self.effects.push(crate::tui::effect::Effect::StartChat {
+                    input: feedback.clone(),
+                    response_index: new_response_index,
+                    request_id: new_request_id,
+                    model_id,
+                    system_prompt,
+                    history: new_history_clone,
+                    tool_server,
+                    provider,
+                    runtime,
+                    abort_registration: new_abort_registration,
+                });
             }
         }
+    }
+
+    /// Trigger a self-check reflection after a completed chat.
+    fn trigger_self_check(
+        &mut self,
+        response_index: usize,
+        request_id: u64,
+        full_response: String,
+        input: &str,
+        runtime: &Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
+    ) {
+        // Don't reflect on reflection-triggered retries
+        if request_id > 0 && request_id == self.core.last_chat_request_id {
+            return;
+        }
+
+        // Get provider and model_id from the current selection
+        let (provider, model_id, system_prompt) = self.get_chat_context(runtime, input);
+
+        let provider = match provider {
+            Some(p) => p,
+            None => return,
+        };
+
+        let tool_server = self.core.tool_server.clone();
+
+        // Build history from messages up to the response
+        let mut history: Vec<(String, String)> = Vec::new();
+        for (i, msg) in self.core.messages.iter().enumerate() {
+            if i >= response_index.saturating_sub(1) {
+                break;
+            }
+            match msg.role {
+                MessageRole::User => history.push(("user".to_string(), msg.content.clone())),
+                MessageRole::Agent => history.push(("assistant".to_string(), msg.content.clone())),
+                _ => {}
+            }
+        }
+
+        let (abort_handle, abort_registration) = futures::future::AbortHandle::new_pair();
+        self.ui.active_chat_abort = Some(abort_handle);
+
+        self.effects.push(crate::tui::effect::Effect::SelfCheck {
+            response_index,
+            request_id,
+            attempt: 0,
+            full_response,
+            input: input.to_string(),
+            system_prompt,
+            history,
+            tool_server,
+            provider,
+            model_id,
+            runtime: runtime.clone(),
+            abort_registration,
+        });
+    }
+
+    /// Get the chat context (provider, model_id, system_prompt) from current state.
+    fn get_chat_context(
+        &self,
+        _runtime: &Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
+        _input: &str,
+    ) -> (Option<std::sync::Arc<crate::llm::LlmProvider>>, String, String) {
+        let default_tool_prompt =
+            concat!("Must follow user instructions and use available tools. Remember preferences");
+
+        let provider = self
+            .core
+            .runtime
+            .as_ref()
+            .and_then(|rt| rt.try_read().ok().and_then(|r| r.provider.clone()));
+
+        let model_id = provider
+            .as_ref()
+            .and_then(|_| {
+                self.core
+                    .runtime
+                    .as_ref()
+                    .and_then(|rt| rt.try_read().ok().map(|r| r.model_id.clone()))
+            })
+            .unwrap_or_default();
+
+        // Fallback: build from selected_models if runtime provider unavailable
+        let provider = provider.or_else(|| {
+            self.core.selected_models.first().and_then(|sel| {
+                if self.core.configured_providers.iter().any(|id| id == &sel.provider_id) {
+                    // Try to get existing client
+                    self.core.provider_clients.get(&sel.provider_id).cloned()
+                } else {
+                    None
+                }
+            })
+        });
+
+        let agent_prompt = self
+            .core
+            .responsible_agent_id
+            .as_ref()
+            .and_then(|aid| {
+                let pool = self.core.agent_pool.try_read().ok()?;
+                let role = pool.get_agent(aid)?.role.clone();
+                drop(pool);
+                let rt = self.core.runtime.as_ref()?.try_read().ok()?;
+                rt.get_role_template(&role).map(|t| t.system_prompt.clone())
+            })
+            .unwrap_or_else(|| default_tool_prompt.to_string());
+
+        (provider, model_id, agent_prompt)
     }
 }
 
@@ -399,6 +584,8 @@ impl Default for CoreState {
             tool_server: crate::tools::create_tool_server(),
             default_role: "general_business_analyst".to_string(),
             responsible_agent_id: None,
+            reflection: ReflectionConfig::default(),
+            last_chat_request_id: 0,
         }
     }
 }

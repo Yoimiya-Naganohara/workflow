@@ -127,3 +127,209 @@ mod opt_big_array_384 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── AgentRuntimeConfig ──
+
+    #[test]
+    fn test_default_config() {
+        let cfg = AgentRuntimeConfig::default();
+        assert_eq!(cfg.max_concurrent_agents, crate::core::types::DEFAULT_MAX_AGENTS);
+        assert_eq!(
+            cfg.admission_timeout_ms,
+            crate::core::types::DEFAULT_ADMISSION_TIMEOUT_MS
+        );
+        assert_eq!(cfg.max_depth, crate::core::types::DEFAULT_MAX_DEPTH);
+        assert_eq!(cfg.initial_budget, crate::core::types::DEFAULT_RUNTIME_BUDGET);
+        let eps = f32::EPSILON;
+        assert!((cfg.l1_confidence_threshold - crate::core::types::DEFAULT_L1_CONFIDENCE).abs() < eps);
+        assert!((cfg.semantic_conflict_threshold - crate::core::types::DEFAULT_SEMANTIC_THRESHOLD).abs() < eps);
+        assert_eq!(cfg.suspend_timeout_ms, crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS);
+        assert!(cfg.bedrock_path.is_none());
+    }
+
+    #[test]
+    fn test_config_custom_values() {
+        let cfg = AgentRuntimeConfig {
+            max_concurrent_agents: 5,
+            admission_timeout_ms: 200,
+            max_depth: 3,
+            initial_budget: 20_000,
+            l1_confidence_threshold: 0.8,
+            semantic_conflict_threshold: -0.3,
+            suspend_timeout_ms: 100,
+            bedrock_path: Some(std::path::PathBuf::from("/tmp/test.bin")),
+        };
+        assert_eq!(cfg.max_concurrent_agents, 5);
+        assert_eq!(cfg.admission_timeout_ms, 200);
+        assert_eq!(cfg.max_depth, 3);
+        assert_eq!(cfg.initial_budget, 20_000);
+        assert!((cfg.l1_confidence_threshold - 0.8).abs() < f32::EPSILON);
+        assert!((cfg.semantic_conflict_threshold - (-0.3)).abs() < f32::EPSILON);
+        assert_eq!(cfg.suspend_timeout_ms, 100);
+        assert_eq!(cfg.bedrock_path.as_deref(), Some(std::path::Path::new("/tmp/test.bin")));
+    }
+
+    // ── RoleTemplate ──
+
+    fn sample_template() -> RoleTemplate {
+        RoleTemplate {
+            role: "planner".into(),
+            label: "Senior Planner".into(),
+            system_prompt: "You are a senior planner.".into(),
+            template_id: 1,
+            min_experiences: 3,
+            version: 2,
+            created_at: 1000,
+            updated_at: 2000,
+            embedding: None,
+        }
+    }
+
+    #[test]
+    fn test_role_template_default() {
+        let t = RoleTemplate::default();
+        assert_eq!(t.role, "");
+        assert_eq!(t.label, "");
+        assert_eq!(t.system_prompt, "");
+        assert_eq!(t.template_id, 0);
+        assert_eq!(t.min_experiences, 5);
+        assert_eq!(t.version, 0);
+        assert_eq!(t.created_at, 0);
+        assert_eq!(t.updated_at, 0);
+        assert!(t.embedding.is_none());
+    }
+
+    #[test]
+    fn test_role_template_custom() {
+        let t = sample_template();
+        assert_eq!(t.role, "planner");
+        assert_eq!(t.label, "Senior Planner");
+        assert_eq!(t.template_id, 1);
+        assert_eq!(t.min_experiences, 3);
+        assert_eq!(t.version, 2);
+        assert_eq!(t.created_at, 1000);
+        assert_eq!(t.updated_at, 2000);
+    }
+
+    #[test]
+    fn test_role_template_with_embedding() {
+        let mut emb = [0.0f32; crate::core::types::EMBEDDING_DIM];
+        emb[0] = 0.5;
+        emb[42] = -0.3;
+        emb[383] = 0.9;
+        let t = RoleTemplate {
+            embedding: Some(emb),
+            ..sample_template()
+        };
+        let e = t.embedding.unwrap();
+        assert!((e[0] - 0.5).abs() < f32::EPSILON);
+        assert!((e[42] - (-0.3)).abs() < f32::EPSILON);
+        assert!((e[383] - 0.9).abs() < f32::EPSILON);
+        assert_eq!(e.len(), crate::core::types::EMBEDDING_DIM);
+    }
+
+    #[test]
+    fn test_role_template_serde_roundtrip() {
+        let t = sample_template();
+        let json = serde_json::to_string(&t).unwrap();
+        let back: RoleTemplate = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.role, t.role);
+        assert_eq!(back.label, t.label);
+        assert_eq!(back.system_prompt, t.system_prompt);
+        assert_eq!(back.template_id, t.template_id);
+        assert_eq!(back.min_experiences, t.min_experiences);
+        assert_eq!(back.version, t.version);
+        assert_eq!(back.created_at, t.created_at);
+        assert_eq!(back.updated_at, t.updated_at);
+    }
+
+    #[test]
+    fn test_role_template_serde_with_embedding() {
+        let mut emb = [0.0f32; crate::core::types::EMBEDDING_DIM];
+        emb[0] = 1.0;
+        emb[383] = -1.0;
+        let t = RoleTemplate {
+            embedding: Some(emb),
+            ..sample_template()
+        };
+        let json = serde_json::to_string(&t).unwrap();
+        let back: RoleTemplate = serde_json::from_str(&json).unwrap();
+        let e = back.embedding.unwrap();
+        assert!((e[0] - 1.0).abs() < f32::EPSILON);
+        assert!((e[383] - (-1.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_role_template_serde_null_embedding() {
+        let t = RoleTemplate {
+            embedding: None,
+            ..sample_template()
+        };
+        let json = serde_json::to_string(&t).unwrap();
+        let back: RoleTemplate = serde_json::from_str(&json).unwrap();
+        assert!(back.embedding.is_none());
+    }
+
+    #[test]
+    fn test_role_template_serde_wrong_embedding_length() {
+        let json = format!(
+            r#"{{"role":"test","label":"Test","system_prompt":"...","template_id":0,"min_experiences":5,"version":0,"created_at":0,"updated_at":0,"embedding":{}}}"#,
+            serde_json::to_string(&vec![0.0f32; 10]).unwrap()
+        );
+        let result: Result<RoleTemplate, _> = serde_json::from_str(&json);
+        assert!(result.is_err());
+    }
+
+    // ── opt_big_array_384 ──
+
+    #[test]
+    fn test_opt_big_array_serialize_some() {
+        let arr: Option<[f32; crate::core::types::EMBEDDING_DIM]> = Some([0.5; crate::core::types::EMBEDDING_DIM]);
+        let mut buf = Vec::new();
+        let mut ser = serde_json::Serializer::new(&mut buf);
+        super::opt_big_array_384::serialize(&arr, &mut ser).unwrap();
+        let json = String::from_utf8(buf).unwrap();
+        assert!(json.starts_with('['));
+    }
+
+    #[test]
+    fn test_opt_big_array_serialize_none() {
+        let arr: Option<[f32; crate::core::types::EMBEDDING_DIM]> = None;
+        let mut buf = Vec::new();
+        let mut ser = serde_json::Serializer::new(&mut buf);
+        super::opt_big_array_384::serialize(&arr, &mut ser).unwrap();
+        let json = String::from_utf8(buf).unwrap();
+        assert_eq!(json, "null");
+    }
+
+    #[test]
+    fn test_opt_big_array_deserialize_some() {
+        let json = format!("[{}]", "0.5,".repeat(crate::core::types::EMBEDDING_DIM - 1) + "0.5");
+        let mut de = serde_json::Deserializer::from_str(&json);
+        let arr: Option<[f32; crate::core::types::EMBEDDING_DIM]> =
+            super::opt_big_array_384::deserialize(&mut de).unwrap();
+        let a = arr.unwrap();
+        assert!((a[0] - 0.5).abs() < f32::EPSILON);
+        assert!((a[383] - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_opt_big_array_deserialize_none() {
+        let mut de = serde_json::Deserializer::from_str("null");
+        let arr: Option<[f32; crate::core::types::EMBEDDING_DIM]> =
+            super::opt_big_array_384::deserialize(&mut de).unwrap();
+        assert!(arr.is_none());
+    }
+
+    #[test]
+    fn test_opt_big_array_deserialize_wrong_length() {
+        let json = "[0.5, 0.5]";
+        let mut de = serde_json::Deserializer::from_str(json);
+        let result = super::opt_big_array_384::deserialize(&mut de);
+        assert!(result.is_err());
+    }
+}

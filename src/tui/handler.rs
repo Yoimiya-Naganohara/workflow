@@ -140,7 +140,7 @@ impl Tui {
                         .filter(|(cmd, _)| cmd.starts_with(&prefix))
                         .collect();
                     if !matches.is_empty() {
-                        ui.command_popup_selection = (ui.command_popup_selection + 1) % matches.len();
+                        state.popup_selected = (state.popup_selected + 1) % matches.len();
                     }
                 }
             }
@@ -150,7 +150,10 @@ impl Tui {
                 ui.input.insert(byte_idx, c);
                 ui.input_cursor += 1;
                 ui.input_history_idx = None;
-                if ui.input.starts_with('/') && state.popup_mode == PopupMode::None {
+                if c == '@' && state.popup_mode == PopupMode::None {
+                    state.popup_mode = PopupMode::FilePicker { query: String::new() };
+                    state.popup_selected = 0;
+                } else if ui.input.starts_with('/') && state.popup_mode == PopupMode::None {
                     state.popup_mode = PopupMode::Commands;
                     ui.command_popup_selection = 0;
                 }
@@ -162,8 +165,12 @@ impl Tui {
                     let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
                     ui.input.remove(byte_idx);
                     ui.input_history_idx = None;
-                    if ui.input.is_empty() || !ui.input.starts_with('/') {
+                    if matches!(state.popup_mode, PopupMode::FilePicker { .. }) && !ui.input.contains('@') {
                         state.popup_mode = PopupMode::None;
+                    } else if ui.input.is_empty() || !ui.input.starts_with('/') {
+                        if matches!(state.popup_mode, PopupMode::Commands) {
+                            state.popup_mode = PopupMode::None;
+                        }
                     }
                 }
             }
@@ -210,7 +217,10 @@ impl Tui {
                 match &state.popup_mode {
                     PopupMode::Commands => {
                         let prefix = ui.input.trim().to_lowercase();
-                        let matches: Vec<_> = commands::COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).collect();
+                        let matches: Vec<_> = commands::COMMANDS
+                            .iter()
+                            .filter(|(cmd, _)| cmd.starts_with(&prefix))
+                            .collect();
                         if let Some((cmd, _)) = matches.get(state.popup_selected.min(matches.len().saturating_sub(1))) {
                             ui.input = cmd.to_string();
                             ui.input_cursor = Self::char_count(&ui.input);
@@ -220,7 +230,28 @@ impl Tui {
                         }
                     }
                     PopupMode::SubCommand { parent, items } => {
-                        if let Some((name, _)) = items.get(state.popup_selected) {
+                        // Filter items by input text (same logic as popup.rs render)
+                        let filter_text = {
+                            let input = &ui.input;
+                            if input.starts_with(parent) {
+                                let after = &input[parent.len()..];
+                                if after.starts_with(' ') { &after[1..] } else { after }
+                            } else {
+                                input.as_str()
+                            }
+                        };
+                        let fl = filter_text.to_lowercase();
+                        let filtered: Vec<_> = if filter_text.is_empty() {
+                            items.iter().collect()
+                        } else {
+                            items
+                                .iter()
+                                .filter(|(name, _)| name.to_lowercase().contains(&fl))
+                                .collect()
+                        };
+                        if let Some((name, _)) =
+                            filtered.get(state.popup_selected.min(filtered.len().saturating_sub(1)))
+                        {
                             let full_cmd = format!("{} {}", parent, name);
                             ui.input = full_cmd;
                             ui.input_cursor = Self::char_count(&ui.input);
@@ -321,14 +352,51 @@ impl Tui {
                                 core.messages
                                     .push(ChatMessage::system(format!("Added: {} / {}", pname, mname)));
                             }
+                            crate::tui::controller::save_selected_models(&core.selected_models).ok();
                         }
                         // Don't close — allow multi-select
                         return true;
+                    }
+                    PopupMode::FilePicker { .. } => {
+                        // Select file and insert its path after @
+                        let files = crate::tui::popup::get_project_files_cached();
+                        let query = crate::tui::popup::file_picker_query(&ui.input);
+                        let q = query.to_lowercase();
+                        let filtered: Vec<&String> = if q.is_empty() {
+                            files.iter().collect()
+                        } else {
+                            files.iter().filter(|f| f.to_lowercase().contains(&q)).collect()
+                        };
+                        if let Some(path) = filtered.get(state.popup_selected.min(filtered.len().saturating_sub(1))) {
+                            // Replace text from last @ to cursor/end with @path
+                            if let Some(at_pos) = ui.input.rfind('@') {
+                                let new_input = format!("{}@{}", &ui.input[..at_pos], path);
+                                ui.input = new_input;
+                                ui.input_cursor = Self::char_count(&ui.input);
+                            }
+                        }
+                        state.popup_mode = PopupMode::None;
+                        state.popup_selected = 0;
                     }
                     PopupMode::None => {}
                 }
                 state.popup_mode = PopupMode::None;
                 state.popup_selected = 0;
+                return true;
+            }
+
+            KeyCode::Tab => {
+                // Tab cycles through command matches or does nothing in other popups
+                if state.popup_mode == PopupMode::Commands {
+                    let prefix = ui.input.trim().to_lowercase();
+                    let matches: Vec<_> = commands::COMMANDS
+                        .iter()
+                        .filter(|(cmd, _)| cmd.starts_with(&prefix))
+                        .collect();
+                    if !matches.is_empty() {
+                        state.popup_selected = (state.popup_selected + 1) % matches.len();
+                    }
+                }
                 return true;
             }
 
@@ -349,8 +417,10 @@ impl Tui {
                             ui.input.remove(byte_idx);
                             state.popup_selected = 0;
                             // Close popup if input no longer matches
-                            if ui.input.is_empty()
-                                || (!ui.input.starts_with('/') && state.popup_mode == PopupMode::Commands)
+                            if matches!(state.popup_mode, PopupMode::FilePicker { .. }) && !ui.input.contains('@') {
+                                state.popup_mode = PopupMode::None;
+                            } else if ui.input.is_empty()
+                                || (!ui.input.starts_with('/') && matches!(state.popup_mode, PopupMode::Commands))
                             {
                                 state.popup_mode = PopupMode::None;
                             }
@@ -393,6 +463,14 @@ impl Tui {
         let core = &mut state.core;
         let ui = &mut state.ui;
 
+        if core.selected_models.is_empty() {
+            core.messages
+                .push(ChatMessage::system("No model selected. Use `/models` to pick one."));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            return true;
+        }
+
         if ui.active_chat_requests > 0 {
             core.messages.push(ChatMessage::system(
                 "Already processing a request. Wait or press Ctrl+X to cancel.",
@@ -425,12 +503,7 @@ impl Tui {
         ui.active_chat_request_id = request_id;
         ui.active_chat_requests = 1;
 
-        let default_tool_prompt = concat!(
-            "You are a helpful assistant with access to tools. ",
-            "You can read/write files, execute shell commands, and list directories. ",
-            "Always use the appropriate tool when asked. ",
-            "Produce a concrete result."
-        );
+        let default_tool_prompt = concat!("Must follow user instructions and use available tools.");
 
         let (provider, model_id, system_prompt) = {
             let selected_model = core.selected_models.first().cloned();
@@ -466,15 +539,14 @@ impl Tui {
                 .as_ref()
                 .and_then(|aid| {
                     let pool = core.agent_pool.try_read().ok()?;
-                    pool.get_agent(aid).map(|a| a.config.system_prompt.clone())
+                    let role = pool.get_agent(aid)?.role.clone();
+                    drop(pool);
+                    let rt = core.runtime.as_ref()?.try_read().ok()?;
+                    rt.get_role_template(&role).map(|t| t.system_prompt.clone())
                 })
                 .unwrap_or_else(|| default_tool_prompt.to_string());
 
-            let sp = format!(
-                "{}\n\nYou are the workflow agent. Chat with the user, clarify the goal, and delegate tasks by calling the `spawn_agent` tool (roles: planner, developer, tester, reviewer, worker, etc.). You are fully responsible for all spawned agents.\n\nYou have access to tools: read_file, write_file, sh, list_dir, and spawn_agent.",
-                agent_prompt
-            );
-            (provider, mid, sp)
+            (provider, mid, agent_prompt)
         };
 
         let (abort_handle, abort_registration) = futures::future::AbortHandle::new_pair();

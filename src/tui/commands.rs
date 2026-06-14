@@ -168,12 +168,30 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         "/pool clear" => {
-            let msg = if core.runtime.is_some() {
-                "Pool clear requires runtime write access — not available via CLI".to_string()
+            let msg = if let Some(runtime) = &core.runtime {
+                if let Ok(rt) = runtime.try_read() {
+                    match rt.clear_experience_pool() {
+                        Ok(()) => "Experience pool cleared".to_string(),
+                        Err(e) => format!("Clear failed: {}", e),
+                    }
+                } else {
+                    "Runtime locked".to_string()
+                }
             } else {
                 "Runtime not available".to_string()
             };
-            core.messages.push(ChatMessage::system(msg));
+            let is_err = msg.contains("failed") || msg.contains("locked") || msg.contains("not available");
+            let status = if is_err {
+                crate::tui::state::MessageStatus::Error
+            } else {
+                crate::tui::state::MessageStatus::Completed
+            };
+            core.messages.push(ChatMessage {
+                role: crate::tui::state::MessageRole::System,
+                content: msg,
+                timestamp: now.to_string(),
+                status,
+            });
             ui.input.clear();
             ui.input_cursor = 0;
             true
@@ -672,6 +690,138 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             true
         }
 
+        // ── Reflection commands ──
+        "/reflect" | "/reflect status" => {
+            let enabled = state.core.reflection.auto_reflect;
+            let max_attempts = state.core.reflection.max_attempts;
+            let rules_state: Vec<String> = [
+                (
+                    "code",
+                    state.core.reflection.rules_enabled[crate::reflection::RULE_CODE_COMPLETE],
+                ),
+                (
+                    "error",
+                    state.core.reflection.rules_enabled[crate::reflection::RULE_ERROR_AWARENESS],
+                ),
+                (
+                    "questions",
+                    state.core.reflection.rules_enabled[crate::reflection::RULE_MULTI_QUESTION],
+                ),
+                (
+                    "promise",
+                    state.core.reflection.rules_enabled[crate::reflection::RULE_EMPTY_PROMISE],
+                ),
+                (
+                    "fileref",
+                    state.core.reflection.rules_enabled[crate::reflection::RULE_FILE_REF_USED],
+                ),
+                (
+                    "minlen",
+                    state.core.reflection.rules_enabled[crate::reflection::RULE_MIN_OUTPUT],
+                ),
+            ]
+            .iter()
+            .map(|(name, ok)| format!("  {} {}", if *ok { "✓" } else { "✗" }, name))
+            .collect();
+            let msg = format!(
+                "Reflection: {}\nMax retries: {}\nRules:\n{}",
+                if enabled { "🟢 on" } else { "🔴 off" },
+                max_attempts,
+                rules_state.join("\n")
+            );
+            state.core.messages.push(ChatMessage::system(msg));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/reflect on" => {
+            state.core.reflection.auto_reflect = true;
+            state.core.messages.push(ChatMessage::system(
+                "🟢 Reflection enabled — agent responses will be self-checked after each turn.",
+            ));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/reflect off" => {
+            state.core.reflection.auto_reflect = false;
+            state.core.messages.push(ChatMessage::system("🔴 Reflection disabled."));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/reflect max ") => {
+            let val = trimmed.strip_prefix("/reflect max ").unwrap().trim();
+            if let Ok(n) = val.parse::<u8>() {
+                state.core.reflection.max_attempts = n;
+                state
+                    .core
+                    .messages
+                    .push(ChatMessage::system(format!("Reflection max retries set to {}.", n)));
+            } else {
+                state.core.messages.push(ChatMessage::system(format!(
+                    "Invalid number: {}. Usage: /reflect max <N>",
+                    val
+                )));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/reflect rule ") => {
+            let rest = trimmed.strip_prefix("/reflect rule ").unwrap().trim();
+            let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+            if parts.len() == 2 {
+                let (rule_name, state_str) = (parts[0], parts[1]);
+                let enable = match state_str {
+                    "on" | "1" | "true" => Some(true),
+                    "off" | "0" | "false" => Some(false),
+                    _ => None,
+                };
+                if let Some(enabled) = enable {
+                    let idx = match rule_name {
+                        "code" => Some(crate::reflection::RULE_CODE_COMPLETE),
+                        "error" => Some(crate::reflection::RULE_ERROR_AWARENESS),
+                        "questions" => Some(crate::reflection::RULE_MULTI_QUESTION),
+                        "promise" => Some(crate::reflection::RULE_EMPTY_PROMISE),
+                        "fileref" => Some(crate::reflection::RULE_FILE_REF_USED),
+                        "minlen" => Some(crate::reflection::RULE_MIN_OUTPUT),
+                        _ => None,
+                    };
+                    if let Some(idx) = idx {
+                        state.core.reflection.rules_enabled[idx] = enabled;
+                        state.core.messages.push(ChatMessage::system(format!(
+                            "Rule '{}' {}.",
+                            rule_name,
+                            if enabled { "enabled ✓" } else { "disabled ✗" }
+                        )));
+                    } else {
+                        state.core.messages.push(ChatMessage::system(format!(
+                            "Unknown rule: {}. Rules: code, error, questions, promise, fileref, minlen",
+                            rule_name
+                        )));
+                    }
+                } else {
+                    state.core.messages.push(ChatMessage::system(format!(
+                        "Invalid state: {}. Use 'on' or 'off'.",
+                        state_str
+                    )));
+                }
+            } else {
+                state
+                    .core
+                    .messages
+                    .push(ChatMessage::system("Usage: /reflect rule <name> <on|off>"));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
         // Not a recognised command — let caller handle as chat message.
         _ => false,
     }
@@ -749,6 +899,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/connect", "Configure a provider"),
     ("/models", "Open model picker"),
     ("/pool", "Pool management (stats/flush/clear/query)"),
+    ("/reflect", "Reflection control (on/off/status/rule/max)"),
     ("/role", "Role templates (list/show/create/edit/delete)"),
     ("/sh", "Run a shell command"),
     ("/clear", "Clear conversation"),

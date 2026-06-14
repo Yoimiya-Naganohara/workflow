@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use tokio::sync::RwLock;
@@ -23,7 +23,7 @@ pub struct ProviderClient {
     pub config: ProviderConfig,
     /// Whether the client is believed to be healthy.
     healthy: AtomicBool,
-    /// Timestamp (monotonic ns) of last successful use.
+    /// Timestamp (epoch ns) of last successful use.
     last_used: AtomicU64,
     /// Connection error count since last successful call.
     error_count: AtomicU64,
@@ -44,12 +44,14 @@ impl ProviderClient {
         self.healthy.load(Ordering::Relaxed)
     }
 
-    pub fn last_used(&self) -> Option<Instant> {
+    pub fn last_used(&self) -> Option<Duration> {
         let ns = self.last_used.load(Ordering::Relaxed);
         if ns == 0 {
             None
         } else {
-            Some(Instant::now() - Duration::from_nanos(ns))
+            // last_used stores SystemTime epoch nanos — compute elapsed
+            let stored = UNIX_EPOCH + Duration::from_nanos(ns);
+            SystemTime::now().duration_since(stored).ok()
         }
     }
 
@@ -61,10 +63,9 @@ impl ProviderClient {
     pub fn mark_success(&self) {
         self.healthy.store(true, Ordering::Relaxed);
         self.error_count.store(0, Ordering::Relaxed);
-        // Store current epoch nanoseconds — NOT Instant::now().elapsed() which is always ~0.
         self.last_used.store(
-            std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos() as u64,
             Ordering::Relaxed,

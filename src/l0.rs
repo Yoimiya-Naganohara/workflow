@@ -199,16 +199,12 @@ impl L0CircuitBreaker {
     pub fn try_acquire(
         &self,
         requested_budget: u64,
-        current_depth: u32,
+        _current_depth: u32,
         requested_tools: u64,
     ) -> Result<L0Permit, SpawnRejection> {
-        let max_depth = self.resource_state.max_dynamic_depth.load(Ordering::Acquire);
-        if current_depth >= max_depth {
-            return Err(SpawnRejection::DepthExceeded {
-                current: current_depth,
-                max: max_depth,
-            });
-        }
+        // Early depth check is intentionally omitted — increment_depth() uses a CAS loop
+        // that atomically enforces the limit. An early check would only provide a stale
+        // error message, not prevent overshoot.
 
         let allocated =
             self.resource_state
@@ -526,10 +522,24 @@ mod tests {
     fn test_l0_depth_exceeded() {
         let state = TaskResourceState::new(1000, 2);
         let breaker = L0CircuitBreaker::new(state);
-        assert!(matches!(
-            breaker.try_acquire(100, 2, 0),
-            Err(SpawnRejection::DepthExceeded { .. })
-        ));
+        // First two acquisitions should succeed (depth 0→1, 1→2)
+        let p1 = breaker.try_acquire(100, 0, 0).expect("first acquire should succeed");
+        let p2 = breaker.try_acquire(100, 1, 0).expect("second acquire should succeed");
+        // Both permits held — third attempt should fail at increment_depth
+        assert!(
+            matches!(
+                breaker.try_acquire(100, 2, 0),
+                Err(SpawnRejection::DepthExceeded { .. })
+            ),
+            "third acquire should fail: depth limit reached"
+        );
+        // Drop permits to release depth slots
+        drop(p1);
+        drop(p2);
+        // After dropping, depth should be decremented; fourth should succeed
+        let _p3 = breaker
+            .try_acquire(100, 2, 0)
+            .expect("acquire after drop should succeed");
     }
 
     #[test]

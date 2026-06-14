@@ -10,6 +10,7 @@ pub mod llm;
 pub mod models;
 pub mod persistence;
 pub mod provider;
+pub mod reflection;
 pub mod runtime;
 pub mod tools;
 pub mod tui;

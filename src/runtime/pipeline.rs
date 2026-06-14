@@ -171,7 +171,7 @@ impl DecisionPipeline {
         let role_emb = &request.role_description_embedding;
 
         // ── L1: Experience retrieval & confidence check ──
-        let l1_assessment: L1Assessment = {
+        let _l1_assessment: L1Assessment = {
             let exp = self.experience.lock().expect("experience mutex poisoned");
             exp.check_confidence(task_emb, role_emb, role_template_id, role_min_experiences)?
         };
@@ -242,6 +242,10 @@ impl DecisionPipeline {
         self.experience.lock().expect("experience mutex poisoned").flush()
     }
 
+    pub fn clear_experience_pool(&self) -> Result<()> {
+        self.experience.lock().expect("experience mutex poisoned").clear()
+    }
+
     pub fn bedrock_count(&self) -> usize {
         self.experience
             .lock()
@@ -274,12 +278,9 @@ impl DecisionPipeline {
         self.pending_guard.lock().expect("pending_guard poisoned").take()
     }
 
-    /// Record an experience entry into the pool.
+    /// Record an experience entry into the pool (alias for add_experience).
     pub fn record_experience(&self, entry: ExperienceEntry) {
-        self.experience
-            .lock()
-            .expect("experience mutex poisoned")
-            .add_experience(entry);
+        self.add_experience(entry);
     }
 
     /// Search the experience pool by text query.

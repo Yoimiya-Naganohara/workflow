@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing;
 
+use crate::agent::MemoEntry;
 use crate::models::{CustomProvider, ModelRegistry};
 use crate::tui::state::SelectedModel;
 
@@ -87,6 +88,10 @@ pub struct PersistedState {
     /// Storage mode for keys (not serialized — runtime decision).
     #[serde(skip)]
     pub key_store_mode: KeyStore,
+    /// Persistent agent memos, keyed by agent ID hex string.
+    /// Loaded at startup and merged into new agents.
+    #[serde(default)]
+    pub agent_memos: HashMap<String, Vec<MemoEntry>>,
 }
 
 fn config_dir() -> Result<PathBuf> {
@@ -204,6 +209,18 @@ pub fn save_provider_cache(registry: &ModelRegistry) -> Result<()> {
     write_atomic(&path, &json)
 }
 
+/// Save agent memos to persistent state.
+pub fn save_agent_memos(agent_id: &str, memos: &[MemoEntry]) -> Result<()> {
+    let mut state = load();
+    state.agent_memos.insert(agent_id.to_string(), memos.to_vec());
+    save(&state)
+}
+
+/// Loads all persisted agent memos.
+pub fn load_agent_memos() -> HashMap<String, Vec<MemoEntry>> {
+    load().agent_memos
+}
+
 pub fn load_provider_cache() -> Option<ModelRegistry> {
     let path = config_dir().ok()?.join("providers_cache.json");
     if !path.exists() {
@@ -250,24 +267,29 @@ mod tests {
     }
 
     #[test]
-    fn test_write_atomic_dangerous_remove_before_rename() {
-        // BUG: remove_file before rename is dangerous
-        // If crash happens between remove_file (line 223) and rename (line 226),
-        // the file is gone entirely.
-        //
-        // The correct pattern is just rename() which atomically replaces.
-        // The remove_file is unnecessary and creates a window for data loss.
+    fn test_write_atomic_no_remove_before_rename() {
+        // Confirms that write_atomic does NOT call remove_file before rename.
+        // The current implementation uses rename() which atomically replaces
+        // the target on Unix — no prior remove_file needed.
 
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().with_extension("json");
 
         // Write initial content
         write_atomic(&path, "original").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "original");
 
-        // Verify the dangerous pattern exists by checking the function behavior
-        // The bug: remove_file is called before rename on line 222-224
-        // This test documents the bug — the remove_file is unnecessary
-        // because rename() already atomically replaces the target on Linux.
-        assert!(path.exists(), "file should exist after write_atomic");
+        // Overwrite — should succeed without data loss
+        write_atomic(&path, "updated").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "updated");
+
+        // Write with different content size
+        write_atomic(&path, "x").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "x");
+
+        // Write large content
+        let big = "hello\n".repeat(1000);
+        write_atomic(&path, &big).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), big);
     }
 }

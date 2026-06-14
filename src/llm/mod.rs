@@ -47,88 +47,45 @@ pub enum LlmProvider {
     Azure(azure::Client),
     Copilot(copilot::Client),
 }
-
 impl LlmProvider {
     async fn do_complete(&self, request: LlmRequest) -> Result<LlmResponse> {
+        let system_prompt = request
+            .messages
+            .first()
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.as_str())
+            .unwrap_or("");
         let prompt = request.messages.last().map(|m| m.content.as_str()).unwrap_or("");
-        let response = match self {
-            Self::OpenAi(c) => {
-                c.agent(&request.model)
+
+        // Use extended_details().prompt() to capture token usage from the provider.
+        macro_rules! complete_ext {
+            ($client:expr) => {{
+                let resp = $client
+                    .agent(&request.model)
+                    .preamble(system_prompt)
                     .temperature(request.temperature)
                     .max_tokens(request.max_tokens)
                     .build()
                     .prompt(prompt)
-                    .await?
-            }
-            Self::Anthropic(c) => {
-                c.agent(&request.model)
-                    .temperature(request.temperature)
-                    .max_tokens(request.max_tokens)
-                    .build()
-                    .prompt(prompt)
-                    .await?
-            }
-            Self::Cohere(c) => {
-                c.agent(&request.model)
-                    .temperature(request.temperature)
-                    .max_tokens(request.max_tokens)
-                    .build()
-                    .prompt(prompt)
-                    .await?
-            }
-            Self::Gemini(c) => {
-                c.agent(&request.model)
-                    .temperature(request.temperature)
-                    .max_tokens(request.max_tokens)
-                    .build()
-                    .prompt(prompt)
-                    .await?
-            }
-            Self::Mistral(c) => {
-                c.agent(&request.model)
-                    .temperature(request.temperature)
-                    .max_tokens(request.max_tokens)
-                    .build()
-                    .prompt(prompt)
-                    .await?
-            }
-            Self::Ollama(c) => {
-                c.agent(&request.model)
-                    .temperature(request.temperature)
-                    .max_tokens(request.max_tokens)
-                    .build()
-                    .prompt(prompt)
-                    .await?
-            }
-            Self::Llamafile(c) => {
-                c.agent(&request.model)
-                    .temperature(request.temperature)
-                    .max_tokens(request.max_tokens)
-                    .build()
-                    .prompt(prompt)
-                    .await?
-            }
-            Self::Azure(c) => {
-                c.agent(&request.model)
-                    .temperature(request.temperature)
-                    .max_tokens(request.max_tokens)
-                    .build()
-                    .prompt(prompt)
-                    .await?
-            }
-            Self::Copilot(c) => {
-                c.agent(&request.model)
-                    .temperature(request.temperature)
-                    .max_tokens(request.max_tokens)
-                    .build()
-                    .prompt(prompt)
-                    .await?
-            }
+                    .extended_details()
+                    .await?;
+                let total = resp.usage.total_tokens as u32;
+                (resp.output, total)
+            }};
+        }
+
+        let (content, tokens_used): (String, u32) = match self {
+            Self::OpenAi(c) => complete_ext!(c),
+            Self::Anthropic(c) => complete_ext!(c),
+            Self::Cohere(c) => complete_ext!(c),
+            Self::Gemini(c) => complete_ext!(c),
+            Self::Mistral(c) => complete_ext!(c),
+            Self::Ollama(c) => complete_ext!(c),
+            Self::Llamafile(c) => complete_ext!(c),
+            Self::Azure(c) => complete_ext!(c),
+            Self::Copilot(c) => complete_ext!(c),
         };
-        Ok(LlmResponse {
-            content: response,
-            tokens_used: 0,
-        })
+        Ok(LlmResponse { content, tokens_used })
     }
 
     pub async fn complete(&self, request: LlmRequest) -> Result<LlmResponse> {

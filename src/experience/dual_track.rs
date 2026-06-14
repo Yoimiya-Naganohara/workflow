@@ -20,6 +20,7 @@
 //! weighted by each track's credibility factor.
 
 use anyhow::Result;
+use std::collections::VecDeque;
 use tracing::trace;
 
 use crate::core::simd::cosine_similarity_768;
@@ -34,11 +35,11 @@ use crate::l1::L1Assessment;
 
 /// Volatile, in-memory B-track store.
 ///
-/// Entries are stored in a `Vec` with a configurable maximum capacity.
+/// Entries are stored in a `VecDeque` with a configurable maximum capacity.
 /// When the capacity is exceeded, new pushes evict the oldest entry
 /// (FIFO).
 pub struct FluidTrack {
-    entries: Vec<ExperienceEntry>,
+    pub(crate) entries: VecDeque<ExperienceEntry>,
     max_size: usize,
 }
 
@@ -49,7 +50,7 @@ impl FluidTrack {
     /// entry (FIFO).
     pub fn new(max_size: usize) -> Self {
         Self {
-            entries: Vec::with_capacity(max_size),
+            entries: VecDeque::with_capacity(max_size),
             max_size,
         }
     }
@@ -63,9 +64,11 @@ impl FluidTrack {
         self.entries.is_empty()
     }
 
-    /// Access all entries.
+    /// Access all entries as a slice.
     pub fn entries(&self) -> &[ExperienceEntry] {
-        &self.entries
+        // VecDeque doesn't support as_slice() in older Rust stable.
+        // Use make_contiguous() to get a slice.
+        self.entries.as_slices().0
     }
 
     /// Add an entry.  If the track is over capacity, the oldest
@@ -74,17 +77,17 @@ impl FluidTrack {
     /// Returns the evicted entry if any.
     pub fn add(&mut self, entry: ExperienceEntry) -> Option<ExperienceEntry> {
         let evicted = if self.entries.len() >= self.max_size {
-            Some(self.entries.remove(0))
+            self.entries.pop_front()
         } else {
             None
         };
-        self.entries.push(entry);
+        self.entries.push_back(entry);
         evicted
     }
 
     /// Drain all entries, leaving the track empty.
     pub fn drain_all(&mut self) -> Vec<ExperienceEntry> {
-        std::mem::take(&mut self.entries)
+        self.entries.drain(..).collect()
     }
 
     /// Drain up to `n` oldest entries.
@@ -113,8 +116,7 @@ impl FluidTrack {
                 (i, sim * e.weight)
             })
             .collect();
-
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
         scored.truncate(k);
 
         scored.into_iter().map(|(i, s)| (self.entries[i].clone(), s)).collect()
@@ -292,13 +294,16 @@ impl DualTrackMemory {
             );
             self.bedrock.extend(representatives);
         } else {
-            // No clusters qualified — reinstate fluid entries to avoid data loss.
+            // No clusters qualified — reinstate fluid entries directly
+            // to avoid data loss from FIFO eviction during re-add.
             trace!(
                 from_fluid = fluid_entries.len(),
-                "No qualifying clusters — reinstating fluid"
+                "No qualifying clusters — reinstating fluid directly"
             );
             for entry in fluid_entries {
-                self.fluid.add(entry);
+                // Push without capacity check; fluid was already drained
+                // so we have room for everything that was there before.
+                self.fluid.entries.push_back(entry);
             }
         }
     }
@@ -329,7 +334,7 @@ impl DualTrackMemory {
         }
 
         // Merge and sort.
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| b.1.total_cmp(&a.1));
         results.truncate(k);
         results
     }
@@ -425,13 +430,14 @@ impl DualTrackMemory {
         }
 
         // Fluid: filter by role, then score × credibility.
+        // Fluid: filter by role, then score × credibility.
         for (entry, score) in self.fluid.search(query, k * 2) {
             if entry.role_template_id == Some(role_id) {
                 results.push((entry, score * self.fluid_credibility));
             }
         }
 
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| b.1.total_cmp(&a.1));
         results.truncate(k);
         results
     }
@@ -545,6 +551,11 @@ impl crate::l1::ExperienceRetrieval for DualTrackMemory {
 
     fn experience_count(&self) -> usize {
         self.total_count()
+    }
+
+    fn clear(&mut self) -> anyhow::Result<()> {
+        self.fluid.clear();
+        self.bedrock.clear()
     }
 
     fn flush(&mut self) -> anyhow::Result<()> {

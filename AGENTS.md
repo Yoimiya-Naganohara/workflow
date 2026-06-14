@@ -84,6 +84,7 @@ SpawnRequest → L-1 (Admission) → L0 (Hard Logic + Physical Arbitration)
 - `Tab`: Toggle Plan/Build mode
 - `Cmd+/`: Command popup (type `/` to show available commands)
 - `Ctrl+C`: Quit
+- `@`: Open file picker (type path after `@` to filter, Enter to select)
 
 ### Commands (type `/` for popup)
 - `/connect`: Configure a provider (fetches models.dev API, shows cached data immediately)
@@ -92,6 +93,7 @@ SpawnRequest → L-1 (Admission) → L0 (Hard Logic + Physical Arbitration)
 - `/clear`: Clear conversation
 - `/sh <cmd>`: Run a shell command
 - `/help`: Show help
+- `/reflect`: Control reflection (on/off/status/rule/max)
 
 ### Model Picker
 - Shows all models from all providers (not filtered by configured API keys)
@@ -192,6 +194,8 @@ Build a holographic self-evolving multi-agent system in Rust with layered decisi
 - **Multi-provider support** — all 9 provider variants via `mcp_stream_arm!` macro
 - **Tools wired into TUI chat** — `ToolServerHandle` in `AppState`, initialized with `create_tool_server()`
 - **Tool call display** — tool invocations shown as `Decision` messages in chat with formatted args
+- **`@file` reference support** — type `@` to open a file picker popup, navigate with arrows, select with Enter, automatically resolves to file content on submit
+- **Reflection pipeline** — auto/manual self-check after agent responses: 6 local rules (code completeness, error awareness, multi-question coverage, empty promise detection, file ref usage, min output) + self-check LLM call ("yes/no", 1 token). Default off, opt-in via `/reflect on`. Configurable max retries and per-rule toggle.
 
 #### In Progress
 - (none currently)

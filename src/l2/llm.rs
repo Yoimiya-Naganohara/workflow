@@ -86,17 +86,9 @@ impl L2LlmAuditEngine {
         let response = self.provider.complete(request).await?;
         let judge = self.parse_decision(&response.content)?;
 
-        if judge.risk_level == "high" {
-            self.consecutive_failures += 1;
-        } else if judge.risk_level == "medium" {
-            if self.consecutive_failures > 0 {
-                self.consecutive_failures -= 1;
-            }
-        } else {
-            self.consecutive_failures = 0;
-        }
-
-        // Bail if there are no contending agents.
+        // Bail early if there are no contending agents — nothing to audit.
+        // Must happen BEFORE risk/counter updates to avoid incorrectly
+        // inflating consecutive_failures for empty manifests.
         if manifest.contending_agents.is_empty() {
             return Ok(L2LlmAuditResult {
                 decision: ArbitrationResult::Prune(vec![]),
@@ -105,6 +97,17 @@ impl L2LlmAuditEngine {
                 l1_override_vector_patch: None,
                 tokens_used: response.tokens_used,
             });
+        }
+
+        if judge.risk_level == "high" {
+            self.consecutive_failures += 1;
+        } else if judge.risk_level == "medium" {
+            // Medium risk resets to 0 (treat as acceptable).
+            // The previous partial-decrement behavior allowed bypassing
+            // collapse protection by alternating medium-risk decisions.
+            self.consecutive_failures = 0;
+        } else {
+            self.consecutive_failures = 0;
         }
 
         let winner_idx = judge
@@ -147,30 +150,33 @@ impl L2LlmAuditEngine {
             ConflictType::ValueDivergence => "value divergence",
         };
 
-        let agents: Vec<String> = manifest.contending_agents.iter().map(|a| format!("{:?}", a)).collect();
+        // Use index labels only — no agent IDs to avoid confusing the LLM.
+        let agent_labels: Vec<String> = (0..manifest.contending_agents.len())
+            .map(|i| format!("Agent #{}", i))
+            .collect();
 
         format!(
             r#"Analyze this multi-agent conflict:
 
 Conflict Type: {}
-Contending Agents: {}
+Contending Agents (indexed 0..{}): {}
 Priority Scores: {:?}
 
 Context:
 - Agent embeddings show semantic divergence
 - This conflict was escalated from L1 arbitration
 
-Please respond with JSON:
+Respond with JSON only. winner_index MUST be the 0-based index into the Contending Agents list.
 {{
   "decision": "override|merge|prune",
-  "winner_index": 0,
+  "winner_index": <0-based index, or null if none>,
   "risk_level": "low|medium|high",
   "risk_statement": "brief risk assessment",
   "lesson_learned": "what to remember for future"
-}}
-Note: winner_index is the 0-based index of the winning agent in the contending_agents list, or -1 if none."#,
+}}"#,
             conflict_type,
-            agents.join(", "),
+            manifest.contending_agents.len().saturating_sub(1),
+            agent_labels.join(", "),
             manifest.dynamic_priority_scores.as_slice()
         )
     }
@@ -180,7 +186,10 @@ Note: winner_index is the 0-based index of the winning agent in the contending_a
         let json_end = content.rfind('}').map(|i| i + 1).unwrap_or(content.len());
         let json_str = &content[json_start..json_end];
 
-        let decision: JudgeDecision = serde_json::from_str(json_str)?;
+        // Handle "-1" for winner_index by converting to null before parsing
+        let cleaned = json_str.replace(r#""winner_index": -1"#, r#""winner_index": null"#);
+
+        let decision: JudgeDecision = serde_json::from_str(&cleaned)?;
 
         if (decision.decision == "override" && decision.winner_index.is_some())
             || decision.decision == "prune"
@@ -207,7 +216,14 @@ Note: winner_index is the 0-based index of the winning agent in the contending_a
         if winner_idx < manifest.context_embeddings.len() {
             embedding.copy_from_slice(&manifest.context_embeddings[winner_idx]);
         } else if !manifest.context_embeddings.is_empty() {
-            embedding.copy_from_slice(&manifest.context_embeddings[0]);
+            // Winner index out of bounds — log a warning and use a zero embedding
+            // rather than silently using the first agent's embedding, which would
+            // pollute the experience pool with incorrect associations.
+            tracing::warn!(
+                "generate_override_patch: winner_idx {} out of bounds (embeddings len {}), using zero embedding",
+                winner_idx,
+                manifest.context_embeddings.len()
+            );
         }
 
         crate::core::conflict::OverridePatch {

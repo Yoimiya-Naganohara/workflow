@@ -149,8 +149,14 @@ impl Tool for SpawnAgent {
         };
 
         let child_id_str = crate::agent::AgentPool::agent_id_str(&child_id);
+        let tool_server = self.state.read().await.core.tool_server.clone();
+
         if args.blocking.unwrap_or(true) {
-            runtime.read().await.execute_agent(child_id, &agent_pool).await;
+            runtime
+                .read()
+                .await
+                .execute_agent_with_tools(child_id, &agent_pool, tool_server)
+                .await;
             let result = runtime.read().await.await_agent(child_id, &agent_pool).await;
             Ok(SpawnAgentOutput::Completed {
                 agent_id: child_id_str,
@@ -162,7 +168,11 @@ impl Tool for SpawnAgent {
             let runtime_clone = runtime.clone();
             let pool_clone = agent_pool.clone();
             tokio::spawn(async move {
-                runtime_clone.read().await.execute_agent(child_id, &pool_clone).await;
+                runtime_clone
+                    .read()
+                    .await
+                    .execute_agent_with_tools(child_id, &pool_clone, tool_server)
+                    .await;
             });
             Ok(SpawnAgentOutput::Running {
                 agent_id: child_id_str,
@@ -170,5 +180,144 @@ impl Tool for SpawnAgent {
                 goal,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── SpawnAgentArgs ──
+
+    #[test]
+    fn test_spawn_agent_args_deserialize() {
+        let json = r#"{
+            "role": "planner",
+            "goal": "Plan the architecture",
+            "reason": "Need expert design"
+        }"#;
+        let args: SpawnAgentArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(args.role, "planner");
+        assert_eq!(args.goal, "Plan the architecture");
+        assert_eq!(args.reason, "Need expert design");
+        assert!(args.expected_output.is_none());
+        assert!(args.blocking.is_none());
+    }
+
+    #[test]
+    fn test_spawn_agent_args_with_optional_fields() {
+        let json = r#"{
+            "role": "developer",
+            "goal": "Write code",
+            "reason": "Task delegation",
+            "expected_output": "Rust file",
+            "blocking": true
+        }"#;
+        let args: SpawnAgentArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(args.role, "developer");
+        assert_eq!(args.expected_output.as_deref(), Some("Rust file"));
+        assert_eq!(args.blocking, Some(true));
+    }
+
+    // ── SpawnAgentOutput ──
+
+    #[test]
+    fn test_spawn_agent_output_completed_serialization() {
+        let output = SpawnAgentOutput::Completed {
+            agent_id: "abc123".to_string(),
+            role: "tester".to_string(),
+            goal: "Test module".to_string(),
+            result: "All tests passed".to_string(),
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        assert!(json.contains("completed"));
+        assert!(json.contains("abc123"));
+        assert!(json.contains("All tests passed"));
+    }
+
+    #[test]
+    fn test_spawn_agent_output_running_serialization() {
+        let output = SpawnAgentOutput::Running {
+            agent_id: "def456".to_string(),
+            role: "worker".to_string(),
+            goal: "Run task".to_string(),
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        assert!(json.contains("running"));
+        assert!(json.contains("def456"));
+    }
+
+    #[test]
+    fn test_spawn_agent_output_rejected_serialization() {
+        let output = SpawnAgentOutput::Rejected {
+            role: "hacker".to_string(),
+            goal: "Inject code".to_string(),
+            reason: "Security violation".to_string(),
+            recoverable: false,
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        assert!(json.contains("rejected"));
+        assert!(json.contains("Security violation"));
+        assert!(!json.contains("recoverable\": true"));
+    }
+
+    // ── SpawnAgent tool definition ──
+
+    #[tokio::test]
+    async fn test_spawn_agent_definition_returns_valid_tool_def() {
+        let state = Arc::new(RwLock::new(crate::tui::state::AppState::default()));
+        let tool = SpawnAgent { state };
+        let def = tool.definition(String::new()).await;
+        assert_eq!(def.name, "spawn_agent");
+        assert!(def.description.contains("child agent"));
+        // Should have parameters with required fields
+        let params = def.parameters;
+        assert!(params.get("required").is_some());
+    }
+
+    // ── spawn_agent tool entry validation ──
+
+    #[tokio::test]
+    async fn test_spawn_agent_empty_role_rejected() {
+        let state = Arc::new(RwLock::new(crate::tui::state::AppState::default()));
+        let tool = SpawnAgent { state };
+        let result = tool
+            .call(SpawnAgentArgs {
+                role: "  ".to_string(),
+                goal: "test".to_string(),
+                reason: "test".to_string(),
+                expected_output: None,
+                blocking: None,
+            })
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("role"));
+    }
+
+    #[tokio::test]
+    async fn test_spawn_agent_empty_goal_rejected() {
+        let state = Arc::new(RwLock::new(crate::tui::state::AppState::default()));
+        let tool = SpawnAgent { state };
+        let result = tool
+            .call(SpawnAgentArgs {
+                role: "planner".to_string(),
+                goal: "  ".to_string(),
+                reason: "test".to_string(),
+                expected_output: None,
+                blocking: None,
+            })
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("goal"));
+    }
+
+    // ── Register tools ──
+
+    #[test]
+    fn test_register_tools_returns_server() {
+        let state = Arc::new(RwLock::new(crate::tui::state::AppState::default()));
+        let server = crate::tools::ToolServer::new();
+        let _server = register_tools(server, state);
+        // Should not panic
     }
 }

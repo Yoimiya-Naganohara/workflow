@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::Style;
 
 use super::Tui;
 use crate::tui::chat::render_chat;
@@ -25,7 +24,15 @@ impl Tui {
         let input_lines = state.ui.input.lines().count().clamp(1, 5) as u16;
         let chat_width = term_size.width.saturating_sub(4).max(10) as usize;
 
-        let cache_key = (msg_count, last_content_len, is_streaming, chat_width, is_streaming.then_some(state.ui.think_frame));
+        let cache_key = (
+            msg_count,
+            last_content_len,
+            is_streaming,
+            chat_width,
+            is_streaming.then_some(state.ui.think_frame),
+            state.ui.auto_scroll,
+            if state.ui.auto_scroll { 0 } else { state.ui.chat_scroll },
+        );
         if cache_key != self.chat_cache_key {
             self.chat_lines_cache = build_chat_lines(&state.core, chat_width, state.ui.think_frame);
             self.chat_cache_key = cache_key;
@@ -38,7 +45,13 @@ impl Tui {
         } else {
             state.ui.chat_scroll.min(self.chat_lines_cache.len().saturating_sub(1))
         };
-        let visible_lines: Vec<_> = self.chat_lines_cache.iter().skip(chat_scroll).take(visible_height).cloned().collect();
+        let visible_lines: Vec<_> = self
+            .chat_lines_cache
+            .iter()
+            .skip(chat_scroll)
+            .take(visible_height)
+            .cloned()
+            .collect();
 
         self.terminal.draw(|f| {
             // Set background color for entire terminal

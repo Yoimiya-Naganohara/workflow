@@ -17,6 +17,7 @@ use crate::core::types::ExperienceEntry;
 use crate::llm::{LlmProvider, ToolEvent};
 use crate::models::ModelRegistry;
 use crate::persistence;
+use crate::reflection::{build_self_check_prompt, check_rules};
 use crate::runtime::AgentRuntime;
 use crate::tools::ToolServerHandle;
 
@@ -52,6 +53,21 @@ pub enum Effect {
     OptimizeRole {
         role_name: String,
         runtime: std::sync::Arc<tokio::sync::RwLock<crate::runtime::AgentRuntime>>,
+    },
+    /// Run self-check reflection on a completed chat.
+    SelfCheck {
+        response_index: usize,
+        request_id: u64,
+        attempt: u8,
+        full_response: String,
+        input: String,
+        system_prompt: String,
+        history: Vec<(String, String)>,
+        tool_server: ToolServerHandle,
+        provider: std::sync::Arc<LlmProvider>,
+        model_id: String,
+        runtime: Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
+        abort_registration: futures::future::AbortRegistration,
     },
 }
 
@@ -118,6 +134,23 @@ pub enum AppEvent {
     OptimizationError {
         role_name: String,
         error: String,
+    },
+    /// Result of a self-check reflection.
+    SelfCheckResult {
+        response_index: usize,
+        request_id: u64,
+        passed: bool,
+        attempt: u8,
+        // Data needed for retry if !passed
+        input: String,
+        system_prompt: String,
+        history: Vec<(String, String)>,
+        tool_server: ToolServerHandle,
+        provider: std::sync::Arc<LlmProvider>,
+        model_id: String,
+        runtime: Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
+        abort_registration: futures::future::AbortRegistration,
+        feedback: String,
     },
 }
 
@@ -294,39 +327,38 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                         input: input.clone(),
                         runtime: runtime.clone(),
                     });
+
+                    // Record experience (only for completed, not cancelled).
+                    if !full_response.is_empty() {
+                        if let Some(rt) = &runtime {
+                            let rt = rt.read().await;
+                            if let Ok(emb) = rt.embed(&input).await {
+                                // TUI chat lacks agent context — role_template_id is None
+                                // (agent-executed experiences set this in runtime.rs)
+                                rt.record_experience(ExperienceEntry {
+                                    embedding: emb,
+                                    applicability_vector: [0.0f32; 128],
+                                    tool_bitmap: 0,
+                                    role_template_id: None,
+                                    weight: 0.6,
+                                    domain_version: 0,
+                                    timestamp: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs(),
+                                    l2_override_weight: 0.0,
+                                    l2_override_created_at: 0,
+                                });
+                            }
+                        }
+                    }
                 }
                 Err(_) => {
-                    // Cancelled via Ctrl+X
+                    // Cancelled via Ctrl+X — do NOT record experience.
                     let _ = tx.send(AppEvent::ChatCancelled {
                         response_index,
                         request_id,
                     });
-                }
-            }
-
-            // Record experience in background (fire and forget)
-            // Uses blocking read().await to NEVER silently drop the experience.
-            if !full_response.is_empty() {
-                if let Some(rt) = &runtime {
-                    let rt = rt.read().await;
-                    if let Ok(emb) = rt.embed(&input).await {
-                        // TUI chat lacks agent context — role_template_id is None
-                        // (agent-executed experiences set this in runtime.rs)
-                        rt.record_experience(ExperienceEntry {
-                            embedding: emb,
-                            applicability_vector: [0.0f32; 128],
-                            tool_bitmap: 0,
-                            role_template_id: None,
-                            weight: 0.6,
-                            domain_version: 0,
-                            timestamp: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs(),
-                            l2_override_weight: 0.0,
-                            l2_override_created_at: 0,
-                        });
-                    }
                 }
             }
         }
@@ -379,6 +411,118 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                     let _ = tx.send(AppEvent::OptimizationError {
                         role_name: role_name.clone(),
                         error: e.to_string(),
+                    });
+                }
+            }
+        }
+
+        Effect::SelfCheck {
+            response_index,
+            request_id,
+            attempt,
+            full_response,
+            input,
+            system_prompt,
+            history,
+            tool_server,
+            provider,
+            model_id,
+            runtime,
+            abort_registration,
+        } => {
+            let cfg = crate::reflection::ReflectionConfig::default();
+            let tool_trace = ""; // tools are not tracked in this context yet
+            let report = check_rules(&cfg, &input, &full_response, tool_trace);
+
+            if !report.all_passed {
+                // Rules failed → collect which rules failed
+                let mut failed = Vec::new();
+                if report.code_complete == crate::reflection::RuleVerdict::Fail {
+                    failed.push("代码不完整或括号不匹配");
+                }
+                if report.error_awareness == crate::reflection::RuleVerdict::Fail {
+                    failed.push("未处理工具调用错误");
+                }
+                if report.multi_question_coverage == crate::reflection::RuleVerdict::Fail {
+                    failed.push("多问题回复过短");
+                }
+                if report.empty_promise == crate::reflection::RuleVerdict::Fail {
+                    failed.push("有空头承诺但无工具调用");
+                }
+                if report.file_ref_used == crate::reflection::RuleVerdict::Fail {
+                    failed.push("未引用用户提供的 @file");
+                }
+                if report.min_output == crate::reflection::RuleVerdict::Fail {
+                    failed.push("回复过短");
+                }
+
+                let feedback = crate::reflection::build_continuation_feedback(&failed);
+                let _ = tx.send(AppEvent::SelfCheckResult {
+                    response_index,
+                    request_id,
+                    passed: false,
+                    attempt,
+                    input,
+                    system_prompt,
+                    history,
+                    tool_server,
+                    provider,
+                    model_id,
+                    runtime,
+                    abort_registration,
+                    feedback,
+                });
+                return;
+            }
+
+            // Rules passed → do self-check via LLM
+            let self_check_prompt = build_self_check_prompt(&input, &full_response);
+
+            let result = provider.chat(&model_id, &system_prompt, &self_check_prompt).await;
+
+            match result {
+                Ok(text) => {
+                    let trimmed = text.trim().to_lowercase();
+                    let passed = trimmed == "yes";
+                    let feedback = if passed {
+                        String::new()
+                    } else {
+                        "Please review and improve your previous response to fully address the user's request."
+                            .to_string()
+                    };
+                    let _ = tx.send(AppEvent::SelfCheckResult {
+                        response_index,
+                        request_id,
+                        passed,
+                        attempt,
+                        input,
+                        system_prompt,
+                        history,
+                        tool_server,
+                        provider,
+                        model_id,
+                        runtime,
+                        abort_registration,
+                        feedback,
+                    });
+                }
+                Err(e) => {
+                    // LLM call failed — treat as passed to avoid blocking the user
+                    tracing::warn!("Self-check LLM call failed: {}", e);
+                    let _ = tx.send(AppEvent::SelfCheckResult {
+                        response_index,
+                        request_id,
+                        passed: true,
+                        attempt,
+                        input,
+                        system_prompt,
+                        history,
+                        tool_server,
+                        provider,
+                        model_id,
+                        runtime,
+                        abort_registration,
+                        feedback: String::new(),
                     });
                 }
             }

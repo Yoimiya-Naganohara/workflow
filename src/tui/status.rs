@@ -1,4 +1,4 @@
-//! Status bar — clean, minimal design with model info and key metrics.
+//! Status bar — clean, minimal design with model info, mode, and key metrics.
 
 use ratatui::{
     Frame,
@@ -8,65 +8,102 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use super::state::AppState;
+use super::state::{AppMode, AppState};
 use super::style;
 
 pub(crate) fn render_status_bar(f: &mut Frame, area: Rect, state: &AppState) {
-    let total_chars: usize = state.core.messages.iter().map(|m| m.content.len()).sum();
-    let up_k = total_chars / 4000;
-    let down_k = up_k / 4;
-    let r_m = total_chars / 1_000_000;
-
-    let budget_pct = if state.ui.budget_total > 0 {
-        state.ui.budget_used * 100 / state.ui.budget_total
-    } else { 0 };
-    let ctx_pct = (budget_pct as f64 / 100.0).min(99.9);
-
-    let model_name = state.core.selected_models.first()
+    // ── Model name ──
+    let model_name = state
+        .core
+        .selected_models
+        .first()
         .map(|m| m.model_name.as_str())
         .unwrap_or("no model");
 
-    let is_thinking = state.ui.active_chat_requests > 0;
+    // ── Mode indicator ──
+    let (mode_label, mode_color) = match state.ui.mode {
+        AppMode::Plan => ("Plan", style::BLUE),
+        AppMode::Build => ("Build", style::GREEN),
+    };
 
-    let left_text = format!("{} • {:.1}%/1.0M (auto)", model_name, ctx_pct);
-    let left_width = left_text.len() as u16;
-    let remaining = area.width.saturating_sub(left_width + 40);
+    // ── Budget (used / total) ──
+    let budget_used_k = state.ui.budget_used as f64 / 1000.0;
+    let budget_total_k = state.ui.budget_total / 1000;
+    let budget_display = if budget_used_k.fract() == 0.0 {
+        format!("{:.0}K/{}K", budget_used_k, budget_total_k)
+    } else {
+        format!("{:.1}K/{}K", budget_used_k, budget_total_k)
+    };
+
+    // ── Token estimates (based on char count, not actual tokenizer) ──
+    let total_chars: usize = state
+        .core
+        .messages
+        .iter()
+        .map(|m| m.content.chars().count())
+        .sum();
+    let input_k = total_chars / 4000;
+    let output_k = input_k / 4;
+
+    let is_active = state.ui.active_chat_requests > 0;
 
     let mut spans = vec![
-        Span::styled(model_name, Style::default().fg(style::BLUE).add_modifier(ratatui::style::Modifier::BOLD)),
+        // Mode badge
+        Span::styled(
+            mode_label,
+            Style::default()
+                .fg(mode_color)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        ),
         Span::styled(" • ", Style::default().fg(style::TEXT_MUTED)),
-        Span::styled(format!("{:.1}%", ctx_pct), Style::default().fg(style::TEXT_PRIMARY)),
-        Span::styled("/1.0M (auto)", Style::default().fg(style::TEXT_MUTED)),
+        // Model name
+        Span::styled(
+            model_name,
+            Style::default()
+                .fg(style::BLUE)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        ),
+        Span::styled(" • ", Style::default().fg(style::TEXT_MUTED)),
+        // Budget fraction
+        Span::styled(&budget_display, Style::default().fg(style::TEXT_PRIMARY)),
     ];
 
-    // Thinking indicator
-    if is_thinking {
+    // ── Activity spinner ──
+    if is_active {
         let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let phase = (state.ui.think_frame as usize / 2) % spinner.len();
         spans.push(Span::styled("  ", Style::default()));
-        spans.push(Span::styled(spinner[phase], Style::default().fg(style::YELLOW).add_modifier(ratatui::style::Modifier::BOLD)));
-        spans.push(Span::styled(" thinking", Style::default().fg(style::YELLOW)));
+        spans.push(Span::styled(
+            spinner[phase],
+            Style::default()
+                .fg(style::YELLOW)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        ));
     }
 
-    // Metrics
-    spans.push(Span::styled("  ", Style::default()));
-    spans.push(Span::styled(format!("↑{}k", up_k), Style::default().fg(style::TEXT_SECONDARY)));
-    spans.push(Span::styled(" ", Style::default()));
-    spans.push(Span::styled(format!("↓{}k", down_k), Style::default().fg(style::TEXT_SECONDARY)));
-    spans.push(Span::styled(" ", Style::default()));
-    spans.push(Span::styled(format!("R{}M", r_m), Style::default().fg(style::TEXT_SECONDARY)));
-    spans.push(Span::styled(" ", Style::default()));
-    spans.push(Span::styled(format!("${:.3}", 1.176), Style::default().fg(style::TEXT_SECONDARY)));
+    // ── Token metrics ──
+    if input_k > 0 || output_k > 0 {
+        spans.push(Span::styled("  ", Style::default()));
+        if input_k > 0 {
+            spans.push(Span::styled(
+                format!("↑{}k", input_k),
+                Style::default().fg(style::TEXT_SECONDARY),
+            ));
+        }
+        if output_k > 0 {
+            spans.push(Span::styled(
+                format!(" ↓{}k", output_k),
+                Style::default().fg(style::TEXT_SECONDARY),
+            ));
+        }
+    }
 
-    // Fill remaining space
-    for _ in 0..remaining { spans.push(Span::raw(" ")); }
-
-    // Key hints
-    spans.push(Span::styled("Ctrl+A ", Style::default().fg(style::TEXT_MUTED)));
-    spans.push(Span::styled("providers", Style::default().fg(style::BLUE)));
-    spans.push(Span::styled("  ", Style::default()));
-    spans.push(Span::styled("/", Style::default().fg(style::TEXT_MUTED)));
-    spans.push(Span::styled(" cmds", Style::default().fg(style::BLUE)));
+    // ── Fill remaining space ──
+    let content_width: usize = spans.iter().map(|s| s.content.as_ref().chars().count()).sum();
+    let fill = (area.width as usize).saturating_sub(content_width + 1);
+    if fill > 0 {
+        spans.push(Span::raw(" ".repeat(fill)));
+    }
 
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }

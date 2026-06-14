@@ -40,14 +40,20 @@ async fn run_tui() -> Result<()> {
     let runtime = Arc::new(RwLock::new(runtime));
 
     {
-        let state_handle = state.clone();
         let mut state = state.write().await;
         state.ui.budget_total = DEFAULT_RUNTIME_BUDGET;
         state.ui.budget_used = 0;
         state.ui.permits_total = DEFAULT_MAX_AGENTS;
         state.ui.permits_available = DEFAULT_MAX_AGENTS;
         state.core.runtime = Some(runtime);
-        state.core.tool_server = workflow::tools::create_agent_tool_server(state_handle);
+    }
+    // Build tool server AFTER releasing the write lock (MemoToolDeps::from_state
+    // needs a read lock, which would conflict with the write lock above).
+    {
+        let state_handle = state.clone();
+        let tool_server = workflow::tools::create_agent_tool_server(state_handle);
+        let mut state = state.write().await;
+        state.core.tool_server = tool_server;
     }
 
     // Background task: periodic experience pool flush (every 30 seconds)

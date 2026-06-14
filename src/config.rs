@@ -230,10 +230,10 @@ impl ConfigSource for FileConfigSource {
 
 /// Merge configs from multiple sources.
 ///
-/// Earlier sources in `sources` are higher priority — their configs take
-/// precedence over later sources when IDs collide.
+/// Later sources in `sources` take precedence over earlier sources
+/// when IDs collide (last-source-wins).
 pub fn merge_configs(sources: &[&dyn ConfigSource]) -> Result<Vec<ProviderConfig>> {
-    // First pass: collect all configs (later sources overwrite earlier).
+    // Last source wins: later sources overwrite earlier ones.
     let mut merged: HashMap<String, ProviderConfig> = HashMap::new();
     for source in sources {
         let configs = source.load()?;
@@ -241,9 +241,6 @@ pub fn merge_configs(sources: &[&dyn ConfigSource]) -> Result<Vec<ProviderConfig
             merged.insert(config.id.clone(), config);
         }
     }
-    // Second pass (reverse): first source with a matching ID wins.
-    // But for now, the last source wins (consistent with implementation).
-    // TODO: properly implement first-source-wins by reversing the iteration.
 
     let mut result: Vec<ProviderConfig> = merged.into_values().collect();
     result.sort_by(|a, b| a.name.cmp(&b.name));

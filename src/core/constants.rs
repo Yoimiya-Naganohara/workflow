@@ -68,3 +68,57 @@ pub const BUDGET_ANOMALY_RATIO: f64 = 0.8;
 
 /// Maximum responsibility chain length before flagging.
 pub const MAX_CHAIN_LENGTH: usize = 20;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_constants_values() {
+        assert_eq!(EMBEDDING_DIM, 384);
+        assert_eq!(DEFAULT_TEMPERATURE, 0.7);
+        assert_eq!(DEFAULT_MAX_TOKENS, 40000);
+        assert!((BUDGET_PRIORITY_WEIGHT - 0.6).abs() < f32::EPSILON);
+        assert!((DEPTH_PRIORITY_WEIGHT - 0.4).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_default_config_constants() {
+        assert!((DEFAULT_L1_CONFIDENCE - 0.5).abs() < f32::EPSILON);
+        assert!((DEFAULT_SEMANTIC_THRESHOLD - (-0.6)).abs() < f32::EPSILON);
+        assert_eq!(DEFAULT_RUNTIME_BUDGET, 10_000);
+        assert_eq!(DEFAULT_MAX_DEPTH, 5);
+        assert_eq!(DEFAULT_MAX_AGENTS, 10);
+    }
+
+    #[test]
+    fn test_timeout_constants() {
+        assert_eq!(DEFAULT_ADMISSION_TIMEOUT_MS, 100);
+        assert_eq!(DEFAULT_SUSPEND_TIMEOUT_MS, 50);
+    }
+
+    #[test]
+    fn test_l2_constants() {
+        assert_eq!(MAX_CONSECUTIVE_FAILURES, 5);
+        assert_eq!(L2_JUDGE_MAX_TOKENS, 500);
+        assert!((L2_JUDGE_TEMPERATURE - 0.3).abs() < f64::EPSILON);
+        assert!((L2_OVERRIDE_BOOST - 1.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_l1_weight_constants() {
+        assert!((L1_TASK_WEIGHT - 0.35).abs() < f32::EPSILON);
+        assert!((L1_ROLE_WEIGHT - 0.25).abs() < f32::EPSILON);
+        assert!((L1_VALUE_WEIGHT - 0.25).abs() < f32::EPSILON);
+        assert!((L1_RECENCY_WEIGHT - 0.15).abs() < f32::EPSILON);
+        let sum = L1_TASK_WEIGHT + L1_ROLE_WEIGHT + L1_VALUE_WEIGHT + L1_RECENCY_WEIGHT;
+        assert!((sum - 1.0).abs() < f32::EPSILON, "L1 weights should sum to 1.0");
+    }
+
+    #[test]
+    fn test_other_constants() {
+        assert!((BUDGET_ANOMALY_RATIO - 0.8).abs() < f64::EPSILON);
+        assert_eq!(MAX_CHAIN_LENGTH, 20);
+        assert_eq!(SIDEBAR_WIDTH, 28);
+    }
+}

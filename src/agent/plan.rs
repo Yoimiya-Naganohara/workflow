@@ -419,18 +419,26 @@ impl Plan {
         self.status == PlanStatus::Approved && self.tasks.iter().any(|t| t.status == TaskStatus::Pending)
     }
 
-    pub async fn execute_plan(plan: &mut Plan, agent_pool: &Arc<RwLock<AgentPool>>) -> Result<()> {
+    /// Execute a plan by creating an agent for each task and running it.
+    ///
+    /// NOTE: This function is preserved for future use but is NOT currently
+    /// called from anywhere in the codebase. When wired up, a `model_id`
+    /// must be provided — `AgentConfig::default()` has an empty `model_id`.
+    pub async fn execute_plan(plan: &mut Plan, model_id: &str, agent_pool: &Arc<RwLock<AgentPool>>) -> Result<()> {
         plan.status = PlanStatus::Executing;
 
         while let Some(task) = plan.next_task() {
             let task_clone = task.clone();
-            let config = AgentConfig::default();
+            let config = AgentConfig {
+                model_id: model_id.to_string(),
+                ..Default::default()
+            };
 
             let (agent_id, provider) = {
                 let mut pool = agent_pool.write().await;
                 let agent = Agent {
                     id: rand::random(),
-                    name: format!("Worker {}", pool.agents().len() + 1),
+                    name: format!("Worker-{:04x}", rand::random::<u16>()),
                     role: "worker".to_string(),
                     role_template_id: None,
                     parent_id: None,
@@ -441,6 +449,7 @@ impl Plan {
                     status: AgentStatus::Planning,
                     result: None,
                     child_results: Vec::new(),
+                    memos: Vec::new(),
                 };
                 let agent_id = agent.id;
                 pool.add_agent(agent);
@@ -449,9 +458,10 @@ impl Plan {
 
             plan.mark_task_running(task_clone.id);
 
+            let system_prompt = "You are a worker. Execute the given task.".to_string();
             let result: Result<String> = if let Some(provider) = provider {
                 provider
-                    .chat(&config.model_id, &config.system_prompt, &task_clone.description)
+                    .chat(&config.model_id, &system_prompt, &task_clone.description)
                     .await
             } else {
                 Err(anyhow::anyhow!("No provider configured"))

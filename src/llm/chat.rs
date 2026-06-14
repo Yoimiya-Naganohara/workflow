@@ -38,7 +38,7 @@ macro_rules! mcp_stream_arm {
             .tool_server_handle($handle.clone())
             .build();
         Ok(Self::wrap_tool_stream(
-            agent.stream_chat($msg, $history).multi_turn(100).await,
+            agent.stream_chat($msg, $history).multi_turn(20).await,
         ))
     }};
 }
@@ -162,8 +162,15 @@ impl LlmProvider {
                         yield Ok(text);
                     }
                     Ok(MultiTurnStreamItem::StreamAssistantItem(
-                        StreamedAssistantContent::Reasoning(_reasoning),
-                    )) => {}
+                        StreamedAssistantContent::Reasoning(reasoning),
+                    )) => {
+                        // Surface reasoning as text so user can see chain-of-thought
+                        for block in reasoning.content {
+                            if let rig::message::ReasoningContent::Text { text, .. } = block {
+                                yield Ok(text);
+                            }
+                        }
+                    }
                     Ok(MultiTurnStreamItem::FinalResponse(_)) => break,
                     Ok(_) => {}
                     Err(err) => {
@@ -204,8 +211,15 @@ impl LlmProvider {
                         };
                     }
                     Ok(MultiTurnStreamItem::StreamAssistantItem(
-                        StreamedAssistantContent::Reasoning(_),
-                    )) => {}
+                        StreamedAssistantContent::Reasoning(reasoning),
+                    )) => {
+                        // Surface reasoning as text so user can see chain-of-thought
+                        for block in reasoning.content {
+                            if let rig::message::ReasoningContent::Text { text, .. } = block {
+                                yield ToolEvent::Text(text);
+                            }
+                        }
+                    }
                     Ok(MultiTurnStreamItem::FinalResponse(_)) => {
                         yield ToolEvent::Done;
                         break;
@@ -220,5 +234,102 @@ impl LlmProvider {
             }
         };
         Box::pin(stream)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_history_empty() {
+        let history: Vec<(String, String)> = vec![];
+        let msgs = LlmProvider::build_history(&history);
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn test_build_history_user_message() {
+        let history = vec![("user".to_string(), "Hello".to_string())];
+        let msgs = LlmProvider::build_history(&history);
+        assert_eq!(msgs.len(), 1);
+    }
+
+    #[test]
+    fn test_build_history_assistant_message() {
+        let history = vec![("assistant".to_string(), "Hi there".to_string())];
+        let msgs = LlmProvider::build_history(&history);
+        assert_eq!(msgs.len(), 1);
+    }
+
+    #[test]
+    fn test_build_history_alternating() {
+        let history = vec![
+            ("user".to_string(), "Hello".to_string()),
+            ("assistant".to_string(), "Hi".to_string()),
+            ("user".to_string(), "How are you?".to_string()),
+        ];
+        let msgs = LlmProvider::build_history(&history);
+        assert_eq!(msgs.len(), 3);
+    }
+
+    #[test]
+    fn test_build_history_unknown_role_defaults_to_assistant() {
+        let history = vec![("system".to_string(), "Be helpful".to_string())];
+        let msgs = LlmProvider::build_history(&history);
+        assert_eq!(msgs.len(), 1);
+        // Unknown role should default to assistant
+    }
+
+    // ── ToolEvent ──
+
+    #[test]
+    fn test_tool_event_text() {
+        let event = ToolEvent::Text("response chunk".to_string());
+        match event {
+            ToolEvent::Text(t) => assert_eq!(t, "response chunk"),
+            _ => panic!("expected Text"),
+        }
+    }
+
+    #[test]
+    fn test_tool_event_tool_call() {
+        let event = ToolEvent::ToolCall {
+            name: "read_file".to_string(),
+            args: serde_json::json!({"path": "/tmp/test.txt"}),
+            result: String::new(),
+        };
+        match event {
+            ToolEvent::ToolCall { name, args, .. } => {
+                assert_eq!(name, "read_file");
+                assert_eq!(args["path"], "/tmp/test.txt");
+            }
+            _ => panic!("expected ToolCall"),
+        }
+    }
+
+    #[test]
+    fn test_tool_event_done() {
+        let event = ToolEvent::Done;
+        assert!(matches!(event, ToolEvent::Done));
+    }
+
+    #[test]
+    fn test_tool_event_clone() {
+        let event = ToolEvent::Text("hello".to_string());
+        let cloned = event.clone();
+        assert!(matches!(cloned, ToolEvent::Text(t) if t == "hello"));
+    }
+
+    #[test]
+    fn test_tool_event_debug() {
+        let event = ToolEvent::ToolCall {
+            name: "test".to_string(),
+            args: serde_json::json!({}),
+            result: "ok".to_string(),
+        };
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("ToolCall"));
+        assert!(debug.contains("test"));
     }
 }

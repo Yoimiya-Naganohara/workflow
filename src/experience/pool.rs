@@ -62,9 +62,14 @@ struct PoolHeader {
     _pad: [u8; 44],  // 64-byte header total
 }
 
-#[cfg(test)]
 #[allow(unused)]
 const _: () = assert!(size_of::<PoolHeader>() == HEADER_SIZE);
+
+// Assert that ExperienceEntry layout is stable for mmap (repr(C), no niche-optimized enums).
+// Option<u32> is 4 bytes (niche optimization makes None = 0, same size as u32).
+// If this assertion fails, the mmap file format is incompatible.
+#[allow(unused)]
+const _: () = assert!(size_of::<ExperienceEntry>() == 2104);
 
 // ---------------------------------------------------------------------------
 //  ExperiencePool
@@ -165,14 +170,15 @@ impl ExperiencePool {
         // Validate count against mmap file size — prevent UB from corrupted header.
         let file_bytes = ro.len();
         let max_entries = file_bytes.saturating_sub(HEADER_SIZE) / std::mem::size_of::<ExperienceEntry>();
-        if count > max_entries {
+        let count = if count > max_entries {
             warn!(
-                count,
-                max_entries, "Experience pool header claims entries beyond file size – clamping"
+                "Experience pool header claims {} entries but file only fits {} – truncating",
+                count, max_entries
             );
-            // We cannot safely read past the mmap, so return empty.
-            return Ok((Vec::new(), None, None, DEFAULT_CAPACITY));
-        }
+            max_entries
+        } else {
+            count
+        };
 
         let entries: &[ExperienceEntry] =
             unsafe { std::slice::from_raw_parts(ro.as_ptr().add(HEADER_SIZE) as *const ExperienceEntry, count) };
@@ -228,7 +234,7 @@ impl ExperiencePool {
             })
             .collect();
 
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
         scored.truncate(k);
 
         scored.into_iter().map(|(i, s)| (self.entries[i].clone(), s)).collect()

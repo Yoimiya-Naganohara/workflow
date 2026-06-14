@@ -7,11 +7,28 @@ use tokio::sync::Notify;
 use crate::core::types::AgentId;
 use crate::l0::BudgetGuard;
 
+// ── MemoEntry ──
+
+/// A single key-value memo attached to an agent.
+///
+/// Memos provide a simple notepad/scratchpad for agents to
+/// store intermediate findings, decisions, or context during
+/// their lifecycle.  Unlike the experience pool (which is about
+/// long-term learning) or `result` (final output), memos are
+/// ephemeral key-value notes that the agent can read, write,
+/// and list via MCP tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoEntry {
+    pub key: String,
+    pub value: String,
+    pub timestamp: u64,
+    pub agent_id: AgentId,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     pub model_id: String,
     pub provider_id: String,
-    pub system_prompt: String,
     pub max_tokens: u64,
     pub temperature: f64,
     /// Bitmap of tools this agent is allowed to use.
@@ -23,7 +40,6 @@ impl Default for AgentConfig {
         Self {
             model_id: String::new(),
             provider_id: String::new(),
-            system_prompt: String::new(),
             max_tokens: 4000,
             temperature: 0.7,
             allowed_tools: 0,
@@ -45,6 +61,8 @@ pub struct Agent {
     pub status: AgentStatus,
     pub result: Option<String>,
     pub child_results: Vec<(AgentId, String)>,
+    /// Agent scratchpad — persistent key-value notes.
+    pub memos: Vec<MemoEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -154,7 +172,7 @@ impl AgentPool {
     }
 
     pub fn agent_id_str(id: &AgentId) -> String {
-        format!("{:02x}{:02x}{:02x}{:02x}", id[0], id[1], id[2], id[3])
+        id.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join("")
     }
 }
 
@@ -178,6 +196,7 @@ mod tests {
             status: AgentStatus::Idle,
             result: None,
             child_results: Vec::new(),
+            memos: Vec::new(),
         };
         let id = pool.add_agent(agent);
         assert_eq!(pool.agents().len(), 1);
@@ -200,6 +219,7 @@ mod tests {
             status: AgentStatus::Idle,
             result: None,
             child_results: Vec::new(),
+            memos: Vec::new(),
         };
         pool.add_agent(agent);
         let summary = pool.summary();

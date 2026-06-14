@@ -332,7 +332,7 @@ impl ProviderRegistry {
                         let entry = merged.entry(p.id.clone());
                         match entry {
                             std::collections::hash_map::Entry::Occupied(mut e) => {
-                                if priority >= e.get().0 {
+                                if priority > e.get().0 {
                                     e.insert((priority, p));
                                 }
                             }

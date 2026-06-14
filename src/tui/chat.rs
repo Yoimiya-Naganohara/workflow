@@ -94,8 +94,11 @@ pub(crate) fn render_chat(f: &mut Frame, area: Rect, state: &AppState, visible_l
             let chars_on_this_line = state.ui.input[line_start_byte..byte_idx].chars().count();
             let line_width = display_width_up_to(&state.ui.input[line_start_byte..], chars_on_this_line);
             let cursor_x = input_area.x + 2 + line_width as u16;
+            // Calculate visual Y position accounting for line wrapping
             let line_no = state.ui.input[..byte_idx].lines().count().saturating_sub(1);
-            let cursor_y = input_area.y + line_no as u16;
+            let wrap_width = input_area.width.saturating_sub(2) as usize;
+            let wrap_offset = if wrap_width > 0 { line_width / wrap_width } else { 0 };
+            let cursor_y = input_area.y + (line_no + wrap_offset) as u16;
             f.set_cursor_position((
                 cursor_x.min(input_area.right().saturating_sub(1)),
                 cursor_y.min(input_area.bottom().saturating_sub(1)),

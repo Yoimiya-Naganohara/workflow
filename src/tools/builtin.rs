@@ -7,6 +7,7 @@
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::Deserialize;
+use std::time::Duration;
 
 /// Register all built-in tools on a `ToolServer`.
 pub fn register_tools(server: crate::tools::ToolServer) -> crate::tools::ToolServer {
@@ -23,6 +24,8 @@ pub fn register_tools(server: crate::tools::ToolServer) -> crate::tools::ToolSer
         .tool(AppendFile)
         .tool(PatchFile)
         .tool(Glob)
+        .tool(LineEdit)
+        .tool(Fetch)
 }
 
 // ── ReadFile ──
@@ -232,9 +235,10 @@ impl Tool for Shell {
         let mut result = String::new();
         if !output.stdout.is_empty() {
             let s = String::from_utf8_lossy(&output.stdout);
-            // Cap output at 100KB to avoid context overflow
+            // Cap output at 100KB to avoid context overflow (char-boundary safe).
             if s.len() > 102_400 {
-                result.push_str(&s[..102_400]);
+                let end = s.char_indices().nth(102_400).map(|(i, _)| i).unwrap_or(s.len());
+                result.push_str(&s[..end]);
                 result.push_str("\n... [stdout truncated at 100KB]");
             } else {
                 result.push_str(&s);
@@ -247,7 +251,8 @@ impl Tool for Shell {
             result.push_str("stderr:\n");
             let s = String::from_utf8_lossy(&output.stderr);
             if s.len() > 51_200 {
-                result.push_str(&s[..51_200]);
+                let end = s.char_indices().nth(51_200).map(|(i, _)| i).unwrap_or(s.len());
+                result.push_str(&s[..end]);
                 result.push_str("\n... [stderr truncated at 50KB]");
             } else {
                 result.push_str(&s);
@@ -1098,10 +1103,20 @@ impl Tool for PatchFile {
             .map_err(|e| ToolCallError(format!("Failed to read '{}': {}", args.path, e)))?;
 
         if !content.contains(&args.old_text) {
+            let preview = if args.old_text.len() > 80 {
+                let end = args
+                    .old_text
+                    .char_indices()
+                    .nth(80)
+                    .map(|(i, _)| i)
+                    .unwrap_or(args.old_text.len());
+                format!("{}...", &args.old_text[..end])
+            } else {
+                args.old_text.clone()
+            };
             return Err(ToolCallError(format!(
                 "old_text not found in '{}': {:?}",
-                args.path,
-                &args.old_text[..args.old_text.len().min(80)]
+                args.path, preview
             )));
         }
 
@@ -1290,7 +1305,509 @@ impl Tool for Glob {
     }
 }
 
-// ── Error type ──
+// ── LineEdit (structured line-level editor) ──
+
+/// Single line-edit operation.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "op")]
+#[serde(rename_all = "snake_case")]
+pub enum LineEditOp {
+    InsertAfter {
+        line: usize,
+        text: String,
+    },
+    InsertBefore {
+        line: usize,
+        text: String,
+    },
+    ReplaceRange {
+        start_line: usize,
+        end_line: usize,
+        text: String,
+    },
+    DeleteRange {
+        start_line: usize,
+        end_line: usize,
+    },
+}
+
+#[derive(Deserialize)]
+pub struct LineEditArgs {
+    pub path: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub operations: Vec<LineEditOp>,
+}
+
+pub struct LineEdit;
+
+impl Tool for LineEdit {
+    const NAME: &'static str = "line_edit";
+
+    type Error = ToolCallError;
+    type Args = LineEditArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.into(),
+            description: concat!(
+                "Apply a sequence of line-level edits to a file. ",
+                "Operations are applied in order. All line numbers are 1-based ",
+                "and reference the current file state (after previous operations). ",
+                "Use dry_run=true to preview changes without writing."
+            )
+            .into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "required": ["path", "operations"],
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path (relative to project root)"
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true, only validate and preview, don't write",
+                        "default": false
+                    },
+                    "operations": {
+                        "type": "array",
+                        "description": "Operations to apply in sequence. Line numbers are relative (1-based).",
+                        "minItems": 1,
+                        "maxItems": 100,
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "required": ["op", "line", "text"],
+                                    "properties": {
+                                        "op": { "type": "string", "enum": ["insert_after"], "description": "Insert text after the given line. line=0 means at start." },
+                                        "line": { "type": "integer", "minimum": 0 },
+                                        "text": { "type": "string" }
+                                    }
+                                },
+                                {
+                                    "type": "object",
+                                    "required": ["op", "line", "text"],
+                                    "properties": {
+                                        "op": { "type": "string", "enum": ["insert_before"] },
+                                        "line": { "type": "integer", "minimum": 1 },
+                                        "text": { "type": "string" }
+                                    }
+                                },
+                                {
+                                    "type": "object",
+                                    "required": ["op", "start_line", "end_line", "text"],
+                                    "properties": {
+                                        "op": { "type": "string", "enum": ["replace_range"] },
+                                        "start_line": { "type": "integer", "minimum": 1 },
+                                        "end_line": { "type": "integer", "minimum": 1 },
+                                        "text": { "type": "string", "description": "Replacement text. Empty string deletes the range content (line becomes empty)." }
+                                    }
+                                },
+                                {
+                                    "type": "object",
+                                    "required": ["op", "start_line", "end_line"],
+                                    "properties": {
+                                        "op": { "type": "string", "enum": ["delete_range"] },
+                                        "start_line": { "type": "integer", "minimum": 1 },
+                                        "end_line": { "type": "integer", "minimum": 1 }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        // Read file
+        let content = std::fs::read_to_string(&args.path)
+            .map_err(|e| ToolCallError(format!("Cannot read '{}': {}", args.path, e)))?;
+
+        // Reject binary files
+        if !content.is_ascii() && content.contains('\0') {
+            return Err(ToolCallError(format!(
+                "'{}' appears to be a binary file (contains null bytes). Use write_file instead.",
+                args.path
+            )));
+        }
+
+        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        // Preserve trailing newline semantics: track if file ends with newline
+        let ends_with_newline = content.ends_with('\n');
+
+        let mut stats = EditStats::default();
+        let mut preview_lines = Vec::new();
+
+        for (i, op) in args.operations.iter().enumerate() {
+            let before_count = lines.len();
+            match apply_operation(&mut lines, op, ends_with_newline) {
+                Ok(desc) => {
+                    stats.record(&desc);
+                    if args.dry_run {
+                        let after_count = lines.len();
+                        let change = if after_count > before_count {
+                            format!("+{} lines", after_count - before_count)
+                        } else if before_count > after_count {
+                            format!("-{} lines", before_count - after_count)
+                        } else {
+                            "modified".to_string()
+                        };
+                        preview_lines.push(format!(
+                            "  {}. {} (was {} lines → {} lines, {})",
+                            i + 1,
+                            desc,
+                            before_count,
+                            after_count,
+                            change
+                        ));
+                    }
+                }
+                Err(e) => {
+                    let err_msg = format!(
+                        "Operation {} failed: {}. {} operations applied successfully before this error.",
+                        i + 1,
+                        e,
+                        i
+                    );
+                    if args.dry_run {
+                        preview_lines.push(format!("  {}. ERROR: {}", i + 1, e));
+                        return Ok(format!(
+                            "⚠️ Dry-run: {} operation(s) would fail\n\n{}",
+                            args.operations.len() - i,
+                            preview_lines.join("\n")
+                        ));
+                    }
+                    // Partial rollback: restore original
+                    let _ = std::fs::write(&args.path, &content);
+                    return Err(ToolCallError(err_msg));
+                }
+            }
+        }
+
+        let new_content = if lines.is_empty() {
+            String::new()
+        } else {
+            let mut result = lines.join("\n");
+            if ends_with_newline {
+                result.push('\n');
+            }
+            result
+        };
+
+        if args.dry_run {
+            let preview_diff = generate_inline_diff(&content, &new_content);
+            Ok(format!(
+                "✅ Dry-run: {} would apply.\n\nChange preview:\n{}\n\nSummary:\n{}",
+                if stats.total == 0 { "no changes" } else { "ok" },
+                preview_diff,
+                stats.summary()
+            ))
+        } else {
+            // Atomic write: temp file + rename
+            use std::io::Write;
+            let tmp_path = format!("{}.tmp.{}", args.path, std::process::id());
+            {
+                let mut tmp = std::fs::File::create(&tmp_path)
+                    .map_err(|e| ToolCallError(format!("Failed to create temp file: {}", e)))?;
+                tmp.write_all(new_content.as_bytes())
+                    .map_err(|e| ToolCallError(format!("Failed to write temp file: {}", e)))?;
+                tmp.flush()
+                    .map_err(|e| ToolCallError(format!("Failed to flush temp file: {}", e)))?;
+            }
+            std::fs::rename(&tmp_path, &args.path)
+                .map_err(|e| ToolCallError(format!("Failed to rename temp file: {}", e)))?;
+
+            Ok(format!(
+                "✅ Applied {} operation(s) to '{}'.\n\nFile changed: {} lines → {} lines.\n\nPreview of changes:\n{}",
+                stats.total,
+                args.path,
+                content.lines().count(),
+                new_content.lines().count(),
+                generate_inline_diff(&content, &new_content),
+            ))
+        }
+    }
+}
+
+// ── Operation application logic ──
+
+#[derive(Debug, Default)]
+struct EditStats {
+    inserts: usize,
+    replaces: usize,
+    deletes: usize,
+    total: usize,
+}
+
+impl EditStats {
+    fn record(&mut self, desc: &str) {
+        self.total += 1;
+        if desc.starts_with("insert") {
+            self.inserts += 1;
+        } else if desc.starts_with("replace") {
+            self.replaces += 1;
+        } else if desc.starts_with("delete") {
+            self.deletes += 1;
+        }
+    }
+
+    fn summary(&self) -> String {
+        let parts: Vec<String> = [
+            (self.inserts, "insert"),
+            (self.replaces, "replace"),
+            (self.deletes, "delete"),
+        ]
+        .iter()
+        .filter_map(|(n, label)| {
+            if *n > 0 {
+                Some(format!("{} {}{}", n, label, if *n > 1 { "s" } else { "" }))
+            } else {
+                None
+            }
+        })
+        .collect();
+        format!("{} operation(s): {}", self.total, parts.join(", "))
+    }
+}
+
+/// Apply a single operation to the current line buffer.
+fn apply_operation(lines: &mut Vec<String>, op: &LineEditOp, _ends_with_newline: bool) -> Result<&'static str, String> {
+    match op {
+        LineEditOp::InsertAfter { line, text } => {
+            let pos = if *line == 0 {
+                0
+            } else if *line > lines.len() {
+                // If file is empty (0 lines) and line > 0, treat as append
+                lines.len()
+            } else {
+                *line
+            };
+            let new_lines = text.lines().map(|l| l.to_string()).collect::<Vec<_>>();
+            let splice_pos = if *line == 0 { 0 } else { pos.min(lines.len()) };
+            let tail = lines.split_off(splice_pos);
+            lines.extend(new_lines);
+            lines.extend(tail);
+            Ok("insert_after")
+        }
+        LineEditOp::InsertBefore { line, text } => {
+            if *line == 0 {
+                return Err(
+                    "insert_before line:0 is invalid. Use insert_after line:0 or insert_before line:1.".to_string(),
+                );
+            }
+            let pos = if *line > lines.len() {
+                lines.len()
+            } else {
+                *line - 1 // 1-based to 0-based
+            };
+            let new_lines = text.lines().map(|l| l.to_string()).collect::<Vec<_>>();
+            let tail = lines.split_off(pos);
+            lines.extend(new_lines);
+            lines.extend(tail);
+            Ok("insert_before")
+        }
+        LineEditOp::ReplaceRange {
+            start_line,
+            end_line,
+            text,
+        } => {
+            if start_line > end_line {
+                return Err(format!("start_line ({}) > end_line ({})", start_line, end_line));
+            }
+            if *start_line == 0 || *start_line > lines.len() {
+                return Err(format!(
+                    "start_line {} is out of range (file has {} lines)",
+                    start_line,
+                    lines.len()
+                ));
+            }
+            let start = *start_line - 1;
+            let end = (*end_line).min(lines.len());
+            if start >= lines.len() {
+                return Err(format!(
+                    "start_line {} is out of range (file has {} lines)",
+                    start_line,
+                    lines.len()
+                ));
+            }
+            let new_lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+            lines.splice(start..end, new_lines);
+            Ok("replace_range")
+        }
+        LineEditOp::DeleteRange { start_line, end_line } => {
+            if start_line > end_line {
+                return Err(format!("start_line ({}) > end_line ({})", start_line, end_line));
+            }
+            if *start_line == 0 || *start_line > lines.len() {
+                return Err(format!(
+                    "start_line {} is out of range (file has {} lines)",
+                    start_line,
+                    lines.len()
+                ));
+            }
+            let start = *start_line - 1;
+            let end = (*end_line).min(lines.len());
+            if start >= lines.len() {
+                return Err(format!(
+                    "start_line {} is out of range (file has {} lines)",
+                    start_line,
+                    lines.len()
+                ));
+            }
+            lines.splice(start..end, std::iter::empty::<String>());
+            Ok("delete_range")
+        }
+    }
+}
+
+/// Generate a simple inline diff preview (shows added/removed lines).
+fn generate_inline_diff(old: &str, new: &str) -> String {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+    let mut output = String::new();
+
+    // Simple line-by-line diff using similartext
+    let mut i = 0;
+    let mut j = 0;
+    while i < old_lines.len() || j < new_lines.len() {
+        if i < old_lines.len() && j < new_lines.len() && old_lines[i] == new_lines[j] {
+            // Unchanged
+            if output.len() < 2000 {
+                output.push_str(&format!("  {}\n", old_lines[i]));
+            }
+            i += 1;
+            j += 1;
+        } else if j < new_lines.len() && (i >= old_lines.len() || new_lines[j] != old_lines[i]) {
+            // Added
+            if output.len() < 2000 {
+                output.push_str(&format!("+ {}\n", new_lines[j]));
+            }
+            j += 1;
+        } else if i < old_lines.len() {
+            // Removed
+            if output.len() < 2000 {
+                output.push_str(&format!("- {}\n", old_lines[i]));
+            }
+            i += 1;
+        }
+    }
+
+    if output.len() >= 2000 {
+        output.push_str("... (diff truncated at 2000 chars)\n");
+    }
+    output
+}
+
+// ── Fetch (web fetch) ──
+
+#[derive(Deserialize)]
+pub struct FetchArgs {
+    pub url: String,
+    #[serde(default)]
+    pub max_size: Option<usize>,
+    #[serde(default)]
+    pub timeout: Option<u64>,
+}
+
+pub struct Fetch;
+
+impl Tool for Fetch {
+    const NAME: &'static str = "fetch";
+
+    type Error = ToolCallError;
+    type Args = FetchArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.into(),
+            description: concat!(
+                "Fetch a URL and return its content as plain text. ",
+                "Supports HTTP(S). Max 10KB by default. ",
+                "Use for reading web pages, APIs, or documentation."
+            )
+            .into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "required": ["url"],
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL to fetch (http:// or https://)"
+                    },
+                    "max_size": {
+                        "type": "integer",
+                        "description": "Maximum response size in bytes (default: 10240, max: 102400)",
+                        "optional": true
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Request timeout in seconds (default: 30)",
+                        "optional": true
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(args.timeout.unwrap_or(30)))
+            .user_agent("Workflow-Agent/1.0")
+            .build()
+            .map_err(|e| ToolCallError(format!("Failed to create HTTP client: {}", e)))?;
+
+        let response = client
+            .get(&args.url)
+            .send()
+            .await
+            .map_err(|e| ToolCallError(format!("Request failed: {}", e)))?;
+
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let max_size = args.max_size.unwrap_or(10240).min(102400);
+
+        let content = response
+            .bytes()
+            .await
+            .map_err(|e| ToolCallError(format!("Failed to read response body: {}", e)))?;
+
+        let bytes_len = content.len();
+        let body_str = String::from_utf8_lossy(&content);
+
+        let truncated = if bytes_len > max_size {
+            // Truncate at char boundary to avoid panics
+            let max_chars = max_size / 4; // conservative estimate (max 4 bytes per char)
+            let truncated_body: String = body_str.chars().take(max_chars).collect();
+            format!(
+                "{}\n\n... [truncated, {} bytes, showing first {} bytes]",
+                truncated_body, bytes_len, max_size
+            )
+        } else {
+            body_str.to_string()
+        };
+
+        Ok(format!(
+            "HTTP {} ({}, {} bytes, {})\n\n{}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or(""),
+            bytes_len,
+            content_type,
+            truncated
+        ))
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]

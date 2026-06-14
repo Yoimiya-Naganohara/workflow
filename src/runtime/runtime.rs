@@ -402,6 +402,11 @@ impl AgentRuntime {
         self.pipeline.flush_experience_pool()
     }
 
+    /// Clear all experiences from both tracks.
+    pub fn clear_experience_pool(&self) -> Result<()> {
+        self.pipeline.clear_experience_pool()
+    }
+
     /// Number of bedrock (persistent) experience entries.
     pub fn bedrock_count(&self) -> usize {
         self.pipeline.bedrock_count()
@@ -494,7 +499,7 @@ impl AgentRuntime {
     pub async fn chat_with_goal(&self, goal: &str, agent_pool: &Arc<RwLock<AgentPool>>) -> Result<String> {
         let agent_id = {
             let mut pool = agent_pool.write().await;
-            self.spawn_root_agent(goal, "planner", &mut pool).await?
+            self.spawn_root_agent(goal, "planner", "default", &mut pool).await?
         };
 
         // Spawned agents are leaf nodes; execute directly.
@@ -543,19 +548,25 @@ impl AgentRuntime {
             depth: 0,
             goal: goal.to_string(),
             config: crate::agent::AgentConfig {
-                system_prompt: role_tpl.system_prompt,
                 model_id: self.model_id.clone(),
                 ..Default::default()
             },
             status: AgentStatus::Idle,
             result: None,
             child_results: Vec::new(),
+            memos: Vec::new(),
         };
         agent_pool.add_agent(agent);
         agent_id
     }
 
-    pub async fn spawn_root_agent(&self, goal: &str, role: &str, agent_pool: &mut AgentPool) -> Result<AgentId> {
+    pub async fn spawn_root_agent(
+        &self,
+        goal: &str,
+        role: &str,
+        value_statement: &str,
+        agent_pool: &mut AgentPool,
+    ) -> Result<AgentId> {
         let role_emb = self.pipeline.embedding().embed(role).await?;
         let task_emb = self.pipeline.embedding().embed(goal).await?;
 
@@ -575,7 +586,7 @@ impl AgentRuntime {
         let agent_id: AgentId = rand::random();
 
         // Run the decision pipeline
-        let value_emb = self.pipeline.embedding().embed("default").await?;
+        let value_emb = self.pipeline.embedding().embed(value_statement).await?;
 
         let request = SpawnRequest {
             trace_id: rand::random(),
@@ -611,7 +622,6 @@ impl AgentRuntime {
                     depth: 0,
                     goal: goal.to_string(),
                     config: crate::agent::AgentConfig {
-                        system_prompt: role_tpl.system_prompt,
                         model_id: self.model_id.clone(),
                         allowed_tools: config.allowed_tools,
                         ..Default::default()
@@ -619,6 +629,7 @@ impl AgentRuntime {
                     status: AgentStatus::Idle,
                     result: None,
                     child_results: Vec::new(),
+                    memos: Vec::new(),
                 };
                 agent_pool.add_agent(agent);
                 Ok(agent_id)
@@ -633,6 +644,7 @@ impl AgentRuntime {
         parent_depth: u32,
         role: &str,
         goal: &str,
+        value_statement: &str,
         responsibility_chain: &[AgentId],
         agent_pool: &mut AgentPool,
     ) -> Result<AgentId> {
@@ -653,7 +665,7 @@ impl AgentRuntime {
 
         let agent_id: AgentId = rand::random();
         let task_emb = self.pipeline.embedding().embed(goal).await?;
-        let value_emb = self.pipeline.embedding().embed("default").await?;
+        let value_emb = self.pipeline.embedding().embed(value_statement).await?;
 
         let mut chain = responsibility_chain.to_vec();
         chain.push(agent_id);
@@ -697,7 +709,6 @@ impl AgentRuntime {
                     depth: parent_depth + 1,
                     goal: goal.to_string(),
                     config: crate::agent::AgentConfig {
-                        system_prompt: role_tpl.system_prompt,
                         model_id: self.model_id.clone(),
                         allowed_tools: config.allowed_tools,
                         ..Default::default()
@@ -705,6 +716,7 @@ impl AgentRuntime {
                     status: AgentStatus::Idle,
                     result: None,
                     child_results: Vec::new(),
+                    memos: Vec::new(),
                 };
                 agent_pool.add_agent(agent);
 
@@ -759,8 +771,16 @@ impl AgentRuntime {
             .map(|agent| (agent.depth, vec![owner_id]))
             .ok_or_else(|| anyhow::anyhow!("Responsible agent not found"))?;
 
-        self.spawn_child(owner_id, parent_depth, role, goal, &responsibility_chain, agent_pool)
-            .await
+        self.spawn_child(
+            owner_id,
+            parent_depth,
+            role,
+            goal,
+            "default",
+            &responsibility_chain,
+            agent_pool,
+        )
+        .await
     }
 
     pub async fn synthesize_plan_result(
@@ -770,19 +790,24 @@ impl AgentRuntime {
         task_results: &[(usize, String)],
         agent_pool: &Arc<RwLock<AgentPool>>,
     ) -> String {
-        let (config, provider) = {
+        let (config, role, provider) = {
             let mut pool = agent_pool.write().await;
-            let config = match pool.get_agent_mut(&owner_id) {
+            let (config, role) = match pool.get_agent_mut(&owner_id) {
                 Some(agent) => {
                     agent.status = AgentStatus::Aggregating;
-                    agent.config.clone()
+                    (agent.config.clone(), agent.role.clone())
                 }
                 None => return "Responsible agent not found".to_string(),
             };
-            (config, self.provider.clone())
+            (config, role, self.provider.clone())
         };
 
         let result = if let Some(provider) = provider {
+            let role_system_prompt = self
+                .role_template_store
+                .get_by_role(&role)
+                .map(|t| t.system_prompt)
+                .unwrap_or_else(|| format!("You are a {}. Execute the given goal.", role));
             let task_summary = task_results
                 .iter()
                 .map(|(id, result)| format!("Task {}:\n{}", id, result))
@@ -793,7 +818,7 @@ impl AgentRuntime {
                 plan_goal, task_summary
             );
             provider
-                .chat(&config.model_id, &config.system_prompt, &prompt)
+                .chat(&config.model_id, &role_system_prompt, &prompt)
                 .await
                 .unwrap_or_else(|e| format!("Plan synthesis failed: {}", e))
         } else {
@@ -810,21 +835,59 @@ impl AgentRuntime {
     }
 
     pub async fn execute_agent(&self, agent_id: AgentId, agent_pool: &Arc<RwLock<AgentPool>>) {
-        self.execute_agent_inner(agent_id, agent_pool).await;
+        self.execute_agent_inner(agent_id, agent_pool, None).await;
+    }
+
+    /// Execute agent with tool access.
+    pub async fn execute_agent_with_tools(
+        &self,
+        agent_id: AgentId,
+        agent_pool: &Arc<RwLock<AgentPool>>,
+        tool_server: crate::tools::ToolServerHandle,
+    ) {
+        self.execute_agent_inner(agent_id, agent_pool, Some(tool_server)).await;
+    }
+
+    /// Map a tool name to a bit position for the tool bitmap.
+    fn tool_bit(name: &str) -> u64 {
+        match name {
+            "read_file" => 1 << 0,
+            "write_file" => 1 << 1,
+            "sh" => 1 << 2,
+            "list_dir" => 1 << 3,
+            "grep" => 1 << 4,
+            "find_files" => 1 << 5,
+            "move_file" => 1 << 6,
+            "copy_file" => 1 << 7,
+            "delete_file" => 1 << 8,
+            "append_file" => 1 << 9,
+            "patch_file" => 1 << 10,
+            "glob" => 1 << 11,
+            "spawn_agent" => 1 << 12,
+            "read_memo" => 1 << 13,
+            "write_memo" => 1 << 14,
+            "delete_memo" => 1 << 15,
+            "list_memos" => 1 << 16,
+            _ => 0,
+        }
     }
 
     /// Execute a single leaf agent: LLM call, store result, record experience.
     ///
-    /// Children are not spawned from text output; spawning is done via the
-    /// `spawn_agent` tool in the TUI chat stream. This is always a leaf agent.
-    async fn execute_agent_inner(&self, agent_id: AgentId, agent_pool: &Arc<RwLock<AgentPool>>) {
-        let (goal, config) = {
+    /// If `tool_server` is provided, the agent can call tools.
+    async fn execute_agent_inner(
+        &self,
+        agent_id: AgentId,
+        agent_pool: &Arc<RwLock<AgentPool>>,
+        tool_server: Option<crate::tools::ToolServerHandle>,
+    ) {
+        let (goal, role, config) = {
             let pool = agent_pool.read().await;
             let agent = match pool.get_agent(&agent_id) {
                 Some(a) => a.clone(),
                 None => return,
             };
-            (agent.goal, agent.config.clone())
+            (agent.goal, agent.role, agent.config.clone())
         };
 
         let provider = match &self.provider {
@@ -849,37 +912,74 @@ impl AgentRuntime {
             }
         }
 
+        let role_system_prompt = self
+            .role_template_store
+            .get_by_role(&role)
+            .map(|t| t.system_prompt)
+            .unwrap_or_else(|| format!("You are a {}. Execute the given goal.", role));
         let system_prompt = format!(
             "{}\n\nYour goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.",
-            config.system_prompt, goal
+            role_system_prompt, goal
         );
 
-        let response = match provider.chat(&config.model_id, &system_prompt, &goal).await {
-            Ok(r) => r,
-            Err(e) => {
-                let mut pool = agent_pool.write().await;
-                if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                    agent.status = AgentStatus::Failed;
-                    agent.result = Some(format!("LLM error: {}", e));
-                    pool.release_budget_guard(&agent_id);
-                    pool.notify_completed(&agent_id);
+        let (response, tool_bitmap) = if let Some(handle) = &tool_server {
+            let mut text = String::new();
+            let mut tools_used: u64 = 0;
+            let stream = match provider
+                .chat_with_tools_stream_mcp(&config.model_id, &system_prompt, &goal, &[], handle)
+                .await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    let mut pool = agent_pool.write().await;
+                    if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                        agent.status = AgentStatus::Failed;
+                        agent.result = Some(format!("LLM error: {}", e));
+                        pool.release_budget_guard(&agent_id);
+                        pool.notify_completed(&agent_id);
+                    }
+                    return;
                 }
-                return;
+            };
+            use futures::StreamExt;
+            futures::pin_mut!(stream);
+            while let Some(event) = stream.next().await {
+                match event {
+                    crate::llm::ToolEvent::Text(t) => text.push_str(&t),
+                    crate::llm::ToolEvent::ToolCall { name, .. } => {
+                        tools_used |= Self::tool_bit(&name);
+                    }
+                    crate::llm::ToolEvent::Done => break,
+                }
+            }
+            (text, tools_used)
+        } else {
+            match provider.chat(&config.model_id, &system_prompt, &goal).await {
+                Ok(r) => (r, 0),
+                Err(e) => {
+                    let mut pool = agent_pool.write().await;
+                    if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                        agent.status = AgentStatus::Failed;
+                        agent.result = Some(format!("LLM error: {}", e));
+                        pool.release_budget_guard(&agent_id);
+                        pool.notify_completed(&agent_id);
+                    }
+                    return;
+                }
             }
         };
 
         // Leaf agent — response is the result
-        let (role_template_id, allowed_tools) = {
+        let (role_template_id, recorded_tool_bitmap) = {
             let mut pool = agent_pool.write().await;
             let role_tpl_id = pool.get_agent(&agent_id).and_then(|a| a.role_template_id);
-            let tools = pool.get_agent(&agent_id).map(|a| a.config.allowed_tools).unwrap_or(0);
             if let Some(agent) = pool.get_agent_mut(&agent_id) {
                 agent.result = Some(response);
                 agent.status = AgentStatus::Completed;
                 pool.release_budget_guard(&agent_id);
                 pool.notify_completed(&agent_id);
             }
-            (role_tpl_id, tools)
+            (role_tpl_id, tool_bitmap)
         };
 
         // Record experience entry (feedback loop).
@@ -887,7 +987,7 @@ impl AgentRuntime {
             self.pipeline.record_experience(ExperienceEntry {
                 embedding: emb,
                 applicability_vector: [0.0f32; 128],
-                tool_bitmap: allowed_tools,
+                tool_bitmap: recorded_tool_bitmap,
                 role_template_id,
                 weight: 0.8,
                 domain_version: 0,

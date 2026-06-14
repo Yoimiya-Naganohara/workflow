@@ -7,6 +7,7 @@ use ratatui::{
     text::Span,
     widgets::{Paragraph, Row, Table, TableState},
 };
+use std::sync::OnceLock;
 
 use crate::models::filter_providers;
 use crate::tui::commands::{COMMANDS, resolve_dynamic_items};
@@ -50,6 +51,17 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
                 .len();
             ((count.min(8) as u16) + 1).min(10)
         }
+        PopupMode::FilePicker { query: _ } => {
+            let files = get_project_files();
+            let query = file_picker_query(&state.ui.input);
+            let count = if query.is_empty() {
+                files.len()
+            } else {
+                let q = query.to_lowercase();
+                files.iter().filter(|f| f.to_lowercase().contains(&q)).count()
+            };
+            (count.min(8) as u16 + 2).min(10)
+        }
     }
 }
 
@@ -62,6 +74,7 @@ pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
         PopupMode::Providers => render_provider_popup(f, area, state),
         PopupMode::KeyInput => render_key_popup(f, area, state),
         PopupMode::ModelPicker => render_model_popup(f, area, state),
+        PopupMode::FilePicker { .. } => render_file_popup(f, area, state),
     }
 }
 
@@ -79,7 +92,7 @@ fn resolve_subcommand_items_owned(parent: &str, items: &[(String, String)], stat
 fn filter_text_for_subcommand<'a>(input: &'a str, parent: &str) -> &'a str {
     if input.starts_with(parent) {
         let after = &input[parent.len()..];
-        if after.starts_with(' ') { &after[1..] } else { "" }
+        if after.starts_with(' ') { &after[1..] } else { after }
     } else {
         input
     }
@@ -194,10 +207,8 @@ fn render_subcommand_popup(f: &mut Frame, area: Rect, state: &AppState, parent: 
 
 fn render_provider_popup(f: &mut Frame, area: Rect, state: &AppState) {
     let filtered = filter_providers(state.core.models.providers(), &state.ui.input);
-    let show_custom = state.ui.input.is_empty()
-        || state.ui.input.to_lowercase().contains("custom")
-        || state.ui.input.to_lowercase().contains("add");
-    let total_items = filtered.len() + if show_custom { 1 } else { 0 };
+    // Always show "Add Custom Provider" row at the bottom regardless of filter.
+    let total_items = filtered.len() + 1;
 
     if total_items == 0 {
         let block = style::panel("Providers");
@@ -238,14 +249,12 @@ fn render_provider_popup(f: &mut Frame, area: Rect, state: &AppState) {
         })
         .collect();
 
-    if show_custom {
-        rows.push(Row::new(vec![
-            Span::raw(""),
-            Span::styled("+ Add Custom Provider", Style::default().fg(style::ACTIVE)),
-            Span::raw(""),
-            Span::raw(""),
-        ]));
-    }
+    rows.push(Row::new(vec![
+        Span::raw(""),
+        Span::styled("+ Add Custom Provider", Style::default().fg(style::ACTIVE)),
+        Span::raw(""),
+        Span::raw(""),
+    ]));
 
     let mut table_state = TableState::default();
     table_state.select(Some(state.popup_selected.min(total_items.saturating_sub(1))));
@@ -379,4 +388,144 @@ fn render_model_popup(f: &mut Frame, area: Rect, state: &AppState) {
         inner,
         &mut table_state,
     );
+}
+
+// ── File picker popup ──
+
+fn render_file_popup(f: &mut Frame, area: Rect, state: &AppState) {
+    let files = get_project_files();
+    let query = file_picker_query(&state.ui.input);
+    let q = query.to_lowercase();
+    let filtered: Vec<&String> = if q.is_empty() {
+        files.iter().collect()
+    } else {
+        files.iter().filter(|f| f.to_lowercase().contains(&q)).collect()
+    };
+
+    if filtered.is_empty() {
+        let block = style::panel("Files");
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        f.render_widget(Paragraph::new("No matching files.").style(style::hint_style()), inner);
+        return;
+    }
+
+    let max_path_len = filtered.iter().map(|f| f.len()).max().unwrap_or(20);
+    let rows: Vec<Row> = filtered
+        .iter()
+        .map(|path| {
+            // Show file icon based on extension
+            let icon = file_icon(path);
+            Row::new(vec![
+                Span::styled(icon, Style::default().fg(style::TEXT_MUTED)),
+                Span::styled(path.as_str(), style::value_style()),
+            ])
+        })
+        .collect();
+
+    let mut table_state = TableState::default();
+    let sel = state.popup_selected.min(filtered.len().saturating_sub(1));
+    table_state.select(Some(sel));
+
+    let block = style::panel("Files  (type to filter)");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    f.render_stateful_widget(
+        Table::new(
+            rows,
+            [
+                ratatui::layout::Constraint::Length(2),
+                ratatui::layout::Constraint::Length(max_path_len as u16 + 2),
+            ],
+        )
+        .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
+        inner,
+        &mut table_state,
+    );
+}
+
+/// Return a simple file icon based on file extension.
+fn file_icon(path: &str) -> &'static str {
+    if path.ends_with(".rs") {
+        "\u{1f99b}" // 🦀 rust
+    } else if path.ends_with(".md") || path.ends_with(".txt") {
+        "\u{1f4c4}" // 📄 document
+    } else if path.ends_with(".toml") || path.ends_with(".json") || path.ends_with(".yaml") || path.ends_with(".yml") {
+        "\u{2699}" // ⚙ config
+    } else if path.ends_with(".html") || path.ends_with(".css") || path.ends_with(".js") || path.ends_with(".ts") {
+        "\u{1f310}" // 🌐 web
+    } else if path.ends_with(".py") {
+        "\u{1f40d}" // 🐍 python
+    } else {
+        "\u{1f4c1}" // 📁 file
+    }
+}
+
+/// Get the query text after the last `@` in the input.
+pub(crate) fn file_picker_query(input: &str) -> &str {
+    if let Some(pos) = input.rfind('@') {
+        &input[pos + 1..]
+    } else {
+        ""
+    }
+}
+
+/// Scan the project directory for files, with caching.
+static FILE_CACHE: OnceLock<Vec<String>> = OnceLock::new();
+
+pub(crate) fn get_project_files_cached() -> &'static Vec<String> {
+    get_project_files()
+}
+
+fn get_project_files() -> &'static Vec<String> {
+    FILE_CACHE.get_or_init(|| {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        if cwd.as_os_str().is_empty() {
+            return Vec::new();
+        }
+
+        // Use `git ls-files` to respect .gitignore and avoid hardcoded skip lists.
+        // This includes both tracked and untracked (non-ignored) files.
+        let mut files: Vec<String> = match std::process::Command::new("git")
+            .args(["ls-files", "--cached", "--others", "--exclude-standard"])
+            .current_dir(&cwd)
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                stdout.lines().map(|s| s.to_string()).collect()
+            }
+            _ => {
+                // Fallback: walk directory when git is not available
+                // with minimal skips for performance
+                let mut f = Vec::new();
+                let skip_dirs: &[&str] = &[".git", "target", "node_modules"];
+                let walker = walkdir::WalkDir::new(&cwd).into_iter().filter_entry(|e| {
+                    if e.file_type().is_dir() {
+                        let name = e.file_name().to_string_lossy();
+                        !skip_dirs.contains(&name.as_ref())
+                    } else {
+                        true
+                    }
+                });
+                for entry in walker.flatten() {
+                    if !entry.file_type().is_file() {
+                        continue;
+                    }
+                    if let Ok(rel) = entry.path().strip_prefix(&cwd) {
+                        f.push(rel.display().to_string());
+                    }
+                }
+                f
+            }
+        };
+
+        files.sort_by(|a: &String, b: &String| {
+            let a_is_src = a.starts_with("src") || a.starts_with("workflow/src");
+            let b_is_src = b.starts_with("src") || b.starts_with("workflow/src");
+            a_is_src.cmp(&b_is_src).reverse().then(a.cmp(b))
+        });
+        files
+    })
 }

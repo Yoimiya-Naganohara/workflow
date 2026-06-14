@@ -137,6 +137,11 @@ pub trait ExperienceRetrieval: Send + Sync {
     fn add_experience(&mut self, entry: ExperienceEntry);
     fn experience_count(&self) -> usize;
 
+    /// Clear all experiences (no-op for in-memory retrievers).
+    fn clear(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// Flush persistent storage to disk (no-op for in-memory retrievers).
     fn flush(&mut self) -> anyhow::Result<()> {
         Ok(())

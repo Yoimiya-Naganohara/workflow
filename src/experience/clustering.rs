@@ -61,14 +61,22 @@ impl Cluster {
     /// without storing all data points.
     pub fn update(&mut self, entry: &ExperienceEntry) {
         self.count += 1;
+        // Use a minimum epsilon weight to ensure numerical stability.
+        // When all entries have weight 0, the centroid won't update at all,
+        // giving a misleading cluster with zero variance.
+        let effective_weight = if entry.weight <= 0.0 {
+            f32::MIN_POSITIVE
+        } else {
+            entry.weight
+        };
         let old_weight = self.sum_weights;
-        let new_weight = old_weight + entry.weight as f64;
+        let new_weight = old_weight + effective_weight as f64;
         self.sum_weights = new_weight;
 
         // Weighted Welford update for the centroid.
         // Guard against division by zero when all weights are 0.
         if new_weight > 0.0_f64 {
-            let weight_ratio = entry.weight as f64 / new_weight;
+            let weight_ratio = effective_weight as f64 / new_weight;
             for i in 0..EMBEDDING_DIM {
                 let delta = entry.embedding[i] as f64 - self.centroid[i] as f64;
                 self.centroid[i] += (delta * weight_ratio) as f32;
@@ -77,7 +85,7 @@ impl Cluster {
                 // where delta = x - mean_old, delta2 = x - mean_new.
                 // This simplifies to w_old * w_new / (w_old + w_new) * delta^2.
                 let delta2 = entry.embedding[i] as f64 - self.centroid[i] as f64;
-                self.m2 += entry.weight as f64 * delta * delta2;
+                self.m2 += effective_weight as f64 * delta * delta2;
             }
         }
 

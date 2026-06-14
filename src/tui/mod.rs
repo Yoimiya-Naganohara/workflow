@@ -31,7 +31,7 @@ pub struct Tui {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     state: Arc<RwLock<AppState>>,
     chat_lines_cache: Vec<Line<'static>>,
-    chat_cache_key: (usize, usize, bool, usize, Option<u8>),
+    chat_cache_key: (usize, usize, bool, usize, Option<u8>, bool, usize),
     app_event_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::effect::AppEvent>,
     app_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::tui::effect::AppEvent>,
 }
@@ -53,7 +53,7 @@ impl Tui {
             terminal,
             state,
             chat_lines_cache: Vec::new(),
-            chat_cache_key: (0, 0, false, 0, None),
+            chat_cache_key: (0, 0, false, 0, None, true, 0),
             app_event_tx,
             app_event_rx,
         })
@@ -124,7 +124,14 @@ impl Tui {
                 Some(app_event) = self.app_event_rx.recv() => {
                     let mut state = self.state.write().await;
                     state.handle_event(app_event);
+                    let effects = std::mem::take(&mut state.effects);
                     drop(state);
+                    for effect in effects {
+                        let tx = self.app_event_tx.clone();
+                        tokio::spawn(async move {
+                            crate::tui::effect::execute_effect(effect, &tx).await;
+                        });
+                    }
                 }
 
                 _ = interval.tick() => {}
