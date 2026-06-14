@@ -920,8 +920,10 @@ impl AgentRuntime {
             .map(|t| t.system_prompt)
             .unwrap_or_else(|| format!("You are a {}. Execute the given goal.", role));
         let system_prompt = format!(
-            "{}\n\nYour goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.",
-            role_system_prompt, goal
+            "{}\n\nYour goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\n{}",
+            role_system_prompt,
+            goal,
+            crate::core::types::MEMO_INSTRUCTIONS
         );
 
         let (response, tool_bitmap) = if let Some(handle) = &tool_server {

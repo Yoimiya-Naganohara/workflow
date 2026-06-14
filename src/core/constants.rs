@@ -72,6 +72,9 @@ pub const MAX_CHAIN_LENGTH: usize = 20;
 /// Default max tool-calling turns for MCP chat (30 = safe upper bound).
 pub const DEFAULT_MAX_TOOL_TURNS: usize = 30;
 
+/// Memo usage instructions appended to every role's system prompt.
+pub const MEMO_INSTRUCTIONS: &str = "\n\n## Memo System\n\nYou have access to write_memo, read_memo, list_memos, and delete_memo tools.\n\nUse memos to: \n- Record intermediate findings during multi-step tasks\n- Save decisions and their rationale for future reference\n- Share context with other agents of the same role (memos are role-scoped)\n- Track progress across conversation turns\n\nWhen to write: After completing a significant step, discovering an important detail, or making a decision.\nWhen to read: At the start of a task, check if relevant context already exists.\nUse namespaced keys like \"task/findings\", \"decision/approach\", \"summary/progress\".";
+
 #[cfg(test)]
 mod tests {
     use super::*;
