@@ -9,6 +9,11 @@ pub use types::*;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use std::time::Duration;
+
+// Default timeout/retry configuration for LLM requests.
+const DEFAULT_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_MAX_RETRIES: u32 = 3;
 
 // Re-export ProviderProtocol at the crate level for convenience.
 pub use types::ProviderProtocol;
@@ -48,7 +53,57 @@ pub enum LlmProvider {
     Copilot(copilot::Client),
 }
 impl LlmProvider {
+    /// Classify an error as retryable (transient) vs permanent.
+    fn is_retryable(err: &anyhow::Error) -> bool {
+        // Try to extract a reqwest error — this is the most common source
+        // of network errors from rig's HTTP-based providers.
+        if let Some(req_err) = err.downcast_ref::<reqwest::Error>() {
+            // Timeouts, DNS failures, connection resets — always retryable
+            if req_err.is_timeout() || req_err.is_connect() || req_err.is_request() {
+                return true;
+            }
+            // Status-based classification
+            if let Some(status) = req_err.status() {
+                let code = status.as_u16();
+                // 5xx (server errors) + 429 (rate limit) → retryable
+                if code >= 500 || code == 429 {
+                    return true;
+                }
+                // 4xx (client errors except 429) → not retryable
+                return false;
+            }
+            // No status code and not a recognized transport error → retry
+            return true;
+        }
+
+        // For non-reqwest errors (rig-native, local), fall back to string matching.
+        let msg = err.to_string().to_lowercase();
+        // Transient patterns
+        if msg.contains("timeout")
+            || msg.contains("timed out")
+            || msg.contains("temporarily unavailable")
+            || msg.contains("too many requests")
+        {
+            return true;
+        }
+        // Permanent patterns (auth, not found, invalid request)
+        if msg.contains("unauthorized")
+            || msg.contains("forbidden")
+            || msg.contains("not found")
+            || msg.contains("invalid")
+        {
+            return false;
+        }
+        // Default: retry (defense in depth)
+        true
+    }
+
+    /// Execute the API call with timeout and retry logic.
     async fn do_complete(&self, request: LlmRequest) -> Result<LlmResponse> {
+        let timeout_secs = request.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS);
+        let max_retries = request.max_retries.unwrap_or(DEFAULT_MAX_RETRIES);
+        let timeout = Duration::from_secs(timeout_secs);
+
         let system_prompt = request
             .messages
             .first()
@@ -74,18 +129,60 @@ impl LlmProvider {
             }};
         }
 
-        let (content, tokens_used): (String, u32) = match self {
-            Self::OpenAi(c) => complete_ext!(c),
-            Self::Anthropic(c) => complete_ext!(c),
-            Self::Cohere(c) => complete_ext!(c),
-            Self::Gemini(c) => complete_ext!(c),
-            Self::Mistral(c) => complete_ext!(c),
-            Self::Ollama(c) => complete_ext!(c),
-            Self::Llamafile(c) => complete_ext!(c),
-            Self::Azure(c) => complete_ext!(c),
-            Self::Copilot(c) => complete_ext!(c),
-        };
-        Ok(LlmResponse { content, tokens_used })
+        let mut last_error = None;
+        for attempt in 0..=max_retries {
+            let result = tokio::time::timeout(timeout, async {
+                let (content, tokens_used): (String, u32) = match self {
+                    Self::OpenAi(c) => complete_ext!(c),
+                    Self::Anthropic(c) => complete_ext!(c),
+                    Self::Cohere(c) => complete_ext!(c),
+                    Self::Gemini(c) => complete_ext!(c),
+                    Self::Mistral(c) => complete_ext!(c),
+                    Self::Ollama(c) => complete_ext!(c),
+                    Self::Llamafile(c) => complete_ext!(c),
+                    Self::Azure(c) => complete_ext!(c),
+                    Self::Copilot(c) => complete_ext!(c),
+                };
+                Ok(LlmResponse { content, tokens_used })
+            })
+            .await;
+
+            match result {
+                Ok(Ok(response)) => return Ok(response),
+                Ok(Err(e)) => {
+                    if !Self::is_retryable(&e) || attempt >= max_retries {
+                        return Err(e);
+                    }
+                    last_error = Some(e);
+                }
+                Err(_elapsed) => {
+                    // Timeout elapsed
+                    let timeout_err = anyhow::anyhow!(
+                        "LLM request timed out after {}s (attempt {}/{})",
+                        timeout_secs,
+                        attempt + 1,
+                        max_retries + 1
+                    );
+                    if attempt >= max_retries {
+                        return Err(timeout_err);
+                    }
+                    last_error = Some(timeout_err);
+                }
+            }
+
+            // Exponential backoff: 1s, 2s, 4s, ...
+            let backoff = Duration::from_secs(1 << attempt);
+            tracing::warn!(
+                "LLM request failed (attempt {}/{}), retrying in {}s: {}",
+                attempt + 1,
+                max_retries + 1,
+                backoff.as_secs(),
+                last_error.as_ref().unwrap()
+            );
+            tokio::time::sleep(backoff).await;
+        }
+
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("LLM request failed after all retries")))
     }
 
     pub async fn complete(&self, request: LlmRequest) -> Result<LlmResponse> {
@@ -279,6 +376,8 @@ mod tests {
             }],
             temperature: 0.7,
             max_tokens: 1000,
+            timeout_secs: None,
+            max_retries: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("gpt-4"));

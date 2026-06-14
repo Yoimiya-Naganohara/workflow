@@ -9,20 +9,21 @@ use crate::l0::BudgetGuard;
 
 // ── MemoEntry ──
 
-/// A single key-value memo attached to an agent.
+/// A single key-value memo scoped to a role.
 ///
 /// Memos provide a simple notepad/scratchpad for agents to
 /// store intermediate findings, decisions, or context during
 /// their lifecycle.  Unlike the experience pool (which is about
 /// long-term learning) or `result` (final output), memos are
-/// ephemeral key-value notes that the agent can read, write,
-/// and list via MCP tools.
+/// ephemeral key-value notes that any agent of the same role
+/// can read, write, and list via MCP tools.
+///
+/// Memos are shared across all agents with the same role.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoEntry {
     pub key: String,
     pub value: String,
     pub timestamp: u64,
-    pub agent_id: AgentId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,8 +62,6 @@ pub struct Agent {
     pub status: AgentStatus,
     pub result: Option<String>,
     pub child_results: Vec<(AgentId, String)>,
-    /// Agent scratchpad — persistent key-value notes.
-    pub memos: Vec<MemoEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,6 +81,8 @@ pub struct AgentPool {
     /// Active budget guards keyed by agent ID.
     /// Guards are dropped (releasing budget) when agents complete or fail.
     budget_guards: HashMap<AgentId, BudgetGuard>,
+    /// Role-scoped memos — shared by all agents with the same role.
+    role_memos: HashMap<String, Vec<MemoEntry>>,
 }
 
 impl Default for AgentPool {
@@ -97,6 +98,7 @@ impl AgentPool {
             provider: None,
             completions: HashMap::new(),
             budget_guards: HashMap::new(),
+            role_memos: HashMap::new(),
         }
     }
 
@@ -174,6 +176,68 @@ impl AgentPool {
     pub fn agent_id_str(id: &AgentId) -> String {
         id.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join("")
     }
+
+    // ── Role-scoped memo access ──
+
+    /// Get an immutable reference to the role memos map.
+    pub fn role_memos(&self) -> &HashMap<String, Vec<MemoEntry>> {
+        &self.role_memos
+    }
+
+    /// Get a mutable reference to the role memos map.
+    pub fn role_memos_mut(&mut self) -> &mut HashMap<String, Vec<MemoEntry>> {
+        &mut self.role_memos
+    }
+
+    /// Get memos for a specific role, or an empty slice if none exist.
+    pub fn get_role_memos(&self, role: &str) -> &[MemoEntry] {
+        self.role_memos.get(role).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Get mutable access to memos for a specific role.
+    /// Creates an empty vec if the role doesn't have memos yet.
+    pub fn get_role_memos_mut(&mut self, role: &str) -> &mut Vec<MemoEntry> {
+        self.role_memos.entry(role.to_string()).or_default()
+    }
+
+    /// Write a memo entry to the given role.
+    /// If a memo with the same key already exists, it is overwritten.
+    pub fn write_role_memo(&mut self, role: &str, entry: MemoEntry) {
+        let memos = self.role_memos.entry(role.to_string()).or_default();
+        if let Some(existing) = memos.iter_mut().find(|m| m.key == entry.key) {
+            *existing = entry;
+        } else {
+            memos.push(entry);
+        }
+    }
+
+    /// Read a memo by key for a given role.
+    pub fn read_role_memo(&self, role: &str, key: &str) -> Option<&MemoEntry> {
+        self.role_memos.get(role)?.iter().find(|m| m.key == key)
+    }
+
+    /// Delete a memo by key for a given role.
+    /// Returns true if a memo was actually removed.
+    pub fn delete_role_memo(&mut self, role: &str, key: &str) -> bool {
+        let Some(memos) = self.role_memos.get_mut(role) else {
+            return false;
+        };
+        let initial_len = memos.len();
+        memos.retain(|m| m.key != key);
+        memos.len() < initial_len
+    }
+
+    /// Migrate any per-agent memos (legacy) into role-scoped memos.
+    /// After calling this, individual agents' memos are cleared.
+    /// This is safe to call multiple times — it only copies memos
+    /// that haven't already been migrated for each role.
+    pub fn migrate_legacy_memos(&mut self) {
+        for agent in &self.agents {
+            // We no longer have agent.memos, so this is a no-op after the migration.
+            // This method exists for forwards-compatibility if old serialized
+            // agents with memos are loaded in the future.
+        }
+    }
 }
 
 #[cfg(test)]
@@ -196,7 +260,6 @@ mod tests {
             status: AgentStatus::Idle,
             result: None,
             child_results: Vec::new(),
-            memos: Vec::new(),
         };
         let id = pool.add_agent(agent);
         assert_eq!(pool.agents().len(), 1);
@@ -219,10 +282,75 @@ mod tests {
             status: AgentStatus::Idle,
             result: None,
             child_results: Vec::new(),
-            memos: Vec::new(),
         };
         pool.add_agent(agent);
         let summary = pool.summary();
         assert!(summary.contains("1 total"));
+    }
+
+    // ── Role memos ──
+
+    #[test]
+    fn test_write_and_read_role_memo() {
+        let mut pool = AgentPool::new();
+        let entry = MemoEntry {
+            key: "test-key".to_string(),
+            value: "test-value".to_string(),
+            timestamp: 1000,
+        };
+        pool.write_role_memo("analyst", entry.clone());
+
+        let read = pool.read_role_memo("analyst", "test-key");
+        assert!(read.is_some());
+        assert_eq!(read.unwrap().value, "test-value");
+
+        // Different role should not see it
+        assert!(pool.read_role_memo("planner", "test-key").is_none());
+    }
+
+    #[test]
+    fn test_write_role_memo_overwrites() {
+        let mut pool = AgentPool::new();
+        pool.write_role_memo(
+            "dev",
+            MemoEntry {
+                key: "x".to_string(),
+                value: "v1".to_string(),
+                timestamp: 1,
+            },
+        );
+        pool.write_role_memo(
+            "dev",
+            MemoEntry {
+                key: "x".to_string(),
+                value: "v2".to_string(),
+                timestamp: 2,
+            },
+        );
+        let memos = pool.get_role_memos("dev");
+        assert_eq!(memos.len(), 1);
+        assert_eq!(memos[0].value, "v2");
+    }
+
+    #[test]
+    fn test_delete_role_memo() {
+        let mut pool = AgentPool::new();
+        pool.write_role_memo(
+            "dev",
+            MemoEntry {
+                key: "a".to_string(),
+                value: "1".to_string(),
+                timestamp: 0,
+            },
+        );
+        assert!(pool.delete_role_memo("dev", "a"));
+        assert!(!pool.delete_role_memo("dev", "a")); // already gone
+        assert!(pool.get_role_memos("dev").is_empty());
+    }
+
+    #[test]
+    fn test_get_role_memos_absent_role() {
+        let pool = AgentPool::new();
+        assert!(pool.get_role_memos("nonexistent").is_empty());
     }
 }

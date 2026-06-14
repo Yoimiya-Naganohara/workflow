@@ -105,6 +105,12 @@ pub struct LlmRequest {
     pub messages: Vec<Message>,
     pub temperature: f64,
     pub max_tokens: u64,
+    /// Request timeout in seconds (default: 60).
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+    /// Max retries on transient errors (default: 3).
+    #[serde(default)]
+    pub max_retries: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
