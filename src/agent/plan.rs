@@ -450,6 +450,7 @@ impl Plan {
                     result: None,
                     child_results: Vec::new(),
                     context: Vec::new(),
+                    last_active_at: crate::agent::now_secs(),
                 };
                 let agent_id = agent.id;
                 pool.add_agent(agent);

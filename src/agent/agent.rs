@@ -2,7 +2,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
+
+pub fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
 
 use crate::core::types::AgentId;
 use crate::l0::BudgetGuard;
@@ -66,6 +74,8 @@ pub struct Agent {
     /// Conversation context — message history scoped to this agent.
     /// Appended after each interaction and used as the base for future LLM calls.
     pub context: Vec<Message>,
+    /// Unix epoch seconds of last activity (used for TTL eviction).
+    pub last_active_at: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -87,6 +97,8 @@ pub struct AgentPool {
     budget_guards: HashMap<AgentId, BudgetGuard>,
     /// Role-scoped memos — shared by all agents with the same role.
     role_memos: HashMap<String, Vec<MemoEntry>>,
+    /// Max idle TTL for completed/failed agents (seconds). Default: 3600 (1h).
+    pub ttl_secs: u64,
 }
 
 impl Default for AgentPool {
@@ -103,6 +115,7 @@ impl AgentPool {
             completions: HashMap::new(),
             budget_guards: HashMap::new(),
             role_memos: HashMap::new(),
+            ttl_secs: 3600,
         }
     }
 
@@ -237,10 +250,46 @@ impl AgentPool {
     /// that haven't already been migrated for each role.
     pub fn migrate_legacy_memos(&mut self) {
         for _agent in &self.agents {
-            // We no longer have agent.memos, so this is a no-op after the migration.
-            // This method exists for forwards-compatibility if old serialized
-            // agents with memos are loaded in the future.
+            // No-op after migration
         }
+    }
+
+    /// Mark an agent as recently active (updates last_active_at).
+    pub fn mark_active(&mut self, id: &AgentId) {
+        if let Some(agent) = self.get_agent_mut(id) {
+            agent.last_active_at = now_secs();
+        }
+    }
+
+    /// Evict completed/failed agents whose idle time exceeds `ttl_secs`.
+    /// Never evicts the responsible agent (protected_id) or the last remaining agent.
+    /// Returns the number of evicted agents.
+    pub fn evict_stale(&mut self, protected_id: Option<&AgentId>) -> usize {
+        if self.agents.len() <= 1 {
+            return 0;
+        }
+        let now = now_secs();
+        let ttl = self.ttl_secs;
+        let before = self.agents.len();
+        let protect = protected_id.copied();
+        self.agents.retain(|a| {
+            // Never evict the protected (currently active) agent
+            if Some(&a.id) == protect.as_ref() {
+                return true;
+            }
+            // Only evict Completed or Failed agents past TTL
+            match a.status {
+                crate::agent::AgentStatus::Completed | crate::agent::AgentStatus::Failed => {
+                    now.saturating_sub(a.last_active_at) < ttl
+                }
+                // Idle/Planning/etc. agents are kept (reusable)
+                _ => true,
+            }
+        });
+        // Retain budget guards only for remaining agents
+        let remaining: Vec<AgentId> = self.agents.iter().map(|a| a.id).collect();
+        self.budget_guards.retain(|id, _| remaining.contains(id));
+        before - self.agents.len()
     }
 }
 
@@ -265,6 +314,7 @@ mod tests {
             result: None,
             child_results: Vec::new(),
             context: Vec::new(),
+            last_active_at: 0,
         };
         let id = pool.add_agent(agent);
         assert_eq!(pool.agents().len(), 1);
@@ -288,6 +338,7 @@ mod tests {
             result: None,
             child_results: Vec::new(),
             context: Vec::new(),
+            last_active_at: 0,
         };
         pool.add_agent(agent);
         let summary = pool.summary();

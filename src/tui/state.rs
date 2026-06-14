@@ -287,6 +287,10 @@ impl AppState {
                             if agent.context.len() > 200 {
                                 agent.context.drain(0..agent.context.len() - 200);
                             }
+                            agent.last_active_at = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
                         }
                     }
                 }

@@ -71,10 +71,27 @@ async fn run_tui() -> Result<()> {
         }
     });
 
+    // Background task: periodic agent pool eviction (every 5 minutes)
+    let evict_state = state.clone();
+    let evict_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            let s = evict_state.read().await;
+            if let Ok(mut pool) = s.core.agent_pool.try_write() {
+                let count = pool.evict_stale(s.core.responsible_agent_id.as_ref());
+                if count > 0 {
+                    tracing::info!("Evicted {} stale agent(s)", count);
+                }
+            }
+        }
+    });
+
     tui.run().await?;
 
-    // Stop the background flush task
+    // Stop background tasks
     flush_handle.abort();
+    evict_handle.abort();
 
     // Flush experience pool on shutdown
     {

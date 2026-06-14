@@ -555,6 +555,7 @@ impl AgentRuntime {
             result: None,
             child_results: Vec::new(),
             context: Vec::new(),
+            last_active_at: crate::agent::now_secs(),
         };
         agent_pool.add_agent(agent);
         agent_id
@@ -630,6 +631,7 @@ impl AgentRuntime {
                     result: None,
                     child_results: Vec::new(),
                     context: Vec::new(),
+                    last_active_at: crate::agent::now_secs(),
                 };
                 agent_pool.add_agent(agent);
                 Ok(agent_id)
@@ -717,6 +719,7 @@ impl AgentRuntime {
                     result: None,
                     child_results: Vec::new(),
                     context: Vec::new(),
+                    last_active_at: crate::agent::now_secs(),
                 };
                 agent_pool.add_agent(agent);
                 // Register plan entity

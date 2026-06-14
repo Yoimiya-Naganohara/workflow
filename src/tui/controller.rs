@@ -42,7 +42,24 @@ pub fn ensure_initial_agent_sync(core: &mut CoreState, goal_hint: &str) -> Optio
 
     let agent_id = match runtime.try_read() {
         Ok(rt) => match core.agent_pool.try_write() {
-            Ok(mut pool) => Some(rt.bootstrap_root_agent(goal, &core.default_role, &mut pool)),
+            Ok(mut pool) => {
+                // Evict stale agents before creating new ones
+                pool.evict_stale(core.responsible_agent_id.as_ref());
+
+                // Try to reuse an idle agent (same role, Idle status)
+                let existing = pool
+                    .agents()
+                    .iter()
+                    .find(|a| a.role == core.default_role && a.status == crate::agent::AgentStatus::Idle)
+                    .map(|a| a.id);
+
+                if let Some(existing_id) = existing {
+                    pool.mark_active(&existing_id);
+                    Some(existing_id)
+                } else {
+                    Some(rt.bootstrap_root_agent(goal, &core.default_role, &mut pool))
+                }
+            }
             Err(_) => return None,
         },
         Err(_) => return None,
