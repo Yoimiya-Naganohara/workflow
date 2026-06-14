@@ -682,8 +682,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             true
         }
 
-        "/memo agents" | "/memo list agents" => {
-            let msg = match_list_agent_memos(core);
+        "/memo roles" | "/memo list roles" => {
+            let msg = match_list_role_memos(core);
             core.messages.push(ChatMessage::system(msg));
             ui.input.clear();
             ui.input_cursor = 0;
@@ -857,11 +857,11 @@ pub fn get_subcommand_items(cmd: &str) -> Option<&'static [(&'static str, &'stat
             ("query", "Query experiences by text similarity"),
         ]),
         "/memo" => Some(&[
-            ("list", "List agent memos"),
+            ("list", "List role memos"),
             ("show", "Show a memo by key"),
             ("write", "Write a memo (key=value)"),
             ("delete", "Delete a memo"),
-            ("agents", "List agents with memos"),
+            ("roles", "List roles with memos"),
         ]),
         _ => None,
     }
@@ -903,7 +903,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/role", "Role templates (list/show/create/edit/delete)"),
     ("/sh", "Run a shell command"),
     ("/clear", "Clear conversation"),
-    ("/memo", "Agent memo management (list/show/write/delete)"),
+    ("/memo", "Role memo management (list/show/write/delete/roles)"),
     ("/help", "Show help"),
 ];
 
@@ -942,11 +942,12 @@ fn match_list_memos(core: &crate::tui::state::CoreState) -> String {
         Some(a) => a,
         None => return "Agent not found".to_string(),
     };
-    if agent.memos.is_empty() {
-        return "No memos for current agent (use write_memo MCP tool or /memo write)".to_string();
+    let memos = pool.get_role_memos(&agent.role);
+    if memos.is_empty() {
+        return format!("No memos for role '{}' (use write_memo MCP tool or /memo write)", agent.role);
     }
-    let mut lines = format!("Memos for {} ({}):\n", agent.name, agent.memos.len());
-    let mut sorted = agent.memos.clone();
+    let mut lines = format!("Memos for role '{}' ({}):\n", agent.role, memos.len());
+    let mut sorted = memos.to_vec();
     sorted.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     for m in &sorted {
         let preview = if m.value.len() > 80 {
@@ -981,7 +982,7 @@ fn match_show_memo(core: &crate::tui::state::CoreState, key: &str) -> String {
         Some(a) => a,
         None => return "Agent not found".to_string(),
     };
-    match agent.memos.iter().find(|m| m.key == key) {
+    match pool.read_role_memo(&agent.role, key) {
         Some(entry) => format!(
             "Memo '{}' ({} bytes, written {}):\n---\n{}\n---",
             entry.key,
@@ -989,7 +990,7 @@ fn match_show_memo(core: &crate::tui::state::CoreState, key: &str) -> String {
             format_age(entry.timestamp),
             entry.value
         ),
-        None => format!("Memo '{}' not found", key),
+        None => format!("Memo '{}' not found for role '{}'", key, agent.role),
     }
 }
 
@@ -1002,8 +1003,10 @@ fn match_write_memo(core: &mut crate::tui::state::CoreState, key: &str, value: &
         Ok(p) => p,
         Err(_) => return "Agent pool locked".to_string(),
     };
-    let agent = match pool.get_agent_mut(&agent_id) {
-        Some(a) => a,
+    // We need the role before we can write, but we need to release the
+    // agent borrow to avoid conflicts with write_role_memo.
+    let role = match pool.get_agent(&agent_id) {
+        Some(a) => a.role.clone(),
         None => return "Agent not found".to_string(),
     };
     let now = std::time::SystemTime::now()
@@ -1014,15 +1017,9 @@ fn match_write_memo(core: &mut crate::tui::state::CoreState, key: &str, value: &
         key: key.to_string(),
         value: value.to_string(),
         timestamp: now,
-        agent_id,
     };
-    if let Some(existing) = agent.memos.iter_mut().find(|m| m.key == key) {
-        *existing = entry.clone();
-        format!("Memo '{}' overwritten ({} bytes)", key, value.len())
-    } else {
-        agent.memos.push(entry);
-        format!("Memo '{}' written ({} bytes)", key, value.len())
-    }
+    pool.write_role_memo(&role, entry);
+    format!("Memo '{}' written ({} bytes) for role '{}'", key, value.len(), role)
 }
 
 fn match_delete_memo(core: &mut crate::tui::state::CoreState, key: &str) -> String {
@@ -1034,38 +1031,31 @@ fn match_delete_memo(core: &mut crate::tui::state::CoreState, key: &str) -> Stri
         Ok(p) => p,
         Err(_) => return "Agent pool locked".to_string(),
     };
-    let agent = match pool.get_agent_mut(&agent_id) {
-        Some(a) => a,
+    let role = match pool.get_agent(&agent_id) {
+        Some(a) => a.role.clone(),
         None => return "Agent not found".to_string(),
     };
-    let initial_len = agent.memos.len();
-    agent.memos.retain(|m| m.key != key);
-    if agent.memos.len() < initial_len {
-        format!("Memo '{}' deleted", key)
+    if pool.delete_role_memo(&role, key) {
+        format!("Memo '{}' deleted from role '{}'", key, role)
     } else {
-        format!("Memo '{}' not found", key)
+        format!("Memo '{}' not found for role '{}'", key, role)
     }
 }
 
-fn match_list_agent_memos(core: &crate::tui::state::CoreState) -> String {
+fn match_list_role_memos(core: &crate::tui::state::CoreState) -> String {
     let pool = match core.agent_pool.try_read() {
         Ok(p) => p,
         Err(_) => return "Agent pool locked".to_string(),
     };
-    let mut lines = vec!["Agent Memos:".to_string()];
-    for agent in pool.agents() {
-        if agent.memos.is_empty() {
-            continue;
-        }
-        let count = agent.memos.len();
-        let total_bytes: usize = agent.memos.iter().map(|m| m.value.len()).sum();
-        lines.push(format!(
-            "  {} (id: {:02x}{:02x}{:02x}{:02x}): {} memos, {} bytes",
-            agent.name, agent.id[0], agent.id[1], agent.id[2], agent.id[3], count, total_bytes
-        ));
+    let role_memos = pool.role_memos();
+    if role_memos.is_empty() {
+        return "No roles with memos found".to_string();
     }
-    if lines.len() == 1 {
-        lines.push("  No agents with memos found".to_string());
+    let mut lines = vec!["Role Memos:".to_string()];
+    for (role, memos) in role_memos.iter() {
+        let count = memos.len();
+        let total_bytes: usize = memos.iter().map(|m| m.value.len()).sum();
+        lines.push(format!("  '{}': {} memos, {} bytes", role, count, total_bytes));
     }
     lines.join("\n")
 }

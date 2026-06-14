@@ -88,10 +88,10 @@ pub struct PersistedState {
     /// Storage mode for keys (not serialized — runtime decision).
     #[serde(skip)]
     pub key_store_mode: KeyStore,
-    /// Persistent agent memos, keyed by agent ID hex string.
-    /// Loaded at startup and merged into new agents.
+    /// Persistent role-scoped memos, keyed by role name.
+    /// Shared by all agents with the same role across restarts.
     #[serde(default)]
-    pub agent_memos: HashMap<String, Vec<MemoEntry>>,
+    pub role_memos: HashMap<String, Vec<MemoEntry>>,
 }
 
 fn config_dir() -> Result<PathBuf> {
@@ -209,16 +209,16 @@ pub fn save_provider_cache(registry: &ModelRegistry) -> Result<()> {
     write_atomic(&path, &json)
 }
 
-/// Save agent memos to persistent state.
-pub fn save_agent_memos(agent_id: &str, memos: &[MemoEntry]) -> Result<()> {
+/// Save role-scoped memos to persistent state.
+pub fn save_role_memos(role: &str, memos: &[MemoEntry]) -> Result<()> {
     let mut state = load();
-    state.agent_memos.insert(agent_id.to_string(), memos.to_vec());
+    state.role_memos.insert(role.to_string(), memos.to_vec());
     save(&state)
 }
 
-/// Loads all persisted agent memos.
-pub fn load_agent_memos() -> HashMap<String, Vec<MemoEntry>> {
-    load().agent_memos
+/// Loads all persisted role-scoped memos.
+pub fn load_role_memos() -> HashMap<String, Vec<MemoEntry>> {
+    load().role_memos
 }
 
 pub fn load_provider_cache() -> Option<ModelRegistry> {

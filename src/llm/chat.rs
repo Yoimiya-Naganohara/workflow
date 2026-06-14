@@ -38,7 +38,10 @@ macro_rules! mcp_stream_arm {
             .tool_server_handle($handle.clone())
             .build();
         Ok(Self::wrap_tool_stream(
-            agent.stream_chat($msg, $history).multi_turn(20).await,
+            agent
+                .stream_chat($msg, $history)
+                .multi_turn(crate::core::types::DEFAULT_MAX_TOOL_TURNS)
+                .await,
         ))
     }};
 }

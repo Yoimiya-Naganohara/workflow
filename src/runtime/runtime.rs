@@ -628,10 +628,9 @@ impl AgentRuntime {
                     status: AgentStatus::Idle,
                     result: None,
                     child_results: Vec::new(),
-                    memos: Vec::new(),
                 };
                 agent_pool.add_agent(agent);
-                    child_results: Vec::new(),
+                Ok(agent_id)
             }
             SpawnDecision::Rejected(rejection) => Err(anyhow::anyhow!("Spawn rejected: {:?}", rejection)),
         }
@@ -715,10 +714,8 @@ impl AgentRuntime {
                     status: AgentStatus::Idle,
                     result: None,
                     child_results: Vec::new(),
-                    memos: Vec::new(),
                 };
                 agent_pool.add_agent(agent);
-                    child_results: Vec::new(),
                 // Register plan entity
                 let plan_entity = PlanEntity {
                     plan_name: format!(

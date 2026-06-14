@@ -69,6 +69,9 @@ pub const BUDGET_ANOMALY_RATIO: f64 = 0.8;
 /// Maximum responsibility chain length before flagging.
 pub const MAX_CHAIN_LENGTH: usize = 20;
 
+/// Default max tool-calling turns for MCP chat (30 = safe upper bound).
+pub const DEFAULT_MAX_TOOL_TURNS: usize = 30;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,7 +2,8 @@
 //!
 //! Agents use memos as a scratchpad/notepad to store intermediate
 //! findings, decisions, or context during their lifecycle.  Memos
-//! are per-agent key-value pairs with timestamps.
+//! are per-role key-value pairs with timestamps, shared across all
+//! agents with the same role.
 //!
 //! These tools are registered on the memos-enabled tool server so
 //! agents can manage their own memos via MCP tool calls.
@@ -80,12 +81,18 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Find the calling agent's ID and clone their data using the deps.
-fn find_agent_cloned(deps: &MemoToolDeps) -> Option<(AgentId, String, Vec<MemoEntry>)> {
+/// Find the calling agent's ID, name, and role (immutable read).
+fn find_agent_info(deps: &MemoToolDeps) -> Option<(AgentId, String, String)> {
     let agent_id = deps.responsible_agent_id()?;
     let pool = deps.agent_pool.try_read().ok()?;
     let agent = pool.get_agent(&agent_id)?;
-    Some((agent_id, agent.name.clone(), agent.memos.clone()))
+    Some((agent_id, agent.name.clone(), agent.role.clone()))
+}
+
+/// Return a cloned copy of all memos for a given role.
+fn get_role_memos_cloned(deps: &MemoToolDeps, role: &str) -> Option<Vec<MemoEntry>> {
+    let pool = deps.agent_pool.try_read().ok()?;
+    Some(pool.get_role_memos(role).to_vec())
 }
 
 // ============================================================================
@@ -100,11 +107,11 @@ pub struct WriteMemoArgs {
     pub value: String,
 }
 
-/// Write a memo entry for the calling agent.
+/// Write a memo entry for the calling agent's role.
 ///
 /// If a memo with the same key already exists, it is overwritten
-/// with a new timestamp.  Memos persist for the agent's lifetime
-/// and are saved to disk on pool flush.
+/// with a new timestamp.  Memos persist for the agent's role
+/// lifetime and are saved to disk on pool flush.
 pub struct WriteMemo {
     deps: Arc<MemoToolDeps>,
 }
@@ -120,7 +127,7 @@ impl Tool for WriteMemo {
         ToolDefinition {
             name: Self::NAME.into(),
             description: concat!(
-                "Write a key-value memo for the current agent. ",
+                "Write a key-value memo for the current agent's role. ",
                 "Memos are a scratchpad/notepad for storing intermediate findings, ",
                 "decisions, or context. If the key already exists, it is overwritten. ",
                 "Use list_memos to see all keys, read_memo to read a value, ",
@@ -164,30 +171,24 @@ impl Tool for WriteMemo {
             .map_err(|_| ToolCallError("Agent pool locked".to_string()))?;
 
         let agent = pool
-            .get_agent_mut(&agent_id)
+            .get_agent(&agent_id)
             .ok_or_else(|| ToolCallError("Agent not found".to_string()))?;
+        let role = agent.role.clone();
+        // agent borrow dropped here — now we can call write_role_memo
 
         let entry = MemoEntry {
             key: args.key.clone(),
             value: args.value.clone(),
             timestamp: now_secs(),
-            agent_id,
         };
 
-        if let Some(existing) = agent.memos.iter_mut().find(|m| m.key == args.key) {
-            *existing = entry.clone();
-        } else {
-            agent.memos.push(entry.clone());
-        }
+        pool.write_role_memo(&role, entry.clone());
 
         Ok(format!(
-            "Memo written — key: '{}', {} bytes, agent: {:02x}{:02x}{:02x}{:02x}",
+            "Memo written — key: '{}', {} bytes, role: '{}'",
             entry.key,
             entry.value.len(),
-            entry.agent_id[0],
-            entry.agent_id[1],
-            entry.agent_id[2],
-            entry.agent_id[3]
+            role,
         ))
     }
 }
@@ -241,8 +242,10 @@ impl Tool for ReadMemo {
             return Err(ToolCallError("memo key cannot be empty".to_string()));
         }
 
-        let (_, _, memos) =
-            find_agent_cloned(&self.deps).ok_or_else(|| ToolCallError("No active agent".to_string()))?;
+        let (_, _, role) = find_agent_info(&self.deps).ok_or_else(|| ToolCallError("No active agent".to_string()))?;
+
+        let memos =
+            get_role_memos_cloned(&self.deps, &role).ok_or_else(|| ToolCallError("Agent pool locked".to_string()))?;
 
         match memos.iter().find(|m| m.key == args.key) {
             Some(entry) => {
@@ -277,7 +280,7 @@ pub struct ListMemosArgs {
     pub prefix: Option<String>,
 }
 
-/// List all memo keys for the calling agent.
+/// List all memo keys for the calling agent's role.
 pub struct ListMemos {
     deps: Arc<MemoToolDeps>,
 }
@@ -293,7 +296,7 @@ impl Tool for ListMemos {
         ToolDefinition {
             name: Self::NAME.into(),
             description: concat!(
-                "List all memo keys for the current agent. ",
+                "List all memo keys for the current agent's role. ",
                 "Optionally filter by a prefix. ",
                 "Returns key, value length, and age for each memo."
             )
@@ -313,8 +316,11 @@ impl Tool for ListMemos {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let (_, agent_name, memos) =
-            find_agent_cloned(&self.deps).ok_or_else(|| ToolCallError("No active agent".to_string()))?;
+        let (_, _agent_name, role) =
+            find_agent_info(&self.deps).ok_or_else(|| ToolCallError("No active agent".to_string()))?;
+
+        let memos =
+            get_role_memos_cloned(&self.deps, &role).ok_or_else(|| ToolCallError("Agent pool locked".to_string()))?;
 
         let now = now_secs();
         let mut entries: Vec<MemoEntry> = memos.into_iter().collect();
@@ -326,10 +332,10 @@ impl Tool for ListMemos {
         entries.sort_by(|a, b| a.key.cmp(&b.key));
 
         if entries.is_empty() {
-            return Ok("No memos found".to_string());
+            return Ok(format!("No memos for role '{}'", role));
         }
 
-        let mut lines = format!("Memos for {} ({} total):\n", agent_name, entries.len());
+        let mut lines = format!("Memos for role '{}' ({} total):\n", role, entries.len());
         for entry in &entries {
             let age = now.saturating_sub(entry.timestamp);
             let age_str = if age < 60 {
@@ -422,16 +428,18 @@ impl Tool for DeleteMemo {
             .map_err(|_| ToolCallError("Agent pool locked".to_string()))?;
 
         let agent = pool
-            .get_agent_mut(&agent_id)
+            .get_agent(&agent_id)
             .ok_or_else(|| ToolCallError("Agent not found".to_string()))?;
+        let role = agent.role.clone();
+        // agent borrow dropped here
 
-        let initial_len = agent.memos.len();
-        agent.memos.retain(|m| m.key != args.key);
-
-        if agent.memos.len() < initial_len {
-            Ok(format!("Memo '{}' deleted", args.key))
+        if pool.delete_role_memo(&role, &args.key) {
+            Ok(format!("Memo '{}' deleted from role '{}'", args.key, role))
         } else {
-            Err(ToolCallError(format!("Memo key '{}' not found", args.key)))
+            Err(ToolCallError(format!(
+                "Memo key '{}' not found for role '{}'",
+                args.key, role
+            )))
         }
     }
 }
