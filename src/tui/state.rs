@@ -268,7 +268,27 @@ impl AppState {
 
                 // ── Trigger self-check reflection if enabled ──
                 if self.core.reflection.auto_reflect {
-                    self.trigger_self_check(response_index, request_id, full_response, &input, &runtime);
+                    self.trigger_self_check(response_index, request_id, full_response.clone(), &input, &runtime);
+                }
+
+                // ── Save exchange to responsible agent's context ──
+                if let Some(agent_id) = self.core.responsible_agent_id {
+                    if let Ok(mut pool) = self.core.agent_pool.try_write() {
+                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                            agent.context.push(crate::llm::types::Message {
+                                role: "user".to_string(),
+                                content: input.clone(),
+                            });
+                            agent.context.push(crate::llm::types::Message {
+                                role: "assistant".to_string(),
+                                content: full_response.clone(),
+                            });
+                            // Prevent unbounded growth: keep last 100 exchanges
+                            if agent.context.len() > 200 {
+                                agent.context.drain(0..agent.context.len() - 200);
+                            }
+                        }
+                    }
                 }
             }
             AppEvent::ChatError {

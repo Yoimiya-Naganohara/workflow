@@ -449,6 +449,7 @@ impl Plan {
                     status: AgentStatus::Planning,
                     result: None,
                     child_results: Vec::new(),
+                    context: Vec::new(),
                 };
                 let agent_id = agent.id;
                 pool.add_agent(agent);

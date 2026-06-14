@@ -175,7 +175,10 @@ fn rule_error_awareness(_input: &str, response: &str, tool_trace: &str) -> RuleV
 /// Rule 3: If user asked multiple questions, response should be proportionally long.
 fn rule_multi_question_coverage(input: &str, response: &str) -> RuleVerdict {
     let question_count = input.chars().filter(|c| *c == '?').count();
-    let numbered_items = input.lines().filter(|l| l.trim().starts_with(|c: char| c.is_ascii_digit())).count();
+    let numbered_items = input
+        .lines()
+        .filter(|l| l.trim().starts_with(|c: char| c.is_ascii_digit()))
+        .count();
     let total_questions = question_count + numbered_items;
 
     if total_questions <= 1 {

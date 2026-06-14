@@ -6,6 +6,7 @@ use tokio::sync::Notify;
 
 use crate::core::types::AgentId;
 use crate::l0::BudgetGuard;
+use crate::llm::types::Message;
 
 // ── MemoEntry ──
 
@@ -62,6 +63,9 @@ pub struct Agent {
     pub status: AgentStatus,
     pub result: Option<String>,
     pub child_results: Vec<(AgentId, String)>,
+    /// Conversation context — message history scoped to this agent.
+    /// Appended after each interaction and used as the base for future LLM calls.
+    pub context: Vec<Message>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -260,6 +264,7 @@ mod tests {
             status: AgentStatus::Idle,
             result: None,
             child_results: Vec::new(),
+            context: Vec::new(),
         };
         let id = pool.add_agent(agent);
         assert_eq!(pool.agents().len(), 1);
@@ -282,6 +287,7 @@ mod tests {
             status: AgentStatus::Idle,
             result: None,
             child_results: Vec::new(),
+            context: Vec::new(),
         };
         pool.add_agent(agent);
         let summary = pool.summary();

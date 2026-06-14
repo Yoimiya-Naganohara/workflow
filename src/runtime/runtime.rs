@@ -554,6 +554,7 @@ impl AgentRuntime {
             status: AgentStatus::Idle,
             result: None,
             child_results: Vec::new(),
+            context: Vec::new(),
         };
         agent_pool.add_agent(agent);
         agent_id
@@ -628,6 +629,7 @@ impl AgentRuntime {
                     status: AgentStatus::Idle,
                     result: None,
                     child_results: Vec::new(),
+                    context: Vec::new(),
                 };
                 agent_pool.add_agent(agent);
                 Ok(agent_id)
@@ -714,6 +716,7 @@ impl AgentRuntime {
                     status: AgentStatus::Idle,
                     result: None,
                     child_results: Vec::new(),
+                    context: Vec::new(),
                 };
                 agent_pool.add_agent(agent);
                 // Register plan entity
