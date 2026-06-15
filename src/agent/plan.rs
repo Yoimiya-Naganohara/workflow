@@ -451,6 +451,8 @@ impl Plan {
                     child_results: Vec::new(),
                     context: Vec::new(),
                     last_active_at: crate::agent::now_secs(),
+                    tool_trace: std::collections::VecDeque::new(),
+                    sandbox: None,
                 };
                 let agent_id = agent.id;
                 pool.add_agent(agent);

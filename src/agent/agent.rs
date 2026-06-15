@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,7 @@ pub fn now_secs() -> u64 {
 use crate::core::types::AgentId;
 use crate::l0::BudgetGuard;
 use crate::llm::types::Message;
+use crate::tools::sandbox::SandboxHandle;
 
 // ── MemoEntry ──
 
@@ -57,6 +58,28 @@ impl Default for AgentConfig {
     }
 }
 
+// ── Tool trace (Phase 3) ──
+
+/// Maximum number of tool call records kept per agent.
+/// After this limit, the oldest entry is dropped (ring buffer).
+pub const MAX_TOOL_TRACE: usize = 20;
+
+/// A single tool call recorded during agent execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallRecord {
+    pub name: String,
+    /// Truncated argument preview (first 80 chars).
+    pub args_preview: String,
+    pub status: ToolStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolStatus {
+    Running,
+    Success,
+    Error,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {
     pub id: AgentId,
@@ -76,6 +99,14 @@ pub struct Agent {
     pub context: Vec<Message>,
     /// Unix epoch seconds of last activity (used for TTL eviction).
     pub last_active_at: u64,
+    /// Ring buffer of tool calls made during this agent's execution.
+    /// Used by the TUI diagnostic detail popup (Phase 3).
+    /// The buffer is bounded at [`MAX_TOOL_TRACE`].
+    pub tool_trace: VecDeque<ToolCallRecord>,
+    /// Per-agent filesystem sandbox handle.
+    /// Created on spawn, cleaned up on eviction.
+    #[serde(skip)]
+    pub sandbox: Option<Arc<SandboxHandle>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -140,6 +171,12 @@ impl AgentPool {
 
     pub fn agents(&self) -> &[Agent] {
         &self.agents
+    }
+
+    /// Mutable access to the agent vector (used for batch operations
+    /// such as sandbox re-hydration).
+    pub fn agents_mut(&mut self) -> &mut Vec<Agent> {
+        &mut self.agents
     }
 
     pub fn get_completion_notify(&self, id: &AgentId) -> Option<Arc<Notify>> {
@@ -233,8 +270,22 @@ impl AgentPool {
         self.role_memos.get(role)?.iter().find(|m| m.key == key)
     }
 
-    /// Delete a memo by key for a given role.
-    /// Returns true if a memo was actually removed.
+    /// Format all memos for a role as a system-prompt injection block.
+    /// Returns None if the role has no memos.
+    pub fn format_role_memos(&self, role: &str) -> Option<String> {
+        let memos = self.role_memos.get(role)?;
+        if memos.is_empty() {
+            return None;
+        }
+        let mut buf = String::from("\n\n=== Role Memos ===");
+        for entry in memos {
+            use std::fmt::Write;
+            let _ = write!(buf, "\n  [{}]: {}", entry.key, entry.value);
+        }
+        buf.push_str("\n====");
+        Some(buf)
+    }
+
     pub fn delete_role_memo(&mut self, role: &str, key: &str) -> bool {
         let Some(memos) = self.role_memos.get_mut(role) else {
             return false;
@@ -325,6 +376,8 @@ mod tests {
             child_results: Vec::new(),
             context: Vec::new(),
             last_active_at: 0,
+            tool_trace: VecDeque::new(),
+            sandbox: None,
         };
         let id = pool.add_agent(agent);
         assert_eq!(pool.agents().len(), 1);
@@ -349,6 +402,8 @@ mod tests {
             child_results: Vec::new(),
             context: Vec::new(),
             last_active_at: 0,
+            tool_trace: VecDeque::new(),
+            sandbox: None,
         };
         pool.add_agent(agent);
         let summary = pool.summary();
