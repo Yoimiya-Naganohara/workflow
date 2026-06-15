@@ -120,6 +120,12 @@ pub struct CoreState {
     pub reflection: ReflectionConfig,
     /// Track the last chat context for retry.
     pub last_chat_request_id: u64,
+    /// Channel sender to the background [`RuntimeEventLoop`].
+    /// Tools use this to dispatch async work without blocking the LLM stream.
+    pub runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
+    /// Saved conversation context from the previous session.
+    /// Loaded on startup by `load_initial_state`, cleared on restore or new task.
+    pub saved_context: Option<Vec<crate::llm::types::Message>>,
 }
 
 /// Transient UI state — reset on restart.
@@ -162,6 +168,9 @@ pub struct UiState {
     /// Currently selected agent index within the diagnostic tree.
     /// Used for keyboard navigation and detail popup (Phase 3).
     pub selected_agent_idx: usize,
+    /// Agent IDs in display order of the diagnostic tree.
+    /// Updated atomically with cached_tree_lines when version changes.
+    pub tree_agent_ids: Vec<crate::core::types::AgentId>,
     /// When true, the input field is greyed out and keyboard input is
     /// discarded.  Set when the root agent transitions to AwaitingChildren.
     pub input_disabled: bool,
@@ -196,6 +205,10 @@ pub enum PopupMode {
     ModelPicker,
     FilePicker {
         query: String,
+    },
+    /// Detail popup for a single agent (Phase 3).
+    AgentDetail {
+        agent_id: crate::core::types::AgentId,
     },
 }
 
@@ -401,19 +414,27 @@ impl AppState {
                 args,
                 timestamp: _,
             } => {
-                // Append tool call to the streaming agent message
+                // Tool call: single-line format, args truncated.
+                // Replace internal newlines in args to keep display flat.
+                let args_flat = args.replace('\n', " ").replace('\r', "");
+                let args_flat = if args_flat.len() > 80 {
+                    format!("{}…", &args_flat[..80])
+                } else {
+                    args_flat
+                };
+                let line = format!("> {}({})", name, args_flat);
+
                 if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
                         if !msg.content.is_empty() {
                             msg.content.push('\n');
                         }
-                        msg.content.push_str(&format!("{} — {}", name, args));
+                        msg.content.push_str(&line);
                     }
                 } else {
-                    // Fallback: insert as separate message if no streaming slot found
                     self.core.messages.push(ChatMessage {
                         role: MessageRole::Decision,
-                        content: format!("{} — {}", name, args),
+                        content: line,
                         timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                         status: MessageStatus::Completed,
                     });
@@ -494,6 +515,19 @@ impl AppState {
                     runtime,
                     abort_registration: new_abort_registration,
                 });
+            }
+            AppEvent::SystemLog { content } => {
+                self.core.messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content,
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                    status: MessageStatus::Completed,
+                });
+            }
+            AppEvent::AggregationStarting { agent_id: _ } => {
+                self.core.messages.push(ChatMessage::system(
+                    "All sub-tasks completed. Synthesising final result…",
+                ));
             }
         }
     }
@@ -689,6 +723,8 @@ impl Default for CoreState {
             responsible_agent_id: None,
             reflection: ReflectionConfig::default(),
             last_chat_request_id: 0,
+            runtime_event_tx: None,
+            saved_context: None,
         }
     }
 }
@@ -724,6 +760,7 @@ impl Default for UiState {
             agent_tree_version: 0,
             cached_tree_lines: Vec::new(),
             selected_agent_idx: 0,
+            tree_agent_ids: Vec::new(),
             input_disabled: false,
         }
     }

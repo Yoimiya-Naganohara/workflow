@@ -10,7 +10,7 @@
 //! - Uses only existing `AgentPool` / `Agent` fields.
 //! - Testable without Tokio or LLM API keys.
 
-use crate::agent::{Agent, AgentPool, AgentStatus};
+use crate::agent::{Agent, AgentPool, AgentStatus, ToolStatus};
 use crate::core::types::AgentId;
 
 /// A single line in the diagnostic tree.
@@ -93,6 +93,28 @@ pub fn build_agent_tree_lines(pool: &AgentPool, root_id: &AgentId) -> Vec<TreeLi
     lines
 }
 
+/// Build a short preview of the last few tool trace entries for an agent.
+/// Returns up to 3 formatted lines (truncated for compact display).
+pub fn build_tool_trace_preview(pool: &AgentPool, agent_id: &AgentId) -> Vec<String> {
+    let Some(agent) = pool.agents().iter().find(|a| a.id == *agent_id) else {
+        return Vec::new();
+    };
+    agent
+        .tool_trace
+        .iter()
+        .rev()
+        .take(3)
+        .map(|record| {
+            let mark = match record.status {
+                ToolStatus::Running => "⏳",
+                ToolStatus::Success => "✓",
+                ToolStatus::Error => "✗",
+            };
+            format!("  {} {}({})", mark, record.name, record.args_preview)
+        })
+        .collect()
+}
+
 /// Returns `true` if the root agent has at least one child that is still
 /// active (not yet Completed or Failed).
 pub fn has_active_delegations(pool: &AgentPool, root_id: &AgentId) -> bool {
@@ -115,7 +137,7 @@ pub fn has_active_delegations(pool: &AgentPool, root_id: &AgentId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::AgentConfig;
+    use crate::agent::{AgentConfig, ToolCallRecord, ToolStatus};
 
     fn stub_agent() -> Agent {
         Agent {
@@ -133,6 +155,8 @@ mod tests {
             child_results: Vec::new(),
             context: Vec::new(),
             last_active_at: 0,
+            tool_trace: std::collections::VecDeque::new(),
+            sandbox: None,
         }
     }
 
@@ -327,5 +351,103 @@ mod tests {
             "leaf prefix: {:?}",
             lines[2].display_text
         );
+    }
+
+    // ── build_tool_trace_preview tests (Phase 3) ──
+
+    #[test]
+    fn test_tool_trace_preview_empty_when_no_trace() {
+        let mut pool = AgentPool::new();
+        let id = [0u8; 16];
+        pool.add_agent(Agent {
+            id,
+            name: "quiet".into(),
+            status: AgentStatus::Completed,
+            ..stub_agent()
+        });
+
+        let preview = build_tool_trace_preview(&pool, &id);
+        assert!(preview.is_empty(), "no tools called → empty preview");
+    }
+
+    #[test]
+    fn test_tool_trace_preview_returns_up_to_three() {
+        let mut pool = AgentPool::new();
+        let id = [0u8; 16];
+        pool.add_agent(Agent {
+            id,
+            name: "busy".into(),
+            status: AgentStatus::Completed,
+            tool_trace: std::collections::VecDeque::from(vec![
+                ToolCallRecord {
+                    name: "read_file".into(),
+                    args_preview: "\"path\": \"src/main.rs\"".into(),
+                    status: ToolStatus::Success,
+                },
+                ToolCallRecord {
+                    name: "grep".into(),
+                    args_preview: "\"pattern\": \"fn main\"".into(),
+                    status: ToolStatus::Success,
+                },
+                ToolCallRecord {
+                    name: "write_file".into(),
+                    args_preview: "\"path\": \"src/lib.rs\"".into(),
+                    status: ToolStatus::Success,
+                },
+            ]),
+            ..stub_agent()
+        });
+
+        let preview = build_tool_trace_preview(&pool, &id);
+        assert_eq!(preview.len(), 3, "all 3 entries returned");
+        assert!(preview[0].contains("write_file"), "most recent first: {}", preview[0]);
+        assert!(preview[2].contains("read_file"), "oldest last: {}", preview[2]);
+    }
+
+    #[test]
+    fn test_tool_trace_preview_truncates_beyond_three() {
+        let mut pool = AgentPool::new();
+        let id = [0u8; 16];
+        let mut trace: std::collections::VecDeque<ToolCallRecord> = std::collections::VecDeque::new();
+        for i in 0..5 {
+            trace.push_back(ToolCallRecord {
+                name: format!("tool_{}", i),
+                args_preview: String::new(),
+                status: ToolStatus::Success,
+            });
+        }
+        pool.add_agent(Agent {
+            id,
+            name: "overdrive".into(),
+            status: AgentStatus::Completed,
+            tool_trace: trace,
+            ..stub_agent()
+        });
+
+        let preview = build_tool_trace_preview(&pool, &id);
+        assert_eq!(preview.len(), 3, "capped at 3");
+        assert!(preview[0].contains("tool_4"), "most recent tool_4: {}", preview[0]);
+        assert!(preview[2].contains("tool_2"), "oldest shown tool_2: {}", preview[2]);
+    }
+
+    #[test]
+    fn test_tool_trace_preview_handles_error_status() {
+        let mut pool = AgentPool::new();
+        let id = [0u8; 16];
+        pool.add_agent(Agent {
+            id,
+            name: "faulty".into(),
+            status: AgentStatus::Failed,
+            tool_trace: std::collections::VecDeque::from(vec![ToolCallRecord {
+                name: "sh".into(),
+                args_preview: "\"command\": \"rm -rf /\"".into(),
+                status: ToolStatus::Error,
+            }]),
+            ..stub_agent()
+        });
+
+        let preview = build_tool_trace_preview(&pool, &id);
+        assert_eq!(preview.len(), 1);
+        assert!(preview[0].contains('✗'), "error marker present");
     }
 }

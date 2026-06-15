@@ -25,8 +25,8 @@ impl Tui {
         let ui = &mut state.ui;
         let core = &mut state.core;
 
-        // ── Alt+Enter: insert newline ──
-        if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::ALT) {
+        // ── Shift+Enter: insert newline ──
+        if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::SHIFT) {
             let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
             ui.input.insert(byte_idx, '\n');
             ui.input_cursor += 1;
@@ -86,6 +86,43 @@ impl Tui {
                 ui.input_cursor = 1;
                 ui.command_popup_selection = 0;
                 state.popup_mode = PopupMode::Commands;
+            }
+
+            Action::InspectAgent => {
+                // Open the detail popup for the currently selected tree item.
+                let ids = &ui.tree_agent_ids;
+                let idx = ui.selected_agent_idx.min(ids.len().saturating_sub(1));
+                if let Some(&agent_id) = ids.get(idx) {
+                    state.popup_mode = PopupMode::AgentDetail { agent_id };
+                    state.popup_selected = 0;
+                }
+            }
+
+            Action::RestoreContext => {
+                if let Some(ctx) = core.saved_context.take() {
+                    // Find or create the root agent and inject the saved context.
+                    let agent_id = crate::tui::controller::ensure_initial_agent_sync(core, "Continue previous task");
+                    if let Some(aid) = agent_id {
+                        if let Ok(mut pool) = core.agent_pool.try_write() {
+                            if let Some(agent) = pool.get_agent_mut(&aid) {
+                                agent.context = ctx;
+                            }
+                        }
+                    }
+                    let _ = crate::persistence::clear_context();
+                    core.messages.push(ChatMessage::system(
+                        "✅ Previous context restored. You can continue where you left off.",
+                    ));
+                }
+            }
+
+            Action::MoveUp if !ui.tree_agent_ids.is_empty() => {
+                ui.selected_agent_idx = ui.selected_agent_idx.saturating_sub(1);
+            }
+
+            Action::MoveDown if !ui.tree_agent_ids.is_empty() => {
+                let max = ui.tree_agent_ids.len().saturating_sub(1);
+                ui.selected_agent_idx = (ui.selected_agent_idx + 1).min(max);
             }
 
             Action::HistoryPrev
@@ -290,6 +327,7 @@ impl Tui {
                                 }
                                 core.models.select_provider(&provider_id);
                                 let _ = crate::tui::controller::get_or_create_provider_client(core, &provider_id);
+                                let _ = crate::persistence::save_configured_provider(&provider_id, "", "");
                                 core.messages.push(ChatMessage::system(format!("{} configured", name)));
                             } else {
                                 state.popup_mode = PopupMode::KeyInput;
@@ -390,6 +428,9 @@ impl Tui {
                         }
                         state.popup_mode = PopupMode::None;
                         state.popup_selected = 0;
+                    }
+                    PopupMode::AgentDetail { .. } => {
+                        // Enter closes the agent detail popup.
                     }
                     PopupMode::None => {}
                 }
@@ -549,22 +590,33 @@ impl Tui {
                 })
                 .unwrap_or_default();
 
-            let agent_prompt = agent_id
+            let (agent_prompt, agent_role) = agent_id
                 .as_ref()
                 .and_then(|aid| {
                     let pool = core.agent_pool.try_read().ok()?;
                     let role = pool.get_agent(aid)?.role.clone();
-                    drop(pool);
-                    let rt = core.runtime.as_ref()?.try_read().ok()?;
-                    rt.get_role_template(&role).map(|t| t.system_prompt.clone())
+                    let prompt = {
+                        let rt = core.runtime.as_ref()?.try_read().ok()?;
+                        rt.get_role_template(&role).map(|t| t.system_prompt.clone())
+                    }?;
+                    Some((prompt, role))
                 })
-                .unwrap_or_else(|| default_tool_prompt.to_string());
+                .unwrap_or_else(|| (default_tool_prompt.to_string(), String::new()));
+
+            // Inject role memos into the root agent's system prompt.
+            let memos = core
+                .agent_pool
+                .try_read()
+                .ok()
+                .and_then(|pool| pool.format_role_memos(&agent_role))
+                .unwrap_or_default();
 
             let agent_prompt = format!(
-                "{}\n\n{}\n\n{}",
+                "{}\n\n{}\n\n{}{}",
                 agent_prompt,
                 crate::core::types::MEMO_INSTRUCTIONS,
                 crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
+                memos,
             );
 
             (provider, mid, agent_prompt)

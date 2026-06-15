@@ -613,6 +613,42 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             true
         }
 
+        // ── Agent commands ──
+        "/agent" | "/agent help" => {
+            if let Some(items) = get_subcommand_items("/agent") {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/agent".to_string(),
+                    items: items.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
+                };
+            }
+            state.popup_selected = 0;
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/agent list" => {
+            let msg = match_agent_list(core);
+            core.messages.push(ChatMessage::system(msg));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/agent inspect ") => {
+            let id_str = trimmed.strip_prefix("/agent inspect ").unwrap().trim().to_string();
+            if id_str.is_empty() {
+                core.messages
+                    .push(ChatMessage::system("Usage: /agent inspect <agent_id>"));
+            } else {
+                let msg = match_agent_inspect(core, &id_str);
+                core.messages.push(ChatMessage::system(msg));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
         // ── Memo commands ──
         "/memo" | "/memo help" => {
             if let Some(items) = get_subcommand_items("/memo") {
@@ -856,6 +892,10 @@ pub fn get_subcommand_items(cmd: &str) -> Option<&'static [(&'static str, &'stat
             ("import", "Import pool from JSON"),
             ("query", "Query experiences by text similarity"),
         ]),
+        "/agent" => Some(&[
+            ("list", "List all agents with status"),
+            ("inspect", "Show agent detail by ID"),
+        ]),
         "/memo" => Some(&[
             ("list", "List role memos"),
             ("show", "Show a memo by key"),
@@ -890,6 +930,20 @@ pub fn resolve_dynamic_items(parent: &str, core: &crate::tui::state::CoreState) 
                     .collect()
             })
             .unwrap_or_default(),
+        "/agent inspect" => core
+            .agent_pool
+            .try_read()
+            .map(|pool| {
+                pool.agents()
+                    .iter()
+                    .map(|a| {
+                        let id_short = crate::agent::AgentPool::agent_id_str(&a.id);
+                        let label = format!("{} — {:?}", a.name, a.status);
+                        (id_short[..12].to_string(), label)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         _ => vec![],
     }
 }
@@ -901,6 +955,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/pool", "Pool management (stats/flush/clear/query)"),
     ("/reflect", "Reflection control (on/off/status/rule/max)"),
     ("/role", "Role templates (list/show/create/edit/delete)"),
+    ("/agent", "Agent management (list/inspect)"),
     ("/sh", "Run a shell command"),
     ("/clear", "Clear conversation"),
     ("/memo", "Role memo management (list/show/write/delete/roles)"),
@@ -1061,6 +1116,76 @@ fn match_list_role_memos(core: &crate::tui::state::CoreState) -> String {
         lines.push(format!("  '{}': {} memos, {} bytes", role, count, total_bytes));
     }
     lines.join("\n")
+}
+
+// ── Agent helper functions ──
+
+fn match_agent_list(core: &crate::tui::state::CoreState) -> String {
+    let pool = match core.agent_pool.try_read() {
+        Ok(p) => p,
+        Err(_) => return "Agent pool locked".to_string(),
+    };
+    let agents = pool.agents();
+    if agents.is_empty() {
+        return "No agents in pool.".to_string();
+    }
+    let mut lines = vec![format!("Agents ({}):", agents.len())];
+    for agent in agents {
+        let id_str = crate::agent::AgentPool::agent_id_str(&agent.id);
+        let short = &id_str[..12];
+        let status = format!("{:?}", agent.status);
+        let depth = agent.depth;
+        lines.push(format!(
+            "  {:<12} {:<18} depth={}  {}",
+            short, agent.name, depth, status
+        ));
+    }
+    lines.join("\n")
+}
+
+fn match_agent_inspect(core: &crate::tui::state::CoreState, id_str: &str) -> String {
+    let pool = match core.agent_pool.try_read() {
+        Ok(p) => p,
+        Err(_) => return "Agent pool locked".to_string(),
+    };
+    // Match by prefix (first 12 hex chars) or full ID.
+    let agent = pool.agents().iter().find(|a| {
+        let full = crate::agent::AgentPool::agent_id_str(&a.id);
+        full.starts_with(id_str) || full == id_str
+    });
+    match agent {
+        Some(a) => {
+            let id_full = crate::agent::AgentPool::agent_id_str(&a.id);
+            let status = format!("{:?}", a.status);
+            let traces: Vec<String> = a
+                .tool_trace
+                .iter()
+                .rev()
+                .take(3)
+                .map(|t| format!("      {} — {}", t.name, t.args_preview))
+                .collect();
+            let trace_block = if traces.is_empty() {
+                String::new()
+            } else {
+                format!("\n  Tool trace (last 3):\n{}", traces.join("\n"))
+            };
+            format!(
+                "Agent: {}\n  ID:     {}\n  Role:   {}\n  Status: {}\n  Depth:  {}\n  Goal:   {}\n  Parent: {}\n  Children: {}{}",
+                a.name,
+                id_full,
+                a.role,
+                status,
+                a.depth,
+                a.goal,
+                a.parent_id
+                    .map(|id| crate::agent::AgentPool::agent_id_str(&id))
+                    .unwrap_or_else(|| "root".to_string()),
+                a.children.len(),
+                trace_block,
+            )
+        }
+        None => format!("Agent '{}' not found.", id_str),
+    }
 }
 
 #[cfg(test)]

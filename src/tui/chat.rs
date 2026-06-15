@@ -4,7 +4,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Paragraph, Wrap},
 };
 
@@ -77,10 +77,24 @@ pub(crate) fn render_chat(f: &mut Frame, area: Rect, state: &AppState, visible_l
             Span::styled(placeholder, style::hint_style()),
         ]))
     } else {
-        Paragraph::new(Line::from(vec![
-            prompt,
-            Span::styled(state.ui.input.as_str(), input_style),
-        ]))
+        // ── Multi-line input rendering ──
+        let mut input_lines: Vec<Line> = Vec::new();
+        let mut first = true;
+        for line in state.ui.input.lines() {
+            if first {
+                input_lines.push(Line::from(vec![
+                    prompt.clone(),
+                    Span::styled(line.to_string(), input_style),
+                ]));
+                first = false;
+            } else {
+                input_lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default().fg(style::TEXT_MUTED)),
+                    Span::styled(line.to_string(), input_style),
+                ]));
+            }
+        }
+        Paragraph::new(Text::from(input_lines))
     };
 
     f.render_widget(input_display, input_area);

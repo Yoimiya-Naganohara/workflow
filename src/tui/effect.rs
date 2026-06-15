@@ -135,6 +135,15 @@ pub enum AppEvent {
         role_name: String,
         error: String,
     },
+    /// A system-level log message (displayed in chat as grey system line).
+    SystemLog {
+        content: String,
+    },
+    /// The agent tree has converged; a parent is ready to aggregate
+    /// and a new LLM synthesis call should be scheduled.
+    AggregationStarting {
+        agent_id: crate::core::types::AgentId,
+    },
     /// Result of a self-check reflection.
     SelfCheckResult {
         response_index: usize,
@@ -370,6 +379,14 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
         }
 
         Effect::OptimizeRole { role_name, runtime } => {
+            // ── Pre-optimization consolidation: drain fluid track to bedrock ──
+            // Ensures all accumulated experiences (even below high-water mark)
+            // are available for optimization analysis.
+            {
+                let mut rt = runtime.write().await;
+                rt.consolidate_experience_pool();
+            }
+
             // Read role and experiences from runtime
             let (role, experiences, provider, model_id) = {
                 let rt = runtime.read().await;

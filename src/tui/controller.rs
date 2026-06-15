@@ -207,6 +207,29 @@ pub async fn load_initial_state(state: &mut AppState) {
     for provider_id in warm_ids {
         let _ = get_or_create_provider_client(&mut state.core, &provider_id);
     }
+
+    // ── Sandbox re-hydration ──
+    // Deserialised agents have sandbox: None (serde skip).  Rebuild the
+    // sandbox handle from the persisted agent_id.  SandboxHandle::new()
+    // is idempotent — existing work/ directories and src symlinks are
+    // preserved, not overwritten.
+    {
+        let mut pool = state.core.agent_pool.write().await;
+        for agent in pool.agents_mut() {
+            let handle = crate::tools::sandbox::SandboxHandle::new(&agent.id)
+                .map(std::sync::Arc::new)
+                .ok();
+            agent.sandbox = handle;
+        }
+    }
+
+    // ── Load persisted context ──
+    if let Some(saved) = crate::persistence::load_context() {
+        state.core.saved_context = Some(saved.context);
+        state.core.messages.push(ChatMessage::system(
+            "📋 Previous session context found. Press Ctrl+R to restore.",
+        ));
+    }
 }
 
 // ============================================================================
@@ -259,6 +282,7 @@ pub fn save_custom_provider(state: &mut CoreState, name: &str, url: &str, key: &
         let _ = crate::persistence::save_configured_provider(&custom_id, &env_key, key);
     } else if !state.configured_providers.contains(&custom_id) {
         state.configured_providers.push(custom_id.clone());
+        let _ = crate::persistence::save_configured_provider(&custom_id, &env_key, "");
     }
 
     state.models.add_custom_provider(&provider);

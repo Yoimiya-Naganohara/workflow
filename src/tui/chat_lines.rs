@@ -26,7 +26,6 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize, _think_frame: u8
                 );
                 lines.push(Line::from(styled));
             }
-            lines.push(Line::from(String::new()));
             continue;
         }
 
@@ -50,7 +49,6 @@ pub(crate) fn build_chat_lines(state: &CoreState, width: usize, _think_frame: u8
             lines.push(Line::from(styled));
         }
 
-        lines.push(Line::from(String::new()));
     }
 
     if lines.is_empty() {
@@ -85,7 +83,6 @@ fn tool_call_lines(lines: &mut Vec<Line<'static>>, message: &crate::tui::state::
     }
 
     lines.push(Line::from(parts));
-    lines.push(Line::from(String::new()));
 }
 
 fn render_markdown(text: &str, body_width: usize) -> Vec<Line<'static>> {
@@ -256,7 +253,7 @@ fn render_plain_table(block: &[String], out: &mut Vec<Line<'static>>, body_width
         .collect();
 
     let h_line = format!(
-        "  {}",
+        "  ┌{}┐",
         col_widths
             .iter()
             .map(|w| "─".repeat(w + 2))
@@ -271,7 +268,7 @@ fn render_plain_table(block: &[String], out: &mut Vec<Line<'static>>, body_width
             .all(|c| c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ') && c.contains('-'));
         if is_sep {
             let sep = format!(
-                "  {}",
+                "  ├{}┤",
                 col_widths
                     .iter()
                     .map(|w| "─".repeat(w + 2))
@@ -298,7 +295,7 @@ fn render_plain_table(block: &[String], out: &mut Vec<Line<'static>>, body_width
     }
 
     let b_line = format!(
-        "  {}",
+        "  └{}┘",
         col_widths
             .iter()
             .map(|w| "─".repeat(w + 2))
@@ -637,7 +634,7 @@ where
 
     // Top border.
     let h_line = format!(
-        "  {}",
+        "  ┌{}┐",
         col_widths
             .iter()
             .map(|w| "─".repeat(w + 2))
@@ -695,7 +692,7 @@ where
         // Separator after header.
         if ri == 0 && rows.len() > 1 {
             let sep = format!(
-                "  {}",
+                "  ├{}┤",
                 col_widths
                     .iter()
                     .map(|w| "─".repeat(w + 2))
@@ -708,7 +705,7 @@ where
 
     // Bottom border.
     let b_line = format!(
-        "  {}",
+        "  └{}┘",
         col_widths
             .iter()
             .map(|w| "─".repeat(w + 2))
@@ -723,24 +720,24 @@ fn flush_code_block(out: &mut Vec<Line<'static>>, lang: &str, code_lines: &[Stri
     if !lang.is_empty() {
         out.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(format!("┌─ {} ", lang), Style::default().fg(style::TEXT_MUTED)),
+            Span::styled(format!("▐ {} ", lang), Style::default().fg(style::TEXT_MUTED)),
         ]));
     } else {
         out.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled("┌───", Style::default().fg(style::TEXT_MUTED)),
+            Span::styled("▐", Style::default().fg(style::TEXT_MUTED)),
         ]));
     }
     for code_line in code_lines {
         out.push(Line::from(vec![
-            Span::styled("  │ ", Style::default().fg(style::TEXT_MUTED)),
+            Span::styled("▐ ", Style::default().fg(style::TEXT_MUTED)),
             Span::styled(code_line.clone(), Style::default().fg(style::TEXT_PRIMARY)),
         ]));
     }
-    out.push(Line::from(Span::styled(
-        "  └───",
-        Style::default().fg(style::TEXT_MUTED),
-    )));
+    out.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("▐", Style::default().fg(style::TEXT_MUTED)),
+    ]));
 }
 
 fn wrap_spans(out: &mut Vec<Line<'static>>, spans: &[Span<'static>], max_width: usize, indent: &str) {

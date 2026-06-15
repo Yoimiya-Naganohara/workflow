@@ -64,31 +64,37 @@ impl Tui {
             .cloned()
             .collect();
 
-        // ── Diagnostic tree (Phase 1) ──
-        // Compute tree outside the closure to minimise borrow complexity.
-        // try_read is safe — if the pool lock is contended we skip the tree.
-        let (tree_item_count, tree_lines) = if let Some(rid) = state.core.responsible_agent_id {
+        // ── Diagnostic tree (Phase 1/3) ──
+        // Build the tree snapshot from the shared pool.
+        // The tree is tiny (≤ 12 lines) so fresh rebuild each frame is free.
+        // Cache is provided for future optimisation; currently unused.
+        let tree_lines = if let Some(rid) = state.core.responsible_agent_id {
             match state.core.agent_pool.try_read() {
                 Ok(pool) => {
                     if has_active_delegations(&pool, &rid) {
-                        let lines = build_agent_tree_lines(&pool, &rid);
-                        let count = lines.len();
-                        (count, lines)
+                        build_agent_tree_lines(&pool, &rid)
                     } else {
-                        (0, Vec::new())
+                        Vec::new()
                     }
                 }
-                Err(_) => (0, Vec::new()),
+                Err(_) => Vec::new(),
             }
         } else {
-            (0, Vec::new())
+            Vec::new()
         };
 
-        // Adaptive height: content-based, clamped to ⅓ of terminal
+        // Sync tree_agent_ids with the current tree.
+        // This is a cheap write-lock update outside the draw closure.
+        // If the lock is contended we skip (the tree will re-sync next frame).
+        if let Ok(mut s) = self.state.try_write() {
+            s.ui.tree_agent_ids = tree_lines.iter().map(|tl| tl.agent_id).collect();
+            s.ui.selected_agent_idx = s.ui.selected_agent_idx.min(tree_lines.len().saturating_sub(1));
+        }
+
+        let tree_item_count = tree_lines.len();
         let tree_height = if tree_item_count > 0 {
             let max_tree = (term_size.height as usize / 3).clamp(3, 12);
-            let h = (4 + tree_item_count).min(max_tree);
-            h as u16
+            (4 + tree_item_count).min(max_tree) as u16
         } else {
             0
         };
@@ -123,8 +129,7 @@ impl Tui {
 
             // ── Diagnostic tree ──
             if show_tree {
-                let separator = Paragraph::new("── Active Delegations ─────────────────────────────────")
-                    .style(Style::default().fg(style::TEXT_MUTED));
+                let separator = Paragraph::new("── Delegations ──").style(Style::default().fg(style::TEXT_MUTED));
                 f.render_widget(separator, vert_chunks[tree_sep_idx]);
 
                 let tree_items: Vec<ListItem> = tree_lines

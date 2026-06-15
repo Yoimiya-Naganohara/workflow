@@ -135,7 +135,7 @@ pub fn input_bar<'a>(active: bool) -> Block<'a> {
 
 pub fn panel_chat<'a>(title: &str) -> Block<'a> {
     Block::default()
-        .borders(Borders::ALL)
+        .borders(Borders::NONE)
         .border_style(Style::default().fg(BORDER_DEFAULT))
         .title(Span::styled(format!(" {} ", title), title_style()))
 }

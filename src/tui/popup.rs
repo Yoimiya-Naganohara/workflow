@@ -9,7 +9,10 @@ use ratatui::{
 };
 use std::sync::OnceLock;
 
+use crate::agent::AgentStatus;
+use crate::core::types::AgentId;
 use crate::models::filter_providers;
+use crate::tui::agent_tree::build_tool_trace_preview;
 use crate::tui::commands::{COMMANDS, resolve_dynamic_items};
 use crate::tui::state::{AppState, PopupMode};
 
@@ -62,6 +65,7 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
             };
             (count.min(8) as u16 + 2).min(10)
         }
+        PopupMode::AgentDetail { .. } => 12,
     }
 }
 
@@ -75,6 +79,7 @@ pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
         PopupMode::KeyInput => render_key_popup(f, area, state),
         PopupMode::ModelPicker => render_model_popup(f, area, state),
         PopupMode::FilePicker { .. } => render_file_popup(f, area, state),
+        PopupMode::AgentDetail { agent_id } => render_agent_detail_popup(f, area, state, agent_id),
     }
 }
 
@@ -448,6 +453,83 @@ fn render_file_popup(f: &mut Frame, area: Rect, state: &AppState) {
     );
 }
 
+// ── Agent detail popup (Phase 3) ──
+
+fn render_agent_detail_popup(f: &mut Frame, area: Rect, state: &AppState, agent_id: &AgentId) {
+    // Read agent data from pool (try_read — never block the render thread).
+    let (name, role, status, depth, goal, result, trace) = match state.core.agent_pool.try_read() {
+        Ok(pool) => {
+            let Some(agent) = pool.agents().iter().find(|a| a.id == *agent_id) else {
+                return;
+            };
+            let trace = build_tool_trace_preview(&pool, agent_id);
+            (
+                agent.name.clone(),
+                agent.role.clone(),
+                agent.status.clone(),
+                agent.depth,
+                agent.goal.clone(),
+                agent.result.clone().unwrap_or_default(),
+                trace,
+            )
+        }
+        Err(_) => return,
+    };
+
+    let status_str = match status {
+        AgentStatus::Idle => "Idle",
+        AgentStatus::Planning => "Planning",
+        AgentStatus::AwaitingChildren => "Awaiting Children",
+        AgentStatus::Aggregating => "Aggregating",
+        AgentStatus::Completed => "Completed",
+        AgentStatus::Failed => "Failed",
+    };
+
+    // Truncate goal for display.
+    let goal_display = if goal.len() > 60 {
+        format!("{}…", &goal[..60])
+    } else {
+        goal
+    };
+
+    // Truncate result for display.
+    let result_display = if result.len() > 80 {
+        format!("{}…", &result[..80])
+    } else {
+        result
+    };
+
+    let mut lines = vec![
+        format!(" Agent:  {}", name),
+        format!(" Role:   {}", role),
+        format!(" Status: {}", status_str),
+        format!(" Depth:  {}", depth),
+        format!(" Goal:   {}", goal_display),
+    ];
+
+    if !result_display.is_empty() {
+        lines.push(format!(" Result: {}", result_display));
+    }
+
+    if !trace.is_empty() {
+        lines.push(" Tools:".to_string());
+        lines.extend(trace);
+    }
+
+    lines.push(String::new());
+    lines.push("  [Esc] close".to_string());
+
+    let text = ratatui::text::Text::from(ratatui::text::Line::from(
+        lines.iter().map(|l| Span::raw(l.as_str())).collect::<Vec<_>>(),
+    ));
+
+    let popup = Paragraph::new(text)
+        .block(style::panel("Agent Detail"))
+        .style(Style::default().fg(style::TEXT_PRIMARY));
+
+    f.render_widget(popup, area);
+}
+
 /// Return a simple file icon based on file extension.
 fn file_icon(path: &str) -> &'static str {
     if path.ends_with(".rs") {
@@ -531,4 +613,133 @@ fn get_project_files() -> &'static Vec<String> {
         });
         files
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
+
+    use crate::agent::{Agent, AgentConfig, AgentStatus, ToolCallRecord, ToolStatus};
+    use crate::core::types::AgentId;
+    use crate::tui::agent_tree::build_tool_trace_preview;
+    use crate::tui::state::{AppState, PopupMode};
+
+    use super::{popup_height, render_agent_detail_popup};
+
+    /// AgentDetail popup reserves 12 lines.
+    #[test]
+    fn test_agent_detail_popup_height() {
+        let app = AppState::default();
+        let agent_id: AgentId = [42u8; 16];
+        // popup_height reads popup_mode, not pool, so it's fine if
+        // the agent doesn't exist yet.
+        let mut app = app;
+        app.popup_mode = PopupMode::AgentDetail { agent_id };
+        assert_eq!(popup_height(&app), 12);
+    }
+
+    /// Verify AgentDetail data extraction does not panic with
+    /// a fully populated agent (tool_trace + child_results).
+    #[test]
+    fn test_agent_detail_data_extraction() {
+        use std::collections::VecDeque;
+
+        let mut app = AppState::default();
+        let agent_id: AgentId = [42u8; 16];
+
+        {
+            let mut pool = app.core.agent_pool.try_write().unwrap();
+            pool.add_agent(Agent {
+                id: agent_id,
+                name: "dev-test".into(),
+                role: "developer".into(),
+                status: AgentStatus::Completed,
+                depth: 1,
+                goal: "Implement auth".into(),
+                result: Some("Done".into()),
+                role_template_id: None,
+                parent_id: None,
+                children: Vec::new(),
+                config: AgentConfig::default(),
+                context: Vec::new(),
+                child_results: vec![([1u8; 16], "sub-result".into())],
+                last_active_at: 0,
+                tool_trace: VecDeque::from(vec![
+                    ToolCallRecord {
+                        name: "grep".into(),
+                        args_preview: "pattern=fn auth".into(),
+                        status: ToolStatus::Success,
+                    },
+                    ToolCallRecord {
+                        name: "read_file".into(),
+                        args_preview: "path=auth.rs".into(),
+                        status: ToolStatus::Success,
+                    },
+                ]),
+                sandbox: None,
+            });
+        }
+
+        app.popup_mode = PopupMode::AgentDetail { agent_id };
+
+        // Data extraction (same as render_agent_detail_popup).
+        let (_name, _role, trace) = match app.core.agent_pool.try_read() {
+            Ok(pool) => {
+                let agent = pool.agents().iter().find(|a| a.id == agent_id).unwrap();
+                let trace = build_tool_trace_preview(&pool, &agent_id);
+                (agent.name.clone(), agent.role.clone(), trace)
+            }
+            Err(_) => panic!("lock"),
+        };
+        assert_eq!(trace.len(), 2);
+        assert!(trace[0].contains("read_file"));
+        assert!(trace[1].contains("grep"));
+    }
+
+    /// Verify that [`render_agent_detail_popup`] does not panic for a
+    /// well-formed agent, even with an empty tool_trace.
+    #[test]
+    fn test_agent_detail_popup_render_does_not_panic() {
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let agent_id: AgentId = [42u8; 16];
+        let mut app_state = AppState::default();
+
+        // Populate pool (sync try_write — safe in single-threaded test).
+        {
+            let mut pool = app_state.core.agent_pool.try_write().unwrap();
+            pool.add_agent(Agent {
+                id: agent_id,
+                name: "stub-agent".into(),
+                role: "stub".into(),
+                role_template_id: None,
+                parent_id: None,
+                children: Vec::new(),
+                depth: 0,
+                goal: "Test goal for render".into(),
+                config: AgentConfig::default(),
+                status: AgentStatus::Planning,
+                result: None,
+                child_results: Vec::new(),
+                context: Vec::new(),
+                last_active_at: 0,
+                tool_trace: std::collections::VecDeque::new(),
+                sandbox: None,
+            });
+        }
+
+        app_state.popup_mode = PopupMode::AgentDetail { agent_id };
+        app_state.ui.input_disabled = true;
+
+        // Render one frame — if this doesn't panic, the popup is sound.
+        let result = terminal.draw(|f| {
+            let area = Rect::new(0, 0, 58, 10);
+            render_agent_detail_popup(f, area, &app_state, &agent_id);
+        });
+
+        assert!(result.is_ok(), "AgentDetail popup render should not panic");
+    }
 }

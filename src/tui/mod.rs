@@ -8,6 +8,7 @@ pub mod handler;
 pub mod keymap;
 pub mod popup;
 pub mod render;
+pub mod runtime_bridge;
 pub mod state;
 pub mod status;
 pub mod style;
@@ -67,6 +68,34 @@ impl Tui {
             crate::tui::controller::load_initial_state(&mut state).await;
         }
 
+        // ── Wire runtime event channel and spawn event loop + broker ──
+        // Channel 1: tools → event loop (ActivateAgent)
+        let (runtime_tx, event_loop_rx) = tokio::sync::mpsc::channel::<crate::runtime::RuntimeEvent>(256);
+        {
+            let mut s = self.state.write().await;
+            s.core.runtime_event_tx = Some(runtime_tx);
+        }
+        // Channel 2: event loop → broker (ChildCompleted, AggregationCompleted, etc.)
+        let (broker_tx, broker_rx) = tokio::sync::mpsc::channel::<crate::runtime::RuntimeEvent>(256);
+
+        let state_clone = self.state.clone();
+        let pool = state_clone.read().await.core.agent_pool.clone();
+        let runtime = state_clone.read().await.core.runtime.clone();
+        let tool_server = state_clone.read().await.core.tool_server.clone();
+        let app_state = state_clone.clone();
+        tokio::spawn(async move {
+            let rt = runtime.expect("Runtime must be initialised before event loop");
+            use crate::runtime::runtime_loop::RuntimeEventLoop;
+            let loop_ = RuntimeEventLoop::new(rt, pool, event_loop_rx, broker_tx, tool_server, Some(app_state));
+            loop_.run().await;
+        });
+
+        let app_tx = self.app_event_tx.clone();
+        let state_for_broker = self.state.clone();
+        tokio::spawn(async move {
+            crate::tui::runtime_bridge::runtime_event_broker(broker_rx, app_tx, state_for_broker).await;
+        });
+
         let mut event_stream = EventStream::new();
         let mut interval = tokio::time::interval(Duration::from_millis(50));
 
@@ -88,6 +117,7 @@ impl Tui {
                                     match state.ui.panel {
                                         Panel::Chat => {
                                             if !self.handle_chat_keys(&mut state, key) {
+                                                self.save_context_on_shutdown().await;
                                                 return Ok(());
                                             }
                                         }
@@ -119,7 +149,10 @@ impl Tui {
                             }
                         }
                         Some(Err(e)) => { eprintln!("Event stream error: {}", e); }
-                        None => return Ok(()),
+                        None => {
+                            self.save_context_on_shutdown().await;
+                            return Ok(());
+                        },
                     }
                 }
 
@@ -142,10 +175,45 @@ impl Tui {
             self.draw().await?;
         }
     }
+
+    /// Save conversation context for the next session.
+    async fn save_context_on_shutdown(&self) {
+        let state = self.state.read().await;
+        if let Some(agent_id) = state.core.responsible_agent_id {
+            if let Ok(pool) = state.core.agent_pool.try_read() {
+                if let Some(agent) = pool.get_agent(&agent_id) {
+                    if !agent.context.is_empty() {
+                        let ctx = crate::persistence::ContextSave {
+                            agent_id: agent.id,
+                            role: agent.role.clone(),
+                            context: agent.context.clone(),
+                            saved_at: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                        };
+                        let _ = crate::persistence::save_context(&ctx);
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Drop for Tui {
     fn drop(&mut self) {
+        // ── Graceful shutdown: consolidate fluid experiences to bedrock ──
+        // This ensures all accumulated experiences (even those below the
+        // high-water mark) are preserved to disk before the process exits.
+        if let Ok(state) = self.state.try_read() {
+            if let Some(runtime) = &state.core.runtime {
+                if let Ok(mut rt) = runtime.try_write() {
+                    rt.consolidate_experience_pool();
+                    let _ = rt.flush_experience_pool();
+                }
+            }
+        }
+
         let _ = disable_raw_mode();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture);
     }
