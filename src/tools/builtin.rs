@@ -7,8 +7,12 @@
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::Deserialize;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::spawn_blocking;
+
+use crate::tools::sandbox::SandboxHandle;
 
 /// Execute a blocking I/O operation on the blocking thread pool.
 /// Prevents `std::fs` calls from starving the Tokio async runtime.
@@ -21,12 +25,30 @@ async fn spawn_blocking_fs<T: Send + 'static>(
         .map_err(ToolCallError)
 }
 
-/// Register all built-in tools on a `ToolServer`.
+/// Register all built-in tools on a `ToolServer` (without sandbox).
 pub fn register_tools(server: crate::tools::ToolServer) -> crate::tools::ToolServer {
+    register_sandboxed_tools(server, None)
+}
+
+/// Register all built-in tools, optionally with a shared sandbox handle.
+///
+/// When `sandbox` is `Some`, the three filesystem-critical tools
+/// (ReadFile, WriteFile, Shell) will resolve paths through the
+/// sandbox, isolating writes and preventing path escape.
+pub fn register_sandboxed_tools(
+    server: crate::tools::ToolServer,
+    sandbox: Option<std::sync::Arc<SandboxHandle>>,
+) -> crate::tools::ToolServer {
     server
-        .tool(ReadFile)
-        .tool(WriteFile)
-        .tool(Shell)
+        .tool(ReadFile {
+            sandbox: sandbox.clone(),
+        })
+        .tool(WriteFile {
+            sandbox: sandbox.clone(),
+        })
+        .tool(Shell {
+            sandbox: sandbox.clone(),
+        })
         .tool(ListDir)
         .tool(Grep)
         .tool(FindFiles)
@@ -49,7 +71,9 @@ pub struct ReadFileArgs {
     pub end: Option<usize>,
 }
 
-pub struct ReadFile;
+pub struct ReadFile {
+    pub sandbox: Option<Arc<SandboxHandle>>,
+}
 
 impl Tool for ReadFile {
     const NAME: &'static str = "read_file";
@@ -88,8 +112,13 @@ impl Tool for ReadFile {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // Offload blocking I/O to the blocking thread pool.
-        let path = args.path.clone();
+        // Resolve path through sandbox (read-only, allows source symlink).
+        let path = match self.sandbox.as_ref() {
+            Some(sb) => sb
+                .resolve_path_read_only(&args.path)
+                .map_err(|e| ToolCallError(format!("Sandbox: {}", e)))?,
+            None => PathBuf::from(&args.path),
+        };
         let content = spawn_blocking_fs(move || std::fs::read_to_string(&path).map_err(|e| e.to_string())).await?;
         let bytes_len = content.len();
         let total_lines = content.lines().count();
@@ -130,7 +159,9 @@ pub struct WriteFileArgs {
     pub end: Option<usize>,
 }
 
-pub struct WriteFile;
+pub struct WriteFile {
+    pub sandbox: Option<Arc<SandboxHandle>>,
+}
 
 impl Tool for WriteFile {
     const NAME: &'static str = "write_file";
@@ -173,6 +204,19 @@ impl Tool for WriteFile {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        // Resolve path through sandbox — writes land in workdir only.
+        let path = match self.sandbox.as_ref() {
+            Some(sb) => sb
+                .resolve_path(&args.path)
+                .map_err(|e| ToolCallError(format!("Sandbox: {}", e)))?,
+            None => PathBuf::from(&args.path),
+        };
+
+        // Create parent directories (safe — resolve_path already asserted boundary).
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
         let len = args.content.len();
         let start = args.start.unwrap_or(0);
         let end = args.end.unwrap_or(len);
@@ -182,7 +226,7 @@ impl Tool for WriteFile {
         // Safe slicing: .get() returns None instead of panicking on
         // non-UTF-8 boundaries (LLM may send byte indices that split chars).
         let write_slice = args.content.get(start..end).unwrap_or("");
-        std::fs::write(&args.path, write_slice).map_err(|e| ToolCallError(e.to_string()))?;
+        std::fs::write(&path, write_slice).map_err(|e| ToolCallError(e.to_string()))?;
 
         let preview = if len > 200 {
             let preview_end = (start + 200).min(len);
@@ -209,7 +253,9 @@ pub struct ShellArgs {
     pub command: String,
 }
 
-pub struct Shell;
+pub struct Shell {
+    pub sandbox: Option<Arc<SandboxHandle>>,
+}
 
 impl Tool for Shell {
     const NAME: &'static str = "sh";
@@ -236,14 +282,16 @@ impl Tool for Shell {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // 30-second timeout to prevent runaway commands
-        let output = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            tokio::process::Command::new("sh").arg("-c").arg(&args.command).output(),
-        )
-        .await
-        .map_err(|_| ToolCallError("Command timed out after 30 seconds".to_string()))?
-        .map_err(|e| ToolCallError(e.to_string()))?;
+        // 30-second timeout; cwd anchored to sandbox workdir when available.
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.arg("-c").arg(&args.command);
+        if let Some(ref sb) = self.sandbox {
+            cmd.current_dir(&sb.workdir);
+        }
+        let output = tokio::time::timeout(std::time::Duration::from_secs(30), cmd.output())
+            .await
+            .map_err(|_| ToolCallError("Command timed out after 30 seconds".to_string()))?
+            .map_err(|e| ToolCallError(e.to_string()))?;
 
         let code = output.status.code().unwrap_or(-1);
         let mut result = String::new();
@@ -1843,7 +1891,7 @@ mod tests {
     async fn test_read_file_basic() {
         let mut f = NamedTempFile::new().unwrap();
         writeln!(f, "line1\nline2\nline3").unwrap();
-        let result = ReadFile
+        let result = (ReadFile { sandbox: None })
             .call(ReadFileArgs {
                 path: f.path().to_str().unwrap().to_string(),
                 start: None,
@@ -1866,7 +1914,7 @@ mod tests {
         }
         let path = f.path().to_str().unwrap().to_string();
         // start=2, end=4 are 1-indexed line numbers → selects lines 2-4
-        let result = ReadFile
+        let result = (ReadFile { sandbox: None })
             .call(ReadFileArgs {
                 path,
                 start: Some(2),
@@ -1887,7 +1935,7 @@ mod tests {
         // Write >10KB to trigger truncation path
         let content = "x".repeat(15000);
         write!(f, "{}", content).unwrap();
-        let result = ReadFile
+        let result = (ReadFile { sandbox: None })
             .call(ReadFileArgs {
                 path: f.path().to_str().unwrap().to_string(),
                 start: None,
@@ -1903,7 +1951,7 @@ mod tests {
         let f = NamedTempFile::new().unwrap();
         let path = f.path().to_str().unwrap().to_string();
         // content is 5 bytes, start=10 is out of bounds — should be clamped, not panic
-        let result = WriteFile
+        let result = (WriteFile { sandbox: None })
             .call(WriteFileArgs {
                 path: path.clone(),
                 content: "hello".to_string(),
@@ -1921,7 +1969,7 @@ mod tests {
         let f = NamedTempFile::new().unwrap();
         let path = f.path().to_str().unwrap().to_string();
         // content is 5 bytes, start=0, end=5 is in bounds
-        let result = WriteFile
+        let result = (WriteFile { sandbox: None })
             .call(WriteFileArgs {
                 path,
                 content: "short".to_string(),
@@ -1935,7 +1983,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shell_basic() {
-        let result = Shell
+        let result = (Shell { sandbox: None })
             .call(ShellArgs {
                 command: "echo hello".to_string(),
             })
@@ -1947,7 +1995,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shell_stderr() {
-        let result = Shell
+        let result = (Shell { sandbox: None })
             .call(ShellArgs {
                 command: "echo error >&2".to_string(),
             })

@@ -6,6 +6,7 @@
 pub mod agent;
 pub mod builtin;
 pub mod memo;
+pub mod sandbox;
 
 pub use rig::tool::server::{ToolServer, ToolServerHandle};
 
@@ -30,6 +31,17 @@ pub fn create_agent_tool_server(
     let server = agent::register_tools(server, state.clone());
     // Derive memo deps from the state
     let memo_deps = memo::MemoToolDeps::from_state(&state);
+    memo::register_memo_tools(server, memo_deps).run()
+}
+
+/// Create a [`ToolServerHandle`] with sandbox-aware tools for a specific agent.
+pub fn create_sandboxed_agent_tool_server(
+    base_state: std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>,
+    sandbox: Option<std::sync::Arc<crate::tools::sandbox::SandboxHandle>>,
+) -> ToolServerHandle {
+    let server = builtin::register_sandboxed_tools(ToolServer::new(), sandbox);
+    let server = agent::register_tools(server, base_state.clone());
+    let memo_deps = memo::MemoToolDeps::from_state(&base_state);
     memo::register_memo_tools(server, memo_deps).run()
 }
 
