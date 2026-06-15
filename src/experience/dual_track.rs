@@ -577,6 +577,10 @@ impl crate::l1::ExperienceRetrieval for DualTrackMemory {
     fn get_experiences_by_role(&self, role_id: u32) -> Vec<ExperienceEntry> {
         self.get_experiences_by_role(role_id)
     }
+
+    fn consolidate(&mut self) {
+        self.consolidate();
+    }
 }
 
 // ---------------------------------------------------------------------------

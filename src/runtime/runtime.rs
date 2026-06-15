@@ -408,6 +408,13 @@ impl AgentRuntime {
         self.pipeline.clear_experience_pool()
     }
 
+    /// Consolidate fluid experiences to bedrock (cluster + promote).
+    /// This is useful before operations that need complete data access,
+    /// such as role optimization or system shutdown.
+    pub fn consolidate_experience_pool(&mut self) {
+        self.pipeline.consolidate_experience_pool();
+    }
+
     /// Number of bedrock (persistent) experience entries.
     pub fn bedrock_count(&self) -> usize {
         self.pipeline.bedrock_count()
@@ -539,6 +546,10 @@ impl AgentRuntime {
         });
 
         let agent_id: AgentId = rand::random();
+        // Create sandbox (best-effort — failure means no filesystem isolation).
+        let sandbox = crate::tools::sandbox::SandboxHandle::new(&agent_id)
+            .ok()
+            .map(std::sync::Arc::new);
         let agent = Agent {
             id: agent_id,
             name: format!("{}-{:04x}", role, u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
@@ -557,6 +568,8 @@ impl AgentRuntime {
             child_results: Vec::new(),
             context: Vec::new(),
             last_active_at: crate::agent::now_secs(),
+            tool_trace: std::collections::VecDeque::new(),
+            sandbox,
         };
         agent_pool.add_agent(agent);
         agent_id
@@ -586,6 +599,9 @@ impl AgentRuntime {
             });
 
         let agent_id: AgentId = rand::random();
+        let sandbox = crate::tools::sandbox::SandboxHandle::new(&agent_id)
+            .map(std::sync::Arc::new)
+            .ok();
 
         // Run the decision pipeline
         let value_emb = self.pipeline.embedding().embed(value_statement).await?;
@@ -633,6 +649,8 @@ impl AgentRuntime {
                     child_results: Vec::new(),
                     context: Vec::new(),
                     last_active_at: crate::agent::now_secs(),
+                    tool_trace: std::collections::VecDeque::new(),
+                    sandbox: sandbox.clone(),
                 };
                 agent_pool.add_agent(agent);
                 Ok(agent_id)
@@ -668,6 +686,9 @@ impl AgentRuntime {
             });
 
         let agent_id: AgentId = rand::random();
+        let sandbox = crate::tools::sandbox::SandboxHandle::new(&agent_id)
+            .map(std::sync::Arc::new)
+            .ok();
         let task_emb = self.pipeline.embedding().embed(goal).await?;
         let value_emb = self.pipeline.embedding().embed(value_statement).await?;
 
@@ -722,6 +743,8 @@ impl AgentRuntime {
                     child_results: Vec::new(),
                     context: Vec::new(),
                     last_active_at: crate::agent::now_secs(),
+                    tool_trace: std::collections::VecDeque::new(),
+                    sandbox: sandbox.clone(),
                 };
                 agent_pool.add_agent(agent);
                 // Register plan entity
@@ -838,6 +861,62 @@ impl AgentRuntime {
         result
     }
 
+    /// Aggregate child results into a final synthesis by calling
+    /// `provider.chat()` (pure text-in-text-out, no tools, no role
+    /// alternation constraints).
+    ///
+    /// Reads `child_results` from the pool, builds a structured
+    /// prompt, and stores the LLM response as the parent's `result`.
+    pub async fn synthesize_aggregation(
+        &self,
+        owner_id: AgentId,
+        agent_pool: &Arc<RwLock<AgentPool>>,
+    ) -> Result<String> {
+        let (config, role, provider, child_count, child_summaries, goal) = {
+            let pool = agent_pool.read().await;
+            let agent = pool
+                .get_agent(&owner_id)
+                .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
+            let summaries: Vec<String> = agent
+                .child_results
+                .iter()
+                .map(|(id, result)| {
+                    let name = pool.get_agent(id).map(|a| a.name.as_str()).unwrap_or("unknown");
+                    format!("[{}]\n{}", name, result)
+                })
+                .collect();
+            (
+                agent.config.clone(),
+                agent.role.clone(),
+                self.provider.clone(),
+                summaries.len(),
+                summaries,
+                agent.goal.clone(),
+            )
+        };
+
+        let provider = provider.ok_or_else(|| anyhow::anyhow!("No LLM provider configured"))?;
+
+        let role_system_prompt = self
+            .role_template_store
+            .get_by_role(&role)
+            .map(|t| t.system_prompt)
+            .unwrap_or_else(|| format!("You are a {}. Execute the given goal.", role));
+
+        let task_summary = child_summaries.join("\n\n---\n\n");
+        let prompt = format!(
+            "You delegated this goal to {} sub-agent(s).\n\nOriginal goal: {}\n\nCompleted sub-task results:\n{}\n\nSynthesize the final result for the user.",
+            child_count, goal, task_summary
+        );
+
+        let result = provider
+            .chat(&config.model_id, &role_system_prompt, &prompt)
+            .await
+            .map_err(|e| anyhow::anyhow!("Synthesis LLM call failed: {}", e))?;
+
+        Ok(result)
+    }
+
     pub async fn execute_agent(&self, agent_id: AgentId, agent_pool: &Arc<RwLock<AgentPool>>) {
         self.execute_agent_inner(agent_id, agent_pool, None).await;
     }
@@ -881,17 +960,17 @@ impl AgentRuntime {
     /// Execute a single leaf agent: LLM call, store result, record experience.
     ///
     /// If `tool_server` is provided, the agent can call tools.
-    async fn execute_agent_inner(
+    pub(crate) async fn execute_agent_inner(
         &self,
         agent_id: AgentId,
         agent_pool: &Arc<RwLock<AgentPool>>,
         tool_server: Option<crate::tools::ToolServerHandle>,
-    ) {
+    ) -> (String, AgentStatus) {
         let (goal, role, config) = {
             let pool = agent_pool.read().await;
             let agent = match pool.get_agent(&agent_id) {
                 Some(a) => a.clone(),
-                None => return,
+                None => return (String::new(), AgentStatus::Failed),
             };
             (agent.goal, agent.role, agent.config.clone())
         };
@@ -906,7 +985,7 @@ impl AgentRuntime {
                     pool.release_budget_guard(&agent_id);
                     pool.notify_completed(&agent_id);
                 }
-                return;
+                return ("No LLM provider configured".to_string(), AgentStatus::Failed);
             }
         };
 
@@ -923,12 +1002,22 @@ impl AgentRuntime {
             .get_by_role(&role)
             .map(|t| t.system_prompt)
             .unwrap_or_else(|| format!("You are a {}. Execute the given goal.", role));
+        // Inject role-scoped memos directly into the system prompt.
+        // This replaces the old explicit ReadMemo tool pattern — memos are
+        // now automatically available without an extra tool call.
+        let memo_block = {
+            let pool = agent_pool.read().await;
+            pool.format_role_memos(&role)
+        };
+
+        let memos = memo_block.as_deref().unwrap_or("");
         let system_prompt = format!(
-            "{}\n\nYour goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\n{}\n\n{}",
+            "{}\n\nYour goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\n{}\n\n{}{}",
             role_system_prompt,
             goal,
             crate::core::types::MEMO_INSTRUCTIONS,
             crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
+            memos,
         );
 
         let (response, tool_bitmap) = if let Some(handle) = &tool_server {
@@ -947,7 +1036,7 @@ impl AgentRuntime {
                         pool.release_budget_guard(&agent_id);
                         pool.notify_completed(&agent_id);
                     }
-                    return;
+                    return (format!("LLM error: {}", e), AgentStatus::Failed);
                 }
             };
             use futures::StreamExt;
@@ -955,8 +1044,27 @@ impl AgentRuntime {
             while let Some(event) = stream.next().await {
                 match event {
                     crate::llm::ToolEvent::Text(t) => text.push_str(&t),
-                    crate::llm::ToolEvent::ToolCall { name, .. } => {
+                    crate::llm::ToolEvent::ToolCall { name, args, .. } => {
                         tools_used |= Self::tool_bit(&name);
+                        // Record tool call trace (ring buffer, bounded).
+                        let args_preview = serde_json::to_string(&args).unwrap_or_default();
+                        let args_preview = if args_preview.len() > 80 {
+                            format!("{}…", &args_preview[..80])
+                        } else {
+                            args_preview
+                        };
+                        if let Ok(mut pool) = agent_pool.try_write() {
+                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                                agent.tool_trace.push_back(crate::agent::ToolCallRecord {
+                                    name,
+                                    args_preview,
+                                    status: crate::agent::ToolStatus::Success,
+                                });
+                                if agent.tool_trace.len() > crate::agent::MAX_TOOL_TRACE {
+                                    agent.tool_trace.pop_front();
+                                }
+                            }
+                        } // try_write drops here — minimal lock duration
                     }
                     crate::llm::ToolEvent::Done => break,
                 }
@@ -973,7 +1081,7 @@ impl AgentRuntime {
                         pool.release_budget_guard(&agent_id);
                         pool.notify_completed(&agent_id);
                     }
-                    return;
+                    return (format!("LLM error: {}", e), AgentStatus::Failed);
                 }
             }
         };
@@ -983,7 +1091,7 @@ impl AgentRuntime {
             let mut pool = agent_pool.write().await;
             let role_tpl_id = pool.get_agent(&agent_id).and_then(|a| a.role_template_id);
             if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                agent.result = Some(response);
+                agent.result = Some(response.clone());
                 agent.status = AgentStatus::Completed;
                 pool.release_budget_guard(&agent_id);
                 pool.notify_completed(&agent_id);
@@ -1008,6 +1116,8 @@ impl AgentRuntime {
                 l2_override_created_at: 0,
             });
         }
+
+        (response, AgentStatus::Completed)
     }
 
     pub async fn await_agent(&self, agent_id: AgentId, agent_pool: &Arc<RwLock<AgentPool>>) -> String {

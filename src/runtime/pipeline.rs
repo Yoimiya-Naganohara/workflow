@@ -246,6 +246,11 @@ impl DecisionPipeline {
         self.experience.lock().expect("experience mutex poisoned").clear()
     }
 
+    /// Consolidate fluid experiences to bedrock (cluster + promote).
+    pub fn consolidate_experience_pool(&self) {
+        self.experience.lock().expect("experience mutex poisoned").consolidate();
+    }
+
     pub fn bedrock_count(&self) -> usize {
         self.experience
             .lock()

@@ -73,7 +73,7 @@ pub const MAX_CHAIN_LENGTH: usize = 20;
 pub const DEFAULT_MAX_TOOL_TURNS: usize = 30;
 
 /// Memo usage instructions appended to every role's system prompt.
-pub const MEMO_INSTRUCTIONS: &str = "The memo is the only way that allows agent to remember accross sessions. So when user say something important remember it";
+pub const MEMO_INSTRUCTIONS: &str = "The memo is the only way that allows agent to remember accross sessions. So when user say something important remember it.";
 
 /// Zero-tolerance defensive execution instructions appended to every role's system prompt.
 /// Injects the mission-critical code quality, chain-of-thought, tool discipline,

@@ -117,7 +117,12 @@ impl Tool for SpawnAgent {
             None => format!("{}\n\nDelegation reason: {}", goal, args.reason.trim()),
         };
 
-        let (runtime, agent_pool, parent_id) = {
+        // Phase 2: Non‑blocking delegation.
+        // 1. Spawn the child through the L-1→L0→L1→L2 pipeline.
+        // 2. Dispatch ActivateAgent to the background event loop.
+        // 3. Return Running instantly — no LLM stream is blocked.
+
+        let (runtime, agent_pool, parent_id, runtime_tx) = {
             let s = self.state.read().await;
             let runtime = s
                 .core
@@ -128,7 +133,12 @@ impl Tool for SpawnAgent {
                 .core
                 .responsible_agent_id
                 .ok_or_else(|| ToolCallError("No responsible parent agent is active".to_string()))?;
-            (runtime, s.core.agent_pool.clone(), parent_id)
+            let runtime_tx = s
+                .core
+                .runtime_event_tx
+                .clone()
+                .ok_or_else(|| ToolCallError("Runtime event channel not initialized".to_string()))?;
+            (runtime, s.core.agent_pool.clone(), parent_id, runtime_tx)
         };
 
         let child_id = match runtime
@@ -148,38 +158,21 @@ impl Tool for SpawnAgent {
             }
         };
 
-        let child_id_str = crate::agent::AgentPool::agent_id_str(&child_id);
-        let tool_server = self.state.read().await.core.tool_server.clone();
+        // Dispatch to the background event loop — the event loop owns
+        // the ToolServerHandle and will execute the agent asynchronously.
+        let _ = runtime_tx
+            .send(crate::runtime::event::RuntimeEvent::ActivateAgent {
+                agent_id: child_id,
+                parent_id: Some(parent_id),
+            })
+            .await
+            .map_err(|_| ToolCallError("Background runtime loop is dead".to_string()))?;
 
-        if args.blocking.unwrap_or(true) {
-            runtime
-                .read()
-                .await
-                .execute_agent_with_tools(child_id, &agent_pool, tool_server)
-                .await;
-            let result = runtime.read().await.await_agent(child_id, &agent_pool).await;
-            Ok(SpawnAgentOutput::Completed {
-                agent_id: child_id_str,
-                role,
-                goal,
-                result,
-            })
-        } else {
-            let runtime_clone = runtime.clone();
-            let pool_clone = agent_pool.clone();
-            tokio::spawn(async move {
-                runtime_clone
-                    .read()
-                    .await
-                    .execute_agent_with_tools(child_id, &pool_clone, tool_server)
-                    .await;
-            });
-            Ok(SpawnAgentOutput::Running {
-                agent_id: child_id_str,
-                role,
-                goal,
-            })
-        }
+        Ok(SpawnAgentOutput::Running {
+            agent_id: crate::agent::AgentPool::agent_id_str(&child_id),
+            role,
+            goal,
+        })
     }
 }
 
