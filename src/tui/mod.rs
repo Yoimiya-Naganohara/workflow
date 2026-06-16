@@ -56,7 +56,10 @@ impl Tui {
         Ok(Self {
             terminal,
             state,
-            chat_lines_cache: ChatRenderOutput { rendered: Vec::new() },
+            chat_lines_cache: ChatRenderOutput {
+                rendered: Vec::new(),
+                tables: Vec::new(),
+            },
             chat_cache_key: (0, 0, false, 0, None, true, 0),
             app_event_tx,
             app_event_rx,

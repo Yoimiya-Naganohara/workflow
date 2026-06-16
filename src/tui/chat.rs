@@ -151,34 +151,57 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
     let avail = area.width.max(1) as usize;
 
     while y < area.bottom() && i < end {
-        let text_start = i;
-        i += 1;
-        while i < end {
-            i += 1;
-        }
-        let batch_count = i - text_start;
-        if batch_count > 0 {
-            let lines: Vec<Line<'static>> = output.rendered[text_start..i].iter().map(|r| r.line.clone()).collect();
-
-            // Total wrapped visual height for smooth scroll tracking.
-            let visual_h: usize = lines
-                .iter()
-                .map(|l| {
-                    let w = l.width();
-                    if w == 0 { 1 } else { w.div_ceil(avail) }
-                })
-                .sum();
-
-            let text_area = Rect::new(
-                area.x,
+        if let Some(ref td) = output.rendered[i].table {
+            // ── Table region: render as a single Table widget ──
+            let table_h = td.end_line - td.start_line;
+            let table_area = Rect::new(
+                area.x + 1,
                 y,
-                area.width,
-                (visual_h as u16).min(area.bottom().saturating_sub(y)),
+                area.width.saturating_sub(2),
+                (table_h as u16).min(area.bottom().saturating_sub(y)),
             );
-            if text_area.height > 0 {
-                f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }), text_area);
+            if table_area.height > 0 && table_area.width > 4 {
+                let widget = output.build_table_widget(td);
+                f.render_widget(widget, table_area);
             }
-            y += visual_h as u16;
+            y += table_h as u16;
+            i = td.end_line;
+        } else {
+            // ── Text batch ──
+            let text_start = i;
+            i += 1;
+            while i < end && output.rendered[i].table.is_none() {
+                i += 1;
+            }
+            let batch_count = i - text_start;
+            if batch_count > 0 {
+                let lines: Vec<Line<'static>> = output.rendered[text_start..i]
+                    .iter()
+                    .map(|r| r.line.clone())
+                    .collect();
+
+                let visual_h: usize = lines
+                    .iter()
+                    .map(|l| {
+                        let w = l.width();
+                        if w == 0 { 1 } else { w.div_ceil(avail) }
+                    })
+                    .sum();
+
+                let text_area = Rect::new(
+                    area.x,
+                    y,
+                    area.width,
+                    (visual_h as u16).min(area.bottom().saturating_sub(y)),
+                );
+                if text_area.height > 0 {
+                    f.render_widget(
+                        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+                        text_area,
+                    );
+                }
+                y += visual_h as u16;
+            }
         }
     }
 }

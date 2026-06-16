@@ -18,6 +18,8 @@ use super::style;
 #[derive(Debug, Clone)]
 pub(crate) struct RenderedLine {
     pub line: Line<'static>,
+    /// If this line is part of a table region, the table definition.
+    pub table: Option<TableDef>,
 }
 
 /// Metadata for rendering a markdown table as a ratatui Table widget.
@@ -34,92 +36,62 @@ pub(crate) struct TableDef {
 #[derive(Debug, Clone)]
 pub(crate) struct ChatRenderOutput {
     pub rendered: Vec<RenderedLine>,
+    #[allow(dead_code)]
+    pub tables: Vec<TableDef>,
 }
 
-/// Format a table as text lines with `│` column separators so they
-/// wrap naturally via Paragraph::Wrap.
 /// Compute how many terminal lines a table occupies.
 fn compute_table_height(td: &TableDef) -> usize {
     3 + td.rows.len()
 }
 
-fn table_as_text_lines(td: &TableDef, bar_char: &str, bar_color: ratatui::style::Color) -> Vec<Line<'static>> {
-    let mut out = Vec::new();
-    let sep = Span::styled(" │ ", Style::default().fg(style::TEXT_MUTED));
-    let bar = Span::styled(bar_char.to_string(), Style::default().fg(bar_color));
-
-    // Separator row
-    fn make_sep(col_widths: &[usize]) -> String {
-        let parts: Vec<String> = col_widths.iter().map(|&w| "─".repeat(w)).collect();
-        format!("├─{}─┤", parts.join("─┼─"))
-    }
-
-    // Header
-    {
-        let mut cells: Vec<Span> = Vec::new();
-        cells.push(bar.clone());
-        cells.push(Span::styled(" ", Style::default()));
-        for (i, h) in td.header.iter().enumerate() {
-            if i > 0 {
-                cells.push(sep.clone());
-            }
-            cells.push(Span::styled(
-                format!("{:w$}", h, w = td.col_widths[i]),
-                Style::default().add_modifier(ratatui::style::Modifier::BOLD),
-            ));
-        }
-        cells.push(Span::styled(
-            format!("{:>w$}", "│", w = 1),
-            Style::default().fg(style::TEXT_MUTED),
-        ));
-        out.push(Line::from(cells));
-    }
-
-    // Separator
-    out.push(Line::from(vec![
-        bar.clone(),
-        Span::styled(
-            format!(" {}", make_sep(&td.col_widths)),
-            Style::default().fg(style::TEXT_MUTED),
-        ),
-    ]));
-
-    // Data rows
-    for row in &td.rows {
-        let mut cells: Vec<Span> = Vec::new();
-        cells.push(bar.clone());
-        cells.push(Span::styled(" ", Style::default()));
-        for (i, c) in row.iter().enumerate() {
-            if i > 0 {
-                cells.push(sep.clone());
-            }
-            cells.push(Span::styled(
-                format!("{:w$}", c, w = td.col_widths[i]),
-                Style::default(),
-            ));
-        }
-        cells.push(Span::styled(
-            format!("{:>w$}", "│", w = 1),
-            Style::default().fg(style::TEXT_MUTED),
-        ));
-        out.push(Line::from(cells));
-    }
-
-    // Bottom border
-    out.push(Line::from(vec![
-        bar.clone(),
-        Span::styled(
-            format!(" {}", make_sep(&td.col_widths)),
-            Style::default().fg(style::TEXT_MUTED),
-        ),
-    ]));
-
-    out
-}
-
 impl ChatRenderOutput {
     pub fn total_lines(&self) -> usize {
         self.rendered.len()
+    }
+
+    /// Build a ratatui Table widget for a given table definition.
+    pub(crate) fn build_table_widget(&self, table: &TableDef) -> Table<'static> {
+        let col_constraints: Vec<Constraint> = table
+            .col_widths
+            .iter()
+            .map(|&w| Constraint::Length(w as u16 + 2))
+            .collect();
+
+        let header_cells: Vec<Cell> = table
+            .header
+            .iter()
+            .map(|h| {
+                Cell::from(Text::from(Line::from(Span::styled(
+                    format!(" {} ", h),
+                    Style::default().fg(style::BLUE).add_modifier(Modifier::BOLD),
+                ))))
+            })
+            .collect();
+        let header_row = Row::new(header_cells).style(Style::default().bg(style::BG_SECONDARY));
+
+        let data_rows: Vec<Row> = table
+            .rows
+            .iter()
+            .map(|row| {
+                let cells: Vec<Cell> = row
+                    .iter()
+                    .map(|c| {
+                        Cell::from(Text::from(Line::from(Span::styled(
+                            format!(" {} ", c),
+                            Style::default().fg(style::TEXT_PRIMARY),
+                        ))))
+                    })
+                    .collect();
+                Row::new(cells)
+            })
+            .collect();
+
+        Table::new(data_rows, col_constraints)
+            .header(header_row)
+            .column_spacing(0)
+            .style(Style::default())
+            .row_highlight_style(Style::default().bg(style::BG_SECONDARY))
     }
 }
 
@@ -131,6 +103,7 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
     let content_width = width.max(20);
     let body_width = content_width.saturating_sub(4).max(1);
     let mut rendered: Vec<RenderedLine> = Vec::new();
+    let mut tables: Vec<TableDef> = Vec::new();
 
     for message in &state.messages {
         if matches!(message.role, MessageRole::System) {
@@ -145,6 +118,7 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
                 );
                 rendered.push(RenderedLine {
                     line: Line::from(styled),
+                    table: None,
                 });
             }
             continue;
@@ -164,15 +138,30 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
 
         // Render all lines — tables are formatted as text lines with `│`
         // column separators so they wrap naturally via Paragraph::Wrap.
+        // Emit table placeholders and regular lines
+        let mut line_idx = rendered.len();
         let mut next_table_idx = 0;
+
         for md_line in result.lines {
             if let Some(ti) = md_line.table_ref {
-                // First occurrence of this table — emit formatted text lines
                 if ti == next_table_idx {
                     let td = &result.tables[ti];
-                    for row in table_as_text_lines(td, &bar_char, bar_color) {
-                        rendered.push(RenderedLine { line: row });
+                    let table_h = compute_table_height(td);
+                    let table_def = TableDef {
+                        start_line: line_idx,
+                        end_line: line_idx + table_h,
+                        header: td.header.clone(),
+                        rows: td.rows.clone(),
+                        col_widths: td.col_widths.clone(),
+                    };
+                    for _ in 0..table_h {
+                        rendered.push(RenderedLine {
+                            line: Line::from(Span::raw("")),
+                            table: Some(table_def.clone()),
+                        });
                     }
+                    tables.push(table_def);
+                    line_idx += table_h;
                     next_table_idx += 1;
                 }
                 continue;
@@ -181,17 +170,20 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
             styled.extend(md_line.spans.into_iter().map(|s| Span::styled(s.content, s.style)));
             rendered.push(RenderedLine {
                 line: Line::from(styled),
+                table: None,
             });
+            line_idx += 1;
         }
     }
 
     if rendered.is_empty() {
         rendered.push(RenderedLine {
             line: Line::from("No messages yet."),
+            table: None,
         });
     }
 
-    ChatRenderOutput { rendered }
+    ChatRenderOutput { rendered, tables }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -349,6 +341,7 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
                     .fg(style::PURPLE)
                     .add_modifier(ratatui::style::Modifier::BOLD),
             )),
+            table: None,
         });
 
         // Args (gray, indented)
@@ -356,6 +349,7 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
             if arg_line.is_empty() {
                 lines.push(RenderedLine {
                     line: Line::from(Span::raw("")),
+                    table: None,
                 });
             } else {
                 lines.push(RenderedLine {
@@ -363,6 +357,7 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
                         format!("  {}", arg_line),
                         Style::default().fg(style::TEXT_MUTED),
                     )),
+                    table: None,
                 });
             }
         }
@@ -1301,11 +1296,12 @@ mod tests {
             ],
             col_widths: vec![6, 6],
         };
-        let output = ChatRenderOutput { rendered: vec![] };
-        // Tables are now rendered as text lines — verify table_as_text_lines
-        let lines = table_as_text_lines(&td, "┃", crate::tui::style::TEXT_PRIMARY);
-        assert!(!lines.is_empty(), "table_as_text_lines should produce output");
-        let _ = output;
+        let output = ChatRenderOutput {
+            rendered: vec![],
+            tables: vec![td.clone()],
+        };
+        let widget = output.build_table_widget(&td);
+        let _ = widget;
     }
 
     // ── render_md basic tests ──
@@ -1402,9 +1398,8 @@ mod tests {
             status: MessageStatus::Completed,
         }];
         let output = build_chat_content(&state, 80, 0);
-        // Tables are rendered as text lines — verify pipe characters exist
-        let all_text: String = output.rendered.iter().map(|r| r.line.to_string()).collect::<Vec<_>>().join("\n");
-        assert!(all_text.contains("Name"), "table header should appear in rendered output");
-        assert!(all_text.contains("Value"), "table header should appear in rendered output");
+        assert!(!output.tables.is_empty(), "should have at least one table");
+        let table_line_count = output.rendered.iter().filter(|r| r.table.is_some()).count();
+        assert!(table_line_count > 0, "should have table placeholder lines");
     }
 }
