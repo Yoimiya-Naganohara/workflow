@@ -139,10 +139,10 @@ impl Tui {
                                 Event::Mouse(mouse) => {
                                     let mut state = self.state.write().await;
                                     match mouse.kind {
-                                        MouseEventKind::ScrollDown if state.ui.focus == Focus::Chat => {
+                                        MouseEventKind::ScrollDown => {
                                             state.ui.chat_scroll = state.ui.chat_scroll.saturating_add(1);
                                         }
-                                        MouseEventKind::ScrollUp if state.ui.focus == Focus::Chat => {
+                                        MouseEventKind::ScrollUp => {
                                             state.ui.chat_scroll = state.ui.chat_scroll.saturating_sub(1);
                                             state.ui.auto_scroll = false;
                                         }
