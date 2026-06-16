@@ -362,7 +362,7 @@ impl Plan {
                 let after_role = line[pos + pattern.len()..].trim();
                 let goal_start = after_role.find('"').or_else(|| after_role.find('\u{201c}'))?;
                 // Use char-based advance — the found quote may be multi-byte UTF-8.
-                let quote = after_role[goal_start..].chars().next().unwrap();
+                let quote = after_role[goal_start..].chars().next()?;
                 let closing = match quote {
                     '"' => '"',
                     '\u{201c}' => '\u{201d}',

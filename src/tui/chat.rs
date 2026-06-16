@@ -175,11 +175,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
             // ── Text line: compute wrapped visual height ──
             let line_width = rl.line.width();
             // ceil(line_width / avail) — minimum 1 row even for empty lines
-            let visual_rows = if line_width == 0 {
-                1
-            } else {
-                line_width.div_ceil(avail)
-            };
+            let visual_rows = if line_width == 0 { 1 } else { line_width.div_ceil(avail) };
 
             let line_area = Rect::new(
                 area.x,

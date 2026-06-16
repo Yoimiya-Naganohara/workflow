@@ -36,6 +36,7 @@ pub(crate) struct TableDef {
 #[derive(Debug, Clone)]
 pub(crate) struct ChatRenderOutput {
     pub rendered: Vec<RenderedLine>,
+    #[allow(dead_code)]
     pub tables: Vec<TableDef>,
 }
 
@@ -302,35 +303,96 @@ fn render_md(text: &str, body_width: usize) -> MdRenderResult {
 // ═══════════════════════════════════════════════════════════════════════════
 //  Tool call rendering
 // ═══════════════════════════════════════════════════════════════════════════
-
+/// Render a tool-call message.  The content uses the format:
+///   `tool_name` or `tool_name — args`
+/// Newlines separate multiple calls in the same message (streaming).
+///
+/// Each call renders as:
+///   ┃ tool_name
+///   ┃   args line 1
+///   ┃   args line 2
+///   …
 fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::ChatMessage) {
     let bar = Span::styled("┃", Style::default().fg(style::TEXT_MUTED));
     let content = &message.content;
-    let (name, args) = if let Some(pos) = content.find(" — ") {
-        (&content[..pos], &content[pos + 5..])
-    } else {
-        (content.as_str(), "")
-    };
 
-    let mut parts = vec![
-        bar,
-        Span::styled(
-            name.trim().to_string(),
-            Style::default().fg(style::PURPLE).add_modifier(Modifier::BOLD),
-        ),
-    ];
+    for call_line in content.lines() {
+        let call_line = call_line.trim();
+        if call_line.is_empty() {
+            continue;
+        }
 
-    if !args.is_empty() {
-        parts.push(Span::styled(
-            format!(" {}", args.trim()),
-            Style::default().fg(style::TEXT_MUTED),
-        ));
+        let (name, args) = if let Some(pos) = call_line.find(" — ") {
+            (&call_line[..pos], call_line[pos + 3..].trim())
+        } else {
+            (call_line, "")
+        };
+
+        // Tool name line (purple bold)
+        lines.push(RenderedLine {
+            line: Line::from(vec![
+                bar.clone(),
+                Span::styled(
+                    name.trim().to_string(),
+                    Style::default().fg(style::PURPLE).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            table: None,
+        });
+
+        // Args — each on its own indented line
+        if !args.is_empty() {
+            let arg_lines = split_args_for_display(args);
+            for arg_seg in arg_lines {
+                lines.push(RenderedLine {
+                    line: Line::from(vec![
+                        bar.clone(),
+                        Span::styled(
+                            format!("  {}", arg_seg),
+                            Style::default().fg(style::TEXT_MUTED),
+                        ),
+                    ]),
+                    table: None,
+                });
+            }
+        }
+    }
+}
+
+/// Split tool-call arguments into display-friendly segments.
+/// Breaks on `, ` (JSON key-value boundaries) rather than one huge line.
+fn split_args_for_display(args: &str) -> Vec<String> {
+    let args = args.trim();
+    if args.len() <= 60 {
+        return vec![args.to_string()];
     }
 
-    lines.push(RenderedLine {
-        line: Line::from(parts),
-        table: None,
-    });
+    // Try breaking on `, ` — JSON-style key-value pairs
+    let comma_segs: Vec<&str> = args.split(", ").collect();
+    if comma_segs.len() >= 2 {
+        let mut result: Vec<String> = Vec::new();
+        let mut line = String::new();
+        for seg in comma_segs {
+            if !line.is_empty() && line.len() + seg.len() + 2 > 55 {
+                result.push(line);
+                line = seg.to_string();
+            } else {
+                if !line.is_empty() {
+                    line.push_str(", ");
+                }
+                line.push_str(seg);
+            }
+        }
+        if !line.is_empty() {
+            result.push(line);
+        }
+        if result.len() >= 2 {
+            return result;
+        }
+    }
+
+    // Fallback: return as-is (the wrapping engine in render_chat_content handles it)
+    vec![args.to_string()]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

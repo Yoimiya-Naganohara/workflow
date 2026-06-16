@@ -205,12 +205,15 @@ impl Default for ModelsDevSource {
 
 impl ModelsDevSource {
     pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(30))
-                .build()
-                .expect("reqwest Client::new"),
-        }
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|e| {
+                // reqwest client construction only fails on TLS backend issues,
+                // which is unrecoverable. Panic with a clear message.
+                panic!("Failed to build reqwest client (TLS backend issue): {}", e);
+            });
+        Self { client }
     }
 }
 

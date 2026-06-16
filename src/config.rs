@@ -182,7 +182,9 @@ impl EnvConfigSource {
     }
 
     fn probe_tcp(addr: &str) -> bool {
-        let addr: std::net::SocketAddr = addr.parse().expect("static socket addr");
+        let Ok(addr) = addr.parse::<std::net::SocketAddr>() else {
+            return false;
+        };
         // Non-blocking check — tokio handles the timeout via select! in the caller.
         std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
     }

@@ -215,7 +215,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
 
         // ── Sub-commands with arguments ──
         _ if trimmed.starts_with("/sh ") => {
-            let arg = trimmed.strip_prefix("/sh ").unwrap().trim();
+            let arg = if let Some(s) = trimmed.strip_prefix("/sh ") {
+                s.trim()
+            } else {
+                unreachable!()
+            };
             if !arg.is_empty() {
                 core.messages.push(ChatMessage::system(format!("$ {}", arg)));
                 state.effects.push(Effect::ExecuteShell {
@@ -251,7 +255,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         // These should be caught by the specific matches above.
         // If we get here, it's an unknown sub-command.
         _ if trimmed.starts_with("/pool ") => {
-            let rest = trimmed.strip_prefix("/pool ").unwrap().trim();
+            let rest = if let Some(s) = trimmed.strip_prefix("/pool ") {
+                s.trim()
+            } else {
+                unreachable!()
+            };
             core.messages.push(ChatMessage::system(format!(
                 "Unknown pool command: {}. Use /pool for help.",
                 rest
@@ -321,7 +329,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/role show ") => {
-            let role_name = trimmed.strip_prefix("/role show ").unwrap().trim().to_string();
+            let role_name = if let Some(s) = trimmed.strip_prefix("/role show ") {
+                s.trim().to_string()
+            } else {
+                unreachable!()
+            };
             if role_name.is_empty() {
                 core.messages.push(ChatMessage::system("Usage: /role show <name>"));
             } else if let Some(runtime) = &core.runtime {
@@ -387,7 +399,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/role edit ") => {
-            let role_name = trimmed.strip_prefix("/role edit ").unwrap().trim().to_string();
+            let role_name = if let Some(s) = trimmed.strip_prefix("/role edit ") {
+                s.trim().to_string()
+            } else {
+                unreachable!()
+            };
             if role_name.is_empty() {
                 core.messages.push(ChatMessage::system("Usage: /role edit <name>"));
             } else if let Some(runtime) = &core.runtime {
@@ -455,7 +471,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/role optimize ") => {
-            let role_name = trimmed.strip_prefix("/role optimize ").unwrap().trim().to_string();
+            let role_name = if let Some(s) = trimmed.strip_prefix("/role optimize ") {
+                s.trim().to_string()
+            } else {
+                unreachable!()
+            };
             if role_name.is_empty() {
                 core.messages.push(ChatMessage::system("Usage: /role optimize <name>"));
             } else if let Some(runtime) = &core.runtime {
@@ -470,34 +490,33 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                                     role_name,
                                     experiences.len()
                                 )));
-                            } else if let Some(reason) = rt
-                                .optimization_tracker
-                                .lock()
-                                .unwrap()
-                                .can_optimize(role.template_id, experiences.len())
-                            {
-                                core.messages.push(ChatMessage::system(format!(
-                                    "Cannot optimize '{}': {}",
-                                    role_name, reason
-                                )));
-                            } else if rt.provider.is_some() {
-                                core.messages.push(ChatMessage::system(format!(
-                                    "Optimizing role '{}' from {} experiences...",
-                                    role_name,
-                                    experiences.len()
-                                )));
-                                state.effects.push(Effect::OptimizeRole {
-                                    role_name: role_name.clone(),
-                                    runtime: core.runtime.clone().unwrap(),
-                                });
-                                // Mark optimization to prevent immediate re-run
-                                if let Ok(mut tracker) = rt.optimization_tracker.lock() {
-                                    tracker.mark_optimized(role.template_id, experiences.len());
+                            } else if let Ok(tracker) = rt.optimization_tracker.lock() {
+                                if let Some(reason) = tracker.can_optimize(role.template_id, experiences.len()) {
+                                    core.messages.push(ChatMessage::system(format!(
+                                        "Cannot optimize '{}': {}",
+                                        role_name, reason
+                                    )));
+                                } else if rt.provider.is_some() {
+                                    core.messages.push(ChatMessage::system(format!(
+                                        "Optimizing role '{}' from {} experiences...",
+                                        role_name,
+                                        experiences.len()
+                                    )));
+                                    if let Some(runtime) = core.runtime.clone() {
+                                        state.effects.push(Effect::OptimizeRole {
+                                            role_name: role_name.clone(),
+                                            runtime,
+                                        });
+                                    }
+                                    // Mark optimization to prevent immediate re-run
+                                    if let Ok(mut tracker) = rt.optimization_tracker.lock() {
+                                        tracker.mark_optimized(role.template_id, experiences.len());
+                                    }
+                                } else {
+                                    core.messages.push(ChatMessage::system(
+                                        "No LLM provider configured. Connect a provider first via /connect.",
+                                    ));
                                 }
-                            } else {
-                                core.messages.push(ChatMessage::system(
-                                    "No LLM provider configured. Connect a provider first via /connect.",
-                                ));
                             }
                         }
                         None => {
@@ -534,7 +553,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/role delete ") => {
-            let role_name = trimmed.strip_prefix("/role delete ").unwrap().trim().to_string();
+            let role_name = if let Some(s) = trimmed.strip_prefix("/role delete ") {
+                s.trim().to_string()
+            } else {
+                unreachable!()
+            };
             if role_name.is_empty() {
                 core.messages.push(ChatMessage::system("Usage: /role delete <name>"));
             } else if let Some(runtime) = &core.runtime {
@@ -582,7 +605,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/role default ") => {
-            let role_name = trimmed.strip_prefix("/role default ").unwrap().trim().to_string();
+            let role_name = if let Some(s) = trimmed.strip_prefix("/role default ") {
+                s.trim().to_string()
+            } else {
+                unreachable!()
+            };
             if role_name.is_empty() {
                 core.messages.push(ChatMessage::system("Usage: /role default <name>"));
             } else if let Some(runtime) = &core.runtime {
@@ -636,7 +663,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/agent inspect ") => {
-            let id_str = trimmed.strip_prefix("/agent inspect ").unwrap().trim().to_string();
+            let id_str = if let Some(s) = trimmed.strip_prefix("/agent inspect ") {
+                s.trim().to_string()
+            } else {
+                unreachable!()
+            };
             if id_str.is_empty() {
                 core.messages
                     .push(ChatMessage::system("Usage: /agent inspect <agent_id>"));
@@ -672,7 +703,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/memo show ") => {
-            let key = trimmed.strip_prefix("/memo show ").unwrap().trim().to_string();
+            let key = if let Some(s) = trimmed.strip_prefix("/memo show ") {
+                s.trim().to_string()
+            } else {
+                unreachable!()
+            };
             if key.is_empty() {
                 core.messages.push(ChatMessage::system("Usage: /memo show <key>"));
             } else {
@@ -685,7 +720,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/memo write ") => {
-            let rest = trimmed.strip_prefix("/memo write ").unwrap().trim().to_string();
+            let rest = if let Some(s) = trimmed.strip_prefix("/memo write ") {
+                s.trim().to_string()
+            } else {
+                unreachable!()
+            };
             if let Some((key, value)) = rest.split_once('=') {
                 let key = key.trim();
                 let value = value.trim();
@@ -706,7 +745,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/memo delete ") => {
-            let key = trimmed.strip_prefix("/memo delete ").unwrap().trim().to_string();
+            let key = if let Some(s) = trimmed.strip_prefix("/memo delete ") {
+                s.trim().to_string()
+            } else {
+                unreachable!()
+            };
             if key.is_empty() {
                 core.messages.push(ChatMessage::system("Usage: /memo delete <key>"));
             } else {
@@ -790,7 +833,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/reflect max ") => {
-            let val = trimmed.strip_prefix("/reflect max ").unwrap().trim();
+            let val = if let Some(s) = trimmed.strip_prefix("/reflect max ") {
+                s.trim()
+            } else {
+                unreachable!()
+            };
             if let Ok(n) = val.parse::<u8>() {
                 state.core.reflection.max_attempts = n;
                 state
@@ -809,7 +856,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/reflect rule ") => {
-            let rest = trimmed.strip_prefix("/reflect rule ").unwrap().trim();
+            let rest = if let Some(s) = trimmed.strip_prefix("/reflect rule ") {
+                s.trim()
+            } else {
+                unreachable!()
+            };
             let parts: Vec<&str> = rest.splitn(2, ' ').collect();
             if parts.len() == 2 {
                 let (rule_name, state_str) = (parts[0], parts[1]);

@@ -419,15 +419,18 @@ impl AppState {
                 args,
                 timestamp: _,
             } => {
-                // Tool call: single-line format, args truncated.
-                // Replace internal newlines in args to keep display flat.
+                // Tool call: "name — args" format, args truncated.
                 let args_flat = args.replace('\n', " ").replace('\r', "");
                 let args_flat = if args_flat.len() > 80 {
                     format!("{}…", &args_flat[..80])
                 } else {
                     args_flat
                 };
-                let line = format!("> {}({})", name, args_flat);
+                let line = if args_flat.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{} — {}", name, args_flat)
+                };
 
                 if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
