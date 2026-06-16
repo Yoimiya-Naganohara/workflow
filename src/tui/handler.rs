@@ -306,12 +306,21 @@ impl Tui {
                             filtered.get(state.popup_selected.min(filtered.len().saturating_sub(1)))
                         {
                             let full_cmd = format!("{} {}", parent, name);
-                            ui.input = full_cmd;
-                            ui.input_cursor = Self::char_count(&ui.input);
-                            state.popup_mode = PopupMode::None;
+                            state.popup_mode = PopupMode::ShellInput {
+                                cmd: full_cmd,
+                                input: String::new(),
+                            };
                             state.popup_selected = 0;
-                            return self.handle_input_submit(state);
+                            return true;
                         }
+                    }
+                    PopupMode::ShellInput { cmd, input } => {
+                        let full_cmd = format!("{} {}", cmd, input.trim());
+                        state.popup_mode = PopupMode::None;
+                        state.popup_selected = 0;
+                        ui.input = full_cmd;
+                        ui.input_cursor = Self::char_count(&ui.input);
+                        return self.handle_input_submit(state);
                     }
                     PopupMode::Providers => {
                         // Select provider from filtered list.

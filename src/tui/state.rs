@@ -806,7 +806,6 @@ impl Default for UiState {
             tree_agent_ids: Vec::new(),
             input_disabled: false,
             total_chat_lines: 0,
-            pending_shell_cmd: false,
         }
     }
 }

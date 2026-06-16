@@ -92,9 +92,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         "/sh" => {
-            core.messages.push(ChatMessage::system("Usage: /sh <command>"));
-            ui.input.clear();
-            ui.input_cursor = 0;
+            state.popup_mode = PopupMode::ShellInput {
+                cmd: "/sh".to_string(),
+                input: String::new(),
+            };
+            state.popup_selected = 0;
             true
         }
 
@@ -235,7 +237,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         _ if trimmed.starts_with("/pool query ") || trimmed.starts_with("/pool q ") => {
             let query_text = trimmed.split_once(' ').map(|x| x.1).unwrap_or("").trim().to_string();
             if query_text.is_empty() {
-                core.messages.push(ChatMessage::system("Usage: /pool query <text>"));
+                state.popup_mode = PopupMode::ShellInput {
+                    cmd: "/pool query".to_string(),
+                    input: String::new(),
+                };
+                state.popup_selected = 0;
             } else if let Some(runtime) = core.runtime.clone() {
                 state.effects.push(Effect::PoolQuery {
                     query_text,
@@ -1372,16 +1378,13 @@ mod tests {
     }
 
     #[test]
-    fn test_dispatch_sh_without_arg_shows_usage() {
+    fn test_dispatch_sh_without_arg_opens_shell_input() {
         let mut state = AppState::default();
         dispatch("/sh", &mut state, "12:00:00");
         assert!(
-            state
-                .core
-                .messages
-                .last()
-                .map(|m| m.content.contains("Usage"))
-                .unwrap_or(false)
+            matches!(state.popup_mode, crate::tui::state::PopupMode::ShellInput { .. }),
+            "/sh without args should open ShellInput popup, got {:?}",
+            state.popup_mode
         );
     }
 

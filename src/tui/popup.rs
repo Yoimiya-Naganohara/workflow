@@ -73,6 +73,7 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
             (count.min(8) as u16 + 2).min(10)
         }
         PopupMode::AgentDetail { .. } => 12,
+        PopupMode::ShellInput { .. } => 3,
     }
 }
 
@@ -80,6 +81,7 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
 pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
     match &state.popup_mode {
         PopupMode::None => {}
+        PopupMode::ShellInput { cmd, input } => render_shell_input_popup(f, area, cmd, input),
         PopupMode::Commands => render_command_popup(f, area, state),
         PopupMode::SubCommand { parent, items } => render_subcommand_popup(f, area, state, parent, items),
         PopupMode::Providers => render_provider_popup(f, area, state),
@@ -205,6 +207,20 @@ fn highlight_matches(cmd: &str, query: &str) -> Vec<Span<'static>> {
         remaining = iter.as_str();
     }
     spans
+}
+
+fn render_shell_input_popup(f: &mut Frame, area: Rect, _cmd: &str, input: &str) {
+    let display = if input.is_empty() {
+        String::new()
+    } else {
+        input.to_string()
+    };
+    f.render_widget(
+        ratatui::widgets::Paragraph::new(display)
+            .block(crate::tui::style::panel("Shell Command"))
+            .style(Style::default().fg(style::TEXT_PRIMARY)),
+        area,
+    );
 }
 
 fn render_subcommand_popup(f: &mut Frame, area: Rect, state: &AppState, parent: &str, items: &[(String, String)]) {
