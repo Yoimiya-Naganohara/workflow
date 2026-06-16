@@ -591,7 +591,11 @@ where
                     match events.next() {
                         Some(Event::Start(Tag::TableCell)) => {
                             let line_groups = collect_inline_spans(events);
-                            let text: String = line_groups.iter().flat_map(|g| g.iter()).map(|s| s.content.as_ref()).collect();
+                            let text: String = line_groups
+                                .iter()
+                                .flat_map(|g| g.iter())
+                                .map(|s| s.content.as_ref())
+                                .collect();
                             cells.push(text);
                         }
                         Some(Event::End(TagEnd::TableHead)) => break,
@@ -609,7 +613,11 @@ where
                     match events.next() {
                         Some(Event::Start(Tag::TableCell)) => {
                             let line_groups = collect_inline_spans(events);
-                            let text: String = line_groups.iter().flat_map(|g| g.iter()).map(|s| s.content.as_ref()).collect();
+                            let text: String = line_groups
+                                .iter()
+                                .flat_map(|g| g.iter())
+                                .map(|s| s.content.as_ref())
+                                .collect();
                             cells.push(text);
                         }
                         Some(Event::End(TagEnd::TableRow)) => break,
@@ -831,24 +839,15 @@ fn flush_code_block_into(result: &mut MdRenderResult, lang: &str, code_lines: &[
     if !lang.is_empty() {
         result.push_line(vec![
             Span::raw("  "),
-            Span::styled(format!("▐ {} ", lang), Style::default().fg(style::TEXT_MUTED)),
-        ]);
-    } else {
-        result.push_line(vec![
-            Span::raw("  "),
-            Span::styled("▐", Style::default().fg(style::TEXT_MUTED)),
+            Span::styled(format!("# {} ", lang), Style::default().fg(style::TEXT_MUTED)),
         ]);
     }
     for code_line in code_lines {
         result.push_line(vec![
-            Span::styled("▐ ", Style::default().fg(style::TEXT_MUTED)),
+            Span::styled("  ", Style::default().fg(style::TEXT_MUTED)),
             Span::styled(code_line.clone(), Style::default().fg(style::TEXT_PRIMARY)),
         ]);
     }
-    result.push_line(vec![
-        Span::raw("  "),
-        Span::styled("▐", Style::default().fg(style::TEXT_MUTED)),
-    ]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1415,7 +1414,7 @@ mod tests {
     #[test]
     fn test_render_md_code_block() {
         let result = render_md("```rust\nfn main() {}\n```", 80);
-        assert_eq!(result.lines.len(), 3); // header + code + footer
+        assert_eq!(result.lines.len(), 2); // header + code (no footer bars)
     }
 
     #[test]

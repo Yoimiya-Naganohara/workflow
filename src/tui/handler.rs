@@ -263,9 +263,10 @@ impl Tui {
                 match &state.popup_mode {
                     PopupMode::Commands => {
                         let prefix = ui.input.trim().to_lowercase();
+                        let query = prefix.trim_start_matches('/');
                         let matches: Vec<_> = commands::COMMANDS
                             .iter()
-                            .filter(|(cmd, _)| cmd.starts_with(&prefix))
+                            .filter(|(cmd, _)| cmd.to_lowercase().contains(query))
                             .collect();
                         if let Some((cmd, _)) = matches.get(state.popup_selected.min(matches.len().saturating_sub(1))) {
                             ui.input = cmd.to_string();
@@ -445,9 +446,10 @@ impl Tui {
                 // Tab cycles through command matches or does nothing in other popups
                 if state.popup_mode == PopupMode::Commands {
                     let prefix = ui.input.trim().to_lowercase();
+                    let query = prefix.trim_start_matches('/');
                     let matches: Vec<_> = commands::COMMANDS
                         .iter()
-                        .filter(|(cmd, _)| cmd.starts_with(&prefix))
+                        .filter(|(cmd, _)| cmd.to_lowercase().contains(query))
                         .collect();
                     if !matches.is_empty() {
                         state.popup_selected = (state.popup_selected + 1) % matches.len();
@@ -501,10 +503,10 @@ impl Tui {
     fn handle_input_submit(&self, state: &mut AppState) -> bool {
         // Resolve paste marker → actual content
         let raw = state.ui.input.clone();
-        let input = if let Some(ref paste) = state.ui.pending_paste.take() {
-            if let Some(start) = raw.rfind("[📋") {
-                let marker_end = raw[start..].find(']').map(|e| start + e + 1).unwrap_or(raw.len());
-                format!("{}{}{}", &raw[..start], paste, &raw[marker_end..])
+        let input = if let Some(paste_content) = state.ui.pending_paste.take() {
+            if let Some(start) = raw.find("[📋") {
+                let after = raw[start..].find(']').map(|e| start + e + 1).unwrap_or(raw.len());
+                format!("{}{}{}", &raw[..start], paste_content, &raw[after..])
             } else {
                 raw
             }

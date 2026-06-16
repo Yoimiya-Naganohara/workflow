@@ -3,7 +3,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::Style,
+    style::{Modifier, Style},
     text::Span,
     widgets::{Paragraph, Row, Table, TableState},
 };
@@ -24,7 +24,14 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
         PopupMode::None => 0,
         PopupMode::Commands => {
             let prefix = state.ui.input.trim().to_lowercase();
-            let count = COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).count();
+            if prefix.is_empty() || prefix == "/" {
+                return 0;
+            }
+            let query = prefix.trim_start_matches('/');
+            let count = COMMANDS
+                .iter()
+                .filter(|(cmd, _)| cmd.to_lowercase().contains(query))
+                .count();
             (count.min(6) as u16 + 2).min(8)
         }
         PopupMode::SubCommand { parent, items } => {
@@ -110,18 +117,42 @@ fn filter_text_for_subcommand<'a>(input: &'a str, parent: &str) -> &'a str {
 
 fn render_command_popup(f: &mut Frame, area: Rect, state: &AppState) {
     let prefix = state.ui.input.trim().to_lowercase();
-    let matches: Vec<_> = COMMANDS.iter().filter(|(cmd, _)| cmd.starts_with(&prefix)).collect();
+    if prefix.is_empty() || prefix == "/" {
+        return;
+    }
+
+    // Substring matching (interactive code-completion style)
+    let matches: Vec<_> = COMMANDS
+        .iter()
+        .filter(|(cmd, _)| {
+            let cmd_lower = cmd.to_lowercase();
+            // Match each character of prefix in order (fuzzy-like)
+            // For simplicity, use substring match which is what users expect
+            // from a command completion dropdown.
+            cmd_lower.contains(prefix.trim_start_matches('/'))
+        })
+        .collect();
+
     if matches.is_empty() {
         return;
     }
 
     let max_cmd_len = matches.iter().map(|(cmd, _)| cmd.len()).max().unwrap_or(10);
+    let query = prefix.trim_start_matches('/');
+
     let rows: Vec<Row> = matches
         .iter()
         .map(|(cmd, desc)| {
+            // Highlight matching characters in the command name
+            let cmd_spans = if query.is_empty() {
+                vec![Span::styled(*cmd, Style::default().fg(style::ACTIVE))]
+            } else {
+                highlight_matches(cmd, query)
+            };
+
             Row::new(vec![
-                Span::styled(*cmd, Style::default().fg(style::ACTIVE)),
-                Span::styled(*desc, style::hint_style()),
+                ratatui::text::Line::from(cmd_spans),
+                ratatui::text::Line::from(Span::styled(*desc, style::hint_style())),
             ])
         })
         .collect();
@@ -143,6 +174,37 @@ fn render_command_popup(f: &mut Frame, area: Rect, state: &AppState) {
         area,
         &mut table_state,
     );
+}
+
+/// Build styled spans for a command name, highlighting characters that match `query`.
+fn highlight_matches(cmd: &str, query: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut remaining = cmd;
+    let mut query_chars = query.chars().peekable();
+
+    while let Some(ch) = remaining.chars().next() {
+        let lower_ch = ch.to_lowercase().next().unwrap_or(ch);
+        if let Some(&qc) = query_chars.peek() {
+            if lower_ch == qc {
+                spans.push(Span::styled(
+                    ch.to_string(),
+                    Style::default()
+                        .fg(style::ACTIVE)
+                        .add_modifier(Modifier::BOLD)
+                        .add_modifier(Modifier::UNDERLINED),
+                ));
+                query_chars.next();
+            } else {
+                spans.push(Span::styled(ch.to_string(), Style::default().fg(style::TEXT_SECONDARY)));
+            }
+        } else {
+            spans.push(Span::styled(ch.to_string(), Style::default().fg(style::TEXT_SECONDARY)));
+        }
+        let mut iter = remaining.chars();
+        iter.next();
+        remaining = iter.as_str();
+    }
+    spans
 }
 
 fn render_subcommand_popup(f: &mut Frame, area: Rect, state: &AppState, parent: &str, items: &[(String, String)]) {
