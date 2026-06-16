@@ -180,11 +180,24 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
                     .iter()
                     .map(|r| r.line.clone())
                     .collect();
+
+                // Compute total wrapped visual height for the batch.
+                // Paragraph::Wrap handles the actual line-breaking; this is only
+                // for tracking the logical y position (smooth scrolling).
+                let avail = area.width.max(1) as usize;
+                let visual_h: usize = lines
+                    .iter()
+                    .map(|l| {
+                        let w = l.width();
+                        if w == 0 { 1 } else { w.div_ceil(avail) }
+                    })
+                    .sum();
+
                 let text_area = Rect::new(
                     area.x,
                     y,
                     area.width,
-                    (batch_count as u16).min(area.bottom().saturating_sub(y)),
+                    (visual_h as u16).min(area.bottom().saturating_sub(y)),
                 );
                 if text_area.height > 0 {
                     f.render_widget(
@@ -192,7 +205,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
                         text_area,
                     );
                 }
-                y += batch_count as u16;
+                y += visual_h as u16;
             }
         }
     }
