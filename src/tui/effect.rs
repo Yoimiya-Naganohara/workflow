@@ -230,10 +230,17 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
             runtime,
             now,
         } => {
-            let rt = runtime.read().await;
-            let (content, is_error) = match rt.embed(&query_text).await {
+            // Clone the embedding service to avoid holding the runtime read lock
+            // across the HTTP request in embed().
+            let embed_service = {
+                let guard = runtime.read().await;
+                guard.embedding_service()
+            };
+            let (content, is_error) = match embed_service.embed(&query_text).await {
                 Ok(emb) => {
-                    let results = rt.search_experience(&emb, 10);
+                    // Re-acquire read lock briefly for sync search (no .await).
+                    let guard = runtime.read().await;
+                    let results = guard.search_experience(&emb, 10);
                     if results.is_empty() {
                         ("No matching experiences found.".to_string(), false)
                     } else {
@@ -340,11 +347,17 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                     // Record experience (only for completed, not cancelled).
                     if !full_response.is_empty() {
                         if let Some(rt) = &runtime {
-                            let rt = rt.read().await;
-                            if let Ok(emb) = rt.embed(&input).await {
+                            // Clone the embedding service to avoid holding the lock
+                            // across the HTTP request in embed().
+                            let embed_service = {
+                                let guard = rt.read().await;
+                                guard.embedding_service()
+                            };
+                            if let Ok(emb) = embed_service.embed(&input).await {
+                                let guard = rt.read().await;
                                 // TUI chat lacks agent context — role_template_id is None
                                 // (agent-executed experiences set this in runtime.rs)
-                                rt.add_experience(ExperienceEntry {
+                                guard.add_experience(ExperienceEntry {
                                     embedding: emb,
                                     applicability_vector: [0.0f32; 128],
                                     tool_bitmap: 0,

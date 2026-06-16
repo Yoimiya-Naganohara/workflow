@@ -362,6 +362,12 @@ impl AgentRuntime {
         self.pipeline.add_experience(entry);
     }
 
+    /// Return a cloneable reference to the embedding service.
+    /// Use this to avoid holding the runtime lock across `.await` points.
+    pub fn embedding_service(&self) -> Arc<dyn EmbeddingService> {
+        self.pipeline.embedding().clone()
+    }
+
     /// Embed text using the pipeline's embedding service.
     pub async fn embed(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
         self.pipeline.embedding().embed(text).await

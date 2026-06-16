@@ -20,16 +20,6 @@ pub(crate) struct RenderedLine {
     pub line: Line<'static>,
     /// If this line is part of a table region, the table definition.
     pub table: Option<TableDef>,
-    /// If this line is a tool-call block, the tool call definition.
-    pub tool_call: Option<ToolCallDef>,
-}
-
-/// Metadata for rendering a tool-call as a bordered Paragraph block.
-#[derive(Debug, Clone)]
-pub(crate) struct ToolCallDef {
-    pub name: String,
-    /// Args text, with original newlines preserved.
-    pub args: String,
 }
 
 /// Metadata for rendering a markdown table as a ratatui Table widget.
@@ -127,14 +117,13 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
                 rendered.push(RenderedLine {
                     line: Line::from(styled),
                     table: None,
-                    tool_call: None,
                 });
             }
             continue;
         }
 
         if matches!(message.role, MessageRole::Decision) {
-            tool_call_lines(&mut rendered, message);
+            tool_call_lines(&mut rendered, message, content_width);
             continue;
         }
 
@@ -169,7 +158,6 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
                             rendered.push(RenderedLine {
                                 line: Line::from(Span::raw("")),
                                 table: Some(table_def.clone()),
-                                tool_call: None,
                             });
                         }
 
@@ -185,7 +173,6 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
                     rendered.push(RenderedLine {
                         line: Line::from(styled),
                         table: None,
-                        tool_call: None,
                     });
                     line_idx += 1;
                 }
@@ -198,7 +185,6 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
                 rendered.push(RenderedLine {
                     line: Line::from(styled),
                     table: None,
-                    tool_call: None,
                 });
             }
         }
@@ -208,7 +194,6 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
         rendered.push(RenderedLine {
             line: Line::from("No messages yet."),
             table: None,
-            tool_call: None,
         });
     }
 
@@ -322,10 +307,20 @@ fn render_md(text: &str, body_width: usize) -> MdRenderResult {
 ///   `tool_name` or `tool_name — args`
 /// Newlines separate multiple calls in the same message (streaming).
 ///
-/// Each call renders as a bordered block (via ToolCallDef), letting ratatui's
-/// built-in Wrap handle line-breaking while preserving original newlines.
-fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::ChatMessage) {
+/// Creates text-based box-drawing lines so that sizing is handled
+/// naturally by Paragraph::Wrap in the render loop (no height estimation).
+///
+///   ┌─ read_file ────────────┐
+///   │ path=/foo/bar.txt      │
+///   └────────────────────────┘
+fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::ChatMessage, box_width: usize) {
+    use unicode_width::UnicodeWidthStr;
     let content = &message.content;
+    // box_width is the available text width inside the chat area.
+    // The box-drawing block should be 2 chars narrower to leave room
+    // for the chat-sidebar margin.
+    let w = box_width.saturating_sub(2).max(20);
+    let inner_w = w.saturating_sub(4); // room for "┌─ " and " ─┐"
 
     for call_line in content.lines() {
         let call_line = call_line.trim();
@@ -339,10 +334,38 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
             (call_line.to_string(), String::new())
         };
 
+        // ── Top border with tool name ──
+        let title = format!(" {} ", name);
+        let title_w = title.width();
+        let left_dashes = 1_usize; // one "─" before the title
+        let right_dashes = inner_w.saturating_sub(title_w + left_dashes);
+        let top = format!(
+            "┌─{}{:─>w$}┐",
+            title,
+            "",
+            w = right_dashes
+        );
         lines.push(RenderedLine {
-            line: Line::from(Span::raw("")),     // placeholder — rendered as block widget
+            line: Line::from(Span::styled(top, Style::default().fg(style::TEXT_MUTED))),
             table: None,
-            tool_call: Some(ToolCallDef { name, args }),
+        });
+
+        // ── Args content (one line per arg) ──
+        for arg_line in args.lines() {
+            lines.push(RenderedLine {
+                line: Line::from(Span::styled(
+                    format!("│ {}", arg_line),
+                    Style::default().fg(style::TEXT_MUTED),
+                )),
+                table: None,
+            });
+        }
+
+        // ── Bottom border ──
+        let bot = format!("└{:─>w$}┘", "", w = w.saturating_sub(2));
+        lines.push(RenderedLine {
+            line: Line::from(Span::styled(bot, Style::default().fg(style::TEXT_MUTED))),
+            table: None,
         });
     }
 }

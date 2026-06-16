@@ -10,9 +10,8 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Paragraph, Wrap},
 };
-use unicode_width::UnicodeWidthStr;
 
 use super::chat_lines::ChatRenderOutput;
 use super::state::{AppState, PopupMode};
@@ -154,42 +153,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
     while y < area.bottom() && i < end {
         let rl = &output.rendered[i];
 
-        if let Some(ref tc) = rl.tool_call {
-            // ── Tool-call block: bordered Paragraph with Wrap ──
-            // Block border takes 1 char on each side → content width = area.width - 2.
-            let inner_w = area.width.saturating_sub(2).max(1) as usize;
-            let content_height: usize = tc.args.lines()
-                .map(|l| {
-                    let w = UnicodeWidthStr::width(l);
-                    if w == 0 { 1 } else { w.div_ceil(inner_w) }
-                })
-                .sum::<usize>()
-                .max(1);
-            let block_h = 2 + content_height; // top-border + content + bottom-border
-            let avail_h = area.bottom().saturating_sub(y);
-            let actual_h = (block_h as u16).min(avail_h);
-
-            if actual_h > 0 {
-                let block_area = Rect::new(area.x, y, area.width, actual_h);
-                let block = Block::default()
-                    .borders(Borders::ALL)
-                    .border_set(ratatui::symbols::border::ROUNDED)
-                    .title(Span::styled(
-                        tc.name.clone(),
-                        Style::default().fg(style::PURPLE).add_modifier(ratatui::style::Modifier::BOLD),
-                    ))
-                    .border_style(Style::default().fg(style::TEXT_MUTED));
-
-                let para = Paragraph::new(Text::from(tc.args.clone()))
-                    .wrap(Wrap { trim: false })
-                    .block(block);
-
-                f.render_widget(para, block_area);
-            }
-
-            y += actual_h;
-            i += 1;
-        } else if let Some(ref td) = rl.table {
+        if let Some(ref td) = rl.table {
             // ── Table region: render as a single Table widget ──
             let table_h = td.end_line - td.start_line;
             let table_area = Rect::new(
