@@ -101,6 +101,17 @@ impl Tui {
             state.ui.chat_scroll.min(max_scroll)
         };
 
+        // Drop read lock before syncing chat_scroll back (tokio RwLock is
+        // read-writer-exclusive — try_write would fail while read guard lives).
+        drop(state);
+
+        if let Ok(mut s) = self.state.try_write() {
+            if s.ui.auto_scroll || chat_scroll != s.ui.chat_scroll {
+                s.ui.chat_scroll = chat_scroll;
+            }
+        }
+
+        let state = self.state.read().await;
         self.terminal.draw(|f| {
             let area = f.area();
 
