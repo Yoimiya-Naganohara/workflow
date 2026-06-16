@@ -334,7 +334,7 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
         }
 
         let (name, args) = if let Some(pos) = call_line.find(" — ") {
-            (call_line[..pos].trim().to_string(), call_line[pos + 3..].to_string())
+            (call_line[..pos].trim().to_string(), call_line[pos + 5..].to_string())
         } else {
             (call_line.to_string(), String::new())
         };
