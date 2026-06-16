@@ -16,9 +16,12 @@ pub mod tokenizer;
 
 use anyhow::Result;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind, MouseEventKind},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, EventStream,
+        KeyCode, KeyEventKind, MouseEventKind,
+    },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -49,7 +52,7 @@ impl Tui {
             )
         })?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture, EnableBracketedPaste)?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
         let (app_event_tx, app_event_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -149,6 +152,19 @@ impl Tui {
                                         _ => {}
                                     }
                                 }
+                                Event::Paste(text) => {
+                                    let mut state = self.state.write().await;
+                                    if state.ui.focus == crate::tui::state::Focus::Input
+                                        || state.popup_mode == crate::tui::state::PopupMode::KeyInput
+                                    {
+                                        let byte_idx = crate::tui::chat_lines::char_idx_to_byte_idx(
+                                            &state.ui.input,
+                                            state.ui.input_cursor,
+                                        );
+                                        state.ui.input.insert_str(byte_idx, &text);
+                                        state.ui.input_cursor += text.chars().count();
+                                    }
+                                }
                                 _ => {}
                             }
                         }
@@ -219,6 +235,11 @@ impl Drop for Tui {
         }
 
         let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture);
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            DisableBracketedPaste,
+        );
     }
 }
