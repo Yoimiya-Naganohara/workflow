@@ -154,8 +154,10 @@ impl Tui {
                                 }
                                 Event::Paste(text) => {
                                     let mut state = self.state.write().await;
-                                    if state.ui.focus == crate::tui::state::Focus::Input {
-                                        // Normal input: show summary marker, store full text
+                                    // 无弹窗 + 输入框焦点 → paste marker；其余情况都直接插入（弹窗过滤、KeyInput 等）
+                                    if state.popup_mode == crate::tui::state::PopupMode::None
+                                        && state.ui.focus == crate::tui::state::Focus::Input
+                                    {
                                         state.ui.pending_paste = Some(text.clone());
                                         let summary = if text.lines().count() > 1 {
                                             format!("[📋 Pasted {} chars / {} lines]", text.chars().count(), text.lines().count())
@@ -168,8 +170,7 @@ impl Tui {
                                         );
                                         state.ui.input.insert_str(byte_idx, &summary);
                                         state.ui.input_cursor += summary.chars().count();
-                                    } else if state.popup_mode == crate::tui::state::PopupMode::KeyInput {
-                                        // KeyInput: paste directly (no marker, no pending_paste)
+                                    } else {
                                         let byte_idx = crate::tui::chat_lines::char_idx_to_byte_idx(
                                             &state.ui.input,
                                             state.ui.input_cursor,
