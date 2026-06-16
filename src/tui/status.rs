@@ -10,6 +10,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
+use unicode_width::UnicodeWidthStr;
 
 use super::state::{AppMode, AppState};
 use super::style;
@@ -101,8 +102,9 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         }
         if out_tokens > 0 {
             let out_k = out_tokens as f64 / 1000.0;
+            let prefix = if in_tokens > 0 { " ↓" } else { "↓" };
             spans.push(Span::styled(
-                format!(" ↓{:0.1}k", out_k),
+                format!("{}{:0.1}k", prefix, out_k),
                 Style::default().fg(style::TEXT_SECONDARY),
             ));
         }
@@ -131,8 +133,8 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         }
     }
 
-    // ── Fill remaining space ──
-    let content_width: usize = spans.iter().map(|s| s.content.as_ref().chars().count()).sum();
+    // ── Fill remaining space (use Unicode display width for CJK safety) ──
+    let content_width: usize = spans.iter().map(|s| s.content.as_ref().width()).sum();
     let fill = (area.width as usize).saturating_sub(content_width + 1);
     if fill > 0 {
         spans.push(Span::raw(" ".repeat(fill)));

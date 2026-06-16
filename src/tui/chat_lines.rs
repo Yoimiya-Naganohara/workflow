@@ -307,25 +307,23 @@ fn render_md(text: &str, body_width: usize) -> MdRenderResult {
 ///   `tool_name` or `tool_name — args`
 /// Newlines separate multiple calls in the same message (streaming).
 ///
-/// Render a tool-call message.  Content uses `name — args` format.
-/// Newlines in content serve TWO purposes:
-/// 1. Multiple tool calls in one message (streaming):   `call1\ncall2`
-/// 2. Multi-line args in one call:                       `name — line1\nargs line2`
+/// Render a tool-call message.  The content uses `name — args` format.
+/// Newlines serve TWO purposes:
+/// 1. Multiple tool calls in one message (streaming): `call1\ncall2`
+/// 2. Multi-line args in one call: `name — line1\nargs line2`
 ///
-/// Distinction: a line containing ` — ` starts a new tool call; subsequent
-/// lines without ` — ` are continuation of the previous call's args.
+/// Lines with ` — ` start a new tool call; subsequent lines without ` — `
+/// are continuation of the previous call's args.
 ///
-/// Renders each call as a box-drawing block:
-///   ┌─ read_file ────┐
-///   │ args line 1    │
-///   │ args line 2    │
-///   └────────────────┘
-fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::ChatMessage, box_width: usize) {
-    use unicode_width::UnicodeWidthStr;
+/// Each call renders as a simple indented block (no box-drawing characters)
+/// so that every line wraps naturally via Paragraph::Wrap:
+///
+///   read_file           ← purple bold
+///     path=/foo.txt     ← gray, 2-space indent
+///     count=42
+///
+fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::ChatMessage, _box_width: usize) {
     let content = &message.content;
-    // Box width ≈ chat-area width minus sidebar margin.
-    let w = box_width.saturating_sub(2).max(20);
-    let inner_w = w.saturating_sub(4); // room for "┌─ " and " ─┐"
 
     // ── Parse content into tool-call groups ──
     struct Call {
@@ -337,7 +335,6 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            // Preserve blank lines inside multi-line args
             if let Some(last) = calls.last_mut() {
                 last.args.push(String::new());
             }
@@ -345,47 +342,46 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
         }
 
         if let Some(pos) = trimmed.find(" — ") {
-            // New tool call
             calls.push(Call {
                 name: trimmed[..pos].trim().to_string(),
                 args: vec![trimmed[pos + 5..].to_string()],
             });
         } else if let Some(last) = calls.last_mut() {
-            // Continuation of previous call's args
             last.args.push(trimmed.to_string());
         }
-        // Line before any " — " is ignored (shouldn't happen in practice)
     }
 
-    // ── Emit box-drawing lines for each call ──
+    // ── Emit lines for each call ──
     for call in &calls {
-        // Top border
-        let title = format!(" {} ", call.name);
-        let title_w = title.width();
-        let right_dashes = inner_w.saturating_sub(title_w + 1);
-        let top = format!("┌─{}{:─>w$}┐", title, "", w = right_dashes);
+        // Tool name (purple bold)
         lines.push(RenderedLine {
-            line: Line::from(Span::styled(top, Style::default().fg(style::TEXT_MUTED))),
+            line: Line::from(Span::styled(
+                call.name.clone(),
+                Style::default()
+                    .fg(style::PURPLE)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )),
             table: None,
         });
 
-        // Args
+        // Args (gray, indented)
         for arg_line in &call.args {
-            lines.push(RenderedLine {
-                line: Line::from(Span::styled(
-                    format!("│ {}", arg_line),
-                    Style::default().fg(style::TEXT_MUTED),
-                )),
-                table: None,
-            });
+            if arg_line.is_empty() {
+                // Preserve blank lines
+                lines.push(RenderedLine {
+                    line: Line::from(Span::raw("")),
+                    table: None,
+                });
+            } else {
+                lines.push(RenderedLine {
+                    line: Line::from(Span::styled(
+                        format!("  {}", arg_line),
+                        Style::default().fg(style::TEXT_MUTED),
+                    )),
+                    table: None,
+                });
+            }
         }
-
-        // Bottom border
-        let bot = format!("└{:─>w$}┘", "", w = w.saturating_sub(2));
-        lines.push(RenderedLine {
-            line: Line::from(Span::styled(bot, Style::default().fg(style::TEXT_MUTED))),
-            table: None,
-        });
     }
 }
 

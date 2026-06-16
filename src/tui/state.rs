@@ -280,10 +280,9 @@ impl AppState {
                         let was_thinking = msg.status == MessageStatus::Thinking;
                         msg.content.push_str(&text);
                         msg.status = MessageStatus::Streaming;
-                        // Recalc on first token so output count appears promptly
-                        if was_thinking {
-                            self.recalc_tokens();
-                        }
+                        // On first token, recalc local estimate only if no API token
+                        // data has arrived yet.  Once ChatTokenUsage events are flowing,
+                        // those per-tick accumulations are more accurate and cheaper.
                         if was_thinking && !self.ui.has_api_tokens {
                             self.recalc_tokens();
                         }
@@ -349,8 +348,10 @@ impl AppState {
                     }
                 }
 
-                // ── Recalculate token cache ──
-                self.recalc_tokens();
+                // ── Recalculate token cache (only if no API tokens received) ──
+                if !self.ui.has_api_tokens {
+                    self.recalc_tokens();
+                }
             }
             AppEvent::ChatError {
                 response_index,
