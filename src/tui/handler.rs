@@ -50,12 +50,16 @@ impl Tui {
             }
 
             Action::ScrollDown if ui.focus == Focus::Chat => {
-                ui.chat_scroll = ui.chat_scroll.saturating_add(1);
+                ui.chat_scroll = ui.chat_scroll.saturating_add(3);
             }
 
             Action::ScrollUp if ui.focus == Focus::Chat => {
-                ui.chat_scroll = ui.chat_scroll.saturating_sub(1);
-                ui.auto_scroll = false;
+                if ui.auto_scroll {
+                    ui.chat_scroll = ui.last_max_scroll.saturating_sub(3);
+                    ui.auto_scroll = false;
+                } else {
+                    ui.chat_scroll = ui.chat_scroll.saturating_sub(3);
+                }
             }
 
             Action::ScrollToTop if ui.focus == Focus::Chat => {

@@ -68,10 +68,13 @@ impl Tui {
             Vec::new()
         };
 
+        let total = self.chat_lines_cache.total_lines();
+
         // Sync tree_agent_ids with the current tree
         if let Ok(mut s) = self.state.try_write() {
             s.ui.tree_agent_ids = tree_lines.iter().map(|tl| tl.agent_id).collect();
             s.ui.selected_agent_idx = s.ui.selected_agent_idx.min(tree_lines.len().saturating_sub(1));
+            s.ui.total_chat_lines = total;
         }
 
         let tree_item_count = tree_lines.len();
@@ -93,7 +96,6 @@ impl Tui {
             .saturating_sub(pop_h))
             .max(1) as usize;
 
-        let total = self.chat_lines_cache.total_lines();
         let max_scroll = total.saturating_sub(visible_height);
         let chat_scroll = if state.ui.auto_scroll {
             max_scroll
@@ -101,17 +103,11 @@ impl Tui {
             state.ui.chat_scroll.min(max_scroll)
         };
 
-        // Drop read lock before syncing chat_scroll back (tokio RwLock is
-        // read-writer-exclusive — try_write would fail while read guard lives).
-        drop(state);
-
+        // Update last_max_scroll for scroll handlers
         if let Ok(mut s) = self.state.try_write() {
-            if s.ui.auto_scroll || chat_scroll != s.ui.chat_scroll {
-                s.ui.chat_scroll = chat_scroll;
-            }
+            s.ui.last_max_scroll = max_scroll;
         }
 
-        let state = self.state.read().await;
         self.terminal.draw(|f| {
             let area = f.area();
 

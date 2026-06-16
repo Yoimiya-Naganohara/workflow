@@ -174,6 +174,11 @@ pub struct UiState {
     /// When true, the input field is greyed out and keyboard input is
     /// discarded.  Set when the root agent transitions to AwaitingChildren.
     pub input_disabled: bool,
+    /// Last known total chat lines (updated each render for scroll clamping).
+    pub total_chat_lines: usize,
+    /// Last computed max_scroll = total - visible_height.
+    /// Used when auto_scroll transitions to false so the view doesn't jump.
+    pub last_max_scroll: usize,
 }
 
 // ── AppState ──
@@ -762,6 +767,8 @@ impl Default for UiState {
             selected_agent_idx: 0,
             tree_agent_ids: Vec::new(),
             input_disabled: false,
+            total_chat_lines: 0,
+            last_max_scroll: 0,
         }
     }
 }
