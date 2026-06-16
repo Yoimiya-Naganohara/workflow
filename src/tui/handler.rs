@@ -269,14 +269,14 @@ impl Tui {
                             .filter(|(cmd, _)| cmd.to_lowercase().contains(query))
                             .collect();
                         if let Some((cmd, _)) = matches.get(state.popup_selected.min(matches.len().saturating_sub(1))) {
-                            // Fill command + space, close popup — user types args
-                            // and presses Enter to execute (interactive completion style).
-                            ui.input = format!("{} ", cmd);
-                            ui.input_cursor = Self::char_count(&ui.input);
                             state.popup_mode = PopupMode::None;
                             state.popup_selected = 0;
                             ui.command_popup_selection = 0;
-                            return true;
+                            // Submit directly — dispatch handler decides whether to open
+                            // a SubCommand/Providers/ShellInput popup or execute immediately.
+                            ui.input = cmd.to_string();
+                            ui.input_cursor = Self::char_count(&ui.input);
+                            return self.handle_input_submit(state);
                         }
                     }
                     PopupMode::SubCommand { parent, items } => {
