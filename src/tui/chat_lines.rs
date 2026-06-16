@@ -278,22 +278,28 @@ fn render_md(text: &str, body_width: usize) -> MdRenderResult {
     while let Some(ev) = events.next() {
         match ev {
             Event::Start(Tag::Paragraph) => {
-                let spans = collect_inline_spans(&mut events);
-                let plain: String = spans.iter().map(|s| s.content.as_ref()).collect();
-                if looks_like_table_row(&plain) {
-                    let block = collect_paragraph_table_block(&plain, &mut events, body_width);
-                    if block.len() >= 2 {
-                        extract_table_from_block(&block, &mut result);
-                    } else {
-                        wrap_spans_into(&mut result, &spans, body_width, "  ");
+                let line_groups = collect_inline_spans(&mut events);
+                for spans in &line_groups {
+                    let plain: String = spans.iter().map(|s| s.content.as_ref()).collect();
+                    if looks_like_table_row(&plain) {
+                        let block = collect_paragraph_table_block(&plain, &mut events, body_width);
+                        if block.len() >= 2 {
+                            extract_table_from_block(&block, &mut result);
+                        } else if !spans.is_empty() {
+                            wrap_spans_into(&mut result, spans, body_width, "  ");
+                        }
+                    } else if !spans.is_empty() {
+                        wrap_spans_into(&mut result, spans, body_width, "  ");
                     }
-                } else {
-                    wrap_spans_into(&mut result, &spans, body_width, "  ");
                 }
             }
             Event::Start(Tag::Heading { level, .. }) => {
-                let spans = collect_inline_spans(&mut events);
-                render_heading_into(&mut result, &spans, level, body_width);
+                let line_groups = collect_inline_spans(&mut events);
+                for spans in &line_groups {
+                    if !spans.is_empty() {
+                        render_heading_into(&mut result, spans, level, body_width);
+                    }
+                }
             }
             Event::Start(Tag::CodeBlock(kind)) => {
                 let lang = match kind {
@@ -584,8 +590,8 @@ where
                 loop {
                     match events.next() {
                         Some(Event::Start(Tag::TableCell)) => {
-                            let spans = collect_inline_spans(events);
-                            let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+                            let line_groups = collect_inline_spans(events);
+                            let text: String = line_groups.iter().flat_map(|g| g.iter()).map(|s| s.content.as_ref()).collect();
                             cells.push(text);
                         }
                         Some(Event::End(TagEnd::TableHead)) => break,
@@ -602,8 +608,8 @@ where
                 loop {
                     match events.next() {
                         Some(Event::Start(Tag::TableCell)) => {
-                            let spans = collect_inline_spans(events);
-                            let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+                            let line_groups = collect_inline_spans(events);
+                            let text: String = line_groups.iter().flat_map(|g| g.iter()).map(|s| s.content.as_ref()).collect();
                             cells.push(text);
                         }
                         Some(Event::End(TagEnd::TableRow)) => break,
@@ -703,13 +709,26 @@ impl InlineStyle {
     }
 }
 
-fn collect_inline_spans<'a, I>(events: &mut std::iter::Peekable<I>) -> Vec<Span<'static>>
+/// Collect inline spans, returning one group per line.
+/// A SoftBreak/HardBreak in markdown creates a new line group,
+/// preserving original newlines as separate text lines.
+fn collect_inline_spans<'a, I>(events: &mut std::iter::Peekable<I>) -> Vec<Vec<Span<'static>>>
 where
     I: Iterator<Item = Event<'a>>,
 {
+    let mut lines: Vec<Vec<Span<'static>>> = Vec::new();
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut buf = String::new();
     let mut istyle = InlineStyle::new();
+
+    macro_rules! flush_line {
+        () => {
+            flush_buf(&mut spans, &mut buf, &istyle);
+            if !spans.is_empty() || !lines.is_empty() {
+                lines.push(std::mem::take(&mut spans));
+            }
+        };
+    }
 
     loop {
         match events.next() {
@@ -746,17 +765,19 @@ where
                     }
                     TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::TableCell => {
                         flush_buf(&mut spans, &mut buf, &istyle);
-                        break;
+                        lines.push(std::mem::take(&mut spans));
+                        return lines;
                     }
                     TagEnd::Item => {
                         flush_buf(&mut spans, &mut buf, &istyle);
-                        break;
+                        lines.push(std::mem::take(&mut spans));
+                        return lines;
                     }
                     _ => {}
                 }
             }
-            Some(Event::SoftBreak) | Some(Event::HardBreak) => {
-                buf.push('\n');
+            Some(Event::SoftBreak | Event::HardBreak) => {
+                flush_line!();
             }
             None => break,
             _ => {}
@@ -764,7 +785,10 @@ where
     }
 
     flush_buf(&mut spans, &mut buf, &istyle);
-    spans
+    if !spans.is_empty() || !lines.is_empty() {
+        lines.push(spans);
+    }
+    lines
 }
 
 fn flush_buf(spans: &mut Vec<Span<'static>>, buf: &mut String, istyle: &InlineStyle) {
@@ -852,16 +876,18 @@ where
             }
             Some(Event::Start(Tag::Paragraph)) => {
                 let _ = events.next();
-                let spans = collect_inline_spans(events);
-                let mut quote_spans = vec![Span::styled("│ ", Style::default().fg(style::YELLOW))];
-                for s in &spans {
-                    let mut merged = s.style;
-                    if merged.fg.is_none() {
-                        merged = merged.fg(style::YELLOW);
+                let line_groups = collect_inline_spans(events);
+                for spans in &line_groups {
+                    let mut quote_spans = vec![Span::styled("│ ", Style::default().fg(style::YELLOW))];
+                    for s in spans {
+                        let mut merged = s.style;
+                        if merged.fg.is_none() {
+                            merged = merged.fg(style::YELLOW);
+                        }
+                        quote_spans.push(Span::styled(s.content.clone(), merged));
                     }
-                    quote_spans.push(Span::styled(s.content.clone(), merged));
+                    wrap_spans_no_indent(&mut out, &quote_spans, body_width, "  ");
                 }
-                wrap_spans_no_indent(&mut out, &quote_spans, body_width, "  ");
             }
             _ => {
                 let _ = events.next();
@@ -884,7 +910,7 @@ where
     loop {
         match events.next() {
             Some(Event::Start(Tag::Item)) => {
-                let item_spans = collect_inline_spans(events);
+                let line_groups = collect_inline_spans(events);
                 let bullet = match list_depth {
                     1 => "•",
                     2 => "◦",
@@ -893,9 +919,15 @@ where
                 };
                 let indent = "  ".repeat((list_depth - 1) as usize);
                 let prefix = format!("{}{} ", indent, bullet);
-                let mut prefix_spans = vec![Span::styled(prefix, Style::default().fg(style::BLUE))];
-                prefix_spans.extend(item_spans.iter().cloned());
-                wrap_spans_into(result, &prefix_spans, body_width, "");
+                for (idx, spans) in line_groups.iter().enumerate() {
+                    let mut prefix_spans = if idx == 0 {
+                        vec![Span::styled(prefix.clone(), Style::default().fg(style::BLUE))]
+                    } else {
+                        vec![Span::raw(format!("{}  ", indent))]
+                    };
+                    prefix_spans.extend(spans.iter().cloned());
+                    wrap_spans_into(result, &prefix_spans, body_width, "");
+                }
             }
             Some(Event::End(TagEnd::List(_))) => {
                 list_depth -= 1;
