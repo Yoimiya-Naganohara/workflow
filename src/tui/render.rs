@@ -102,10 +102,7 @@ impl Tui {
             s.ui.tree_agent_ids = tree_lines.iter().map(|tl| tl.agent_id).collect();
             s.ui.selected_agent_idx = s.ui.selected_agent_idx.min(tree_lines.len().saturating_sub(1));
             s.ui.total_chat_lines = total;
-            s.ui.last_max_scroll = max_scroll;
-            if s.ui.auto_scroll || chat_scroll != s.ui.chat_scroll {
-                s.ui.chat_scroll = chat_scroll;
-            }
+            s.ui.chat_scroll = chat_scroll;
         }
         let state = self.state.read().await;
 

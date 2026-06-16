@@ -27,8 +27,7 @@ impl Tui {
 
         // ── Shift+Enter / Alt+Enter: insert newline ──
         if key.code == KeyCode::Enter
-            && (key.modifiers.contains(KeyModifiers::SHIFT)
-                || key.modifiers.contains(KeyModifiers::ALT))
+            && (key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::ALT))
         {
             let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
             ui.input.insert(byte_idx, '\n');
@@ -57,12 +56,8 @@ impl Tui {
             }
 
             Action::ScrollUp if ui.focus == Focus::Chat => {
-                if ui.auto_scroll {
-                    ui.chat_scroll = ui.last_max_scroll.saturating_sub(3);
-                    ui.auto_scroll = false;
-                } else {
-                    ui.chat_scroll = ui.chat_scroll.saturating_sub(3);
-                }
+                ui.chat_scroll = ui.chat_scroll.saturating_sub(3);
+                ui.auto_scroll = false;
             }
 
             Action::ScrollToTop if ui.focus == Focus::Chat => {

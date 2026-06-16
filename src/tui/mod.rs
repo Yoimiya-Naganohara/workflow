@@ -143,13 +143,8 @@ impl Tui {
                                             state.ui.chat_scroll = state.ui.chat_scroll.saturating_add(3);
                                         }
                                         MouseEventKind::ScrollUp => {
-                                            if state.ui.auto_scroll {
-                                                // Transition from auto → manual: start from last-known viewport
-                                                state.ui.chat_scroll = state.ui.last_max_scroll.saturating_sub(3);
-                                                state.ui.auto_scroll = false;
-                                            } else {
-                                                state.ui.chat_scroll = state.ui.chat_scroll.saturating_sub(3);
-                                            }
+                                            state.ui.chat_scroll = state.ui.chat_scroll.saturating_sub(3);
+                                            state.ui.auto_scroll = false;
                                         }
                                         _ => {}
                                     }
