@@ -52,17 +52,6 @@ impl Tui {
             self.chat_cache_key = cache_key;
         }
 
-        let visible_height = (term_size.height.saturating_sub(input_lines + 3)).max(1) as usize;
-
-        let chat_scroll = if state.ui.auto_scroll {
-            self.chat_lines_cache.total_lines().saturating_sub(visible_height)
-        } else {
-            state
-                .ui
-                .chat_scroll
-                .min(self.chat_lines_cache.total_lines().saturating_sub(1))
-        };
-
         // ── Diagnostic tree (Phase 1/3) ──
         let tree_lines = if let Some(rid) = state.core.responsible_agent_id {
             match state.core.agent_pool.try_read() {
@@ -93,6 +82,24 @@ impl Tui {
             0
         };
         let show_tree = tree_height > 0;
+
+        // Compute actual visible height of the message area.
+        // Layout: chat_area (with 2-pixel border) [+ tree_sep + tree] + status_bar.
+        // Inside chat_area: msg_area [+ popup] + input.
+        let pop_h: u16 = crate::tui::popup::popup_height(&state);
+        let visible_height = (term_size.height
+            .saturating_sub(input_lines + 3)          // border(2) + status_bar(1)
+            .saturating_sub(if show_tree { 1 + tree_height } else { 0 })
+            .saturating_sub(pop_h))
+            .max(1) as usize;
+
+        let total = self.chat_lines_cache.total_lines();
+        let max_scroll = total.saturating_sub(visible_height);
+        let chat_scroll = if state.ui.auto_scroll {
+            max_scroll
+        } else {
+            state.ui.chat_scroll.min(max_scroll)
+        };
 
         self.terminal.draw(|f| {
             let area = f.area();

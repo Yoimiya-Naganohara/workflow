@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-pub use self::state::AppState;
+pub use self::state::{AppState, Focus};
 use self::state::Panel;
 use crate::tui::chat_lines::ChatRenderOutput;
 
@@ -139,10 +139,10 @@ impl Tui {
                                 Event::Mouse(mouse) => {
                                     let mut state = self.state.write().await;
                                     match mouse.kind {
-                                        MouseEventKind::ScrollDown => {
+                                        MouseEventKind::ScrollDown if state.ui.focus == Focus::Chat => {
                                             state.ui.chat_scroll = state.ui.chat_scroll.saturating_add(1);
                                         }
-                                        MouseEventKind::ScrollUp => {
+                                        MouseEventKind::ScrollUp if state.ui.focus == Focus::Chat => {
                                             state.ui.chat_scroll = state.ui.chat_scroll.saturating_sub(1);
                                             state.ui.auto_scroll = false;
                                         }
