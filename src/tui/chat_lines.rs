@@ -51,6 +51,8 @@ impl ChatRenderOutput {
     }
 
     /// Build a ratatui Table widget for a given table definition.
+    /// Cell content is pre-wrapped to column widths so that long text flows
+    /// onto multiple lines inside the table.
     pub(crate) fn build_table_widget(&self, table: &TableDef) -> Table<'static> {
         let col_constraints: Vec<Constraint> = table
             .col_widths
@@ -58,6 +60,39 @@ impl ChatRenderOutput {
             .map(|&w| Constraint::Length(w as u16 + 2))
             .collect();
 
+        // ── Pre-wrap cell content and compute row heights ──
+        fn wrapped_lines(text: &str, width: usize) -> Vec<String> {
+            use unicode_width::UnicodeWidthStr;
+            let inner = width.max(1);
+            let mut out = Vec::new();
+            for line in text.lines() {
+                let w = UnicodeWidthStr::width(line);
+                if w <= inner {
+                    out.push(line.to_string());
+                } else {
+                    let mut start = 0;
+                    let chars: Vec<char> = line.chars().collect();
+                    while start < chars.len() {
+                        let mut end = start;
+                        let mut dw = 0;
+                        while end < chars.len()
+                            && dw + UnicodeWidthChar::width(chars[end]).unwrap_or(0) <= inner
+                        {
+                            dw += UnicodeWidthChar::width(chars[end]).unwrap_or(0);
+                            end += 1;
+                        }
+                        if end == start {
+                            end = start + 1;
+                        }
+                        out.push(chars[start..end].iter().collect());
+                        start = end;
+                    }
+                }
+            }
+            out
+        }
+
+        // Header row (no wrapping needed, but use a single Line)
         let header_cells: Vec<Cell> = table
             .header
             .iter()
@@ -74,16 +109,26 @@ impl ChatRenderOutput {
             .rows
             .iter()
             .map(|row| {
+                let mut max_h = 1usize;
                 let cells: Vec<Cell> = row
                     .iter()
-                    .map(|c| {
-                        Cell::from(Text::from(Line::from(Span::styled(
-                            format!(" {} ", c),
-                            Style::default().fg(style::TEXT_PRIMARY),
-                        ))))
+                    .zip(table.col_widths.iter())
+                    .map(|(c, &col_w)| {
+                        let lines = wrapped_lines(c, col_w);
+                        max_h = max_h.max(lines.len());
+                        let text_lines: Vec<Line<'static>> = lines
+                            .into_iter()
+                            .map(|l| {
+                                Line::from(Span::styled(
+                                    format!(" {} ", l),
+                                    Style::default().fg(style::TEXT_PRIMARY),
+                                ))
+                            })
+                            .collect();
+                        Cell::from(Text::from(text_lines))
                     })
                     .collect();
-                Row::new(cells)
+                Row::new(cells).height(max_h as u16)
             })
             .collect();
 
