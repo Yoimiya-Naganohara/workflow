@@ -209,14 +209,14 @@ fn highlight_matches(cmd: &str, query: &str) -> Vec<Span<'static>> {
     spans
 }
 
-fn render_shell_input_popup(f: &mut Frame, area: Rect, _cmd: &str, input: &str) {
-    let display = if input.is_empty() {
-        String::new()
+fn render_shell_input_popup(f: &mut Frame, area: Rect, cmd: &str, input: &str) {
+    let preview = if input.is_empty() {
+        format!("{} …", cmd)
     } else {
-        input.to_string()
+        format!("{} {}", cmd, input)
     };
     f.render_widget(
-        ratatui::widgets::Paragraph::new(display)
+        ratatui::widgets::Paragraph::new(preview)
             .block(crate::tui::style::panel("Shell Command"))
             .style(Style::default().fg(style::TEXT_PRIMARY)),
         area,
