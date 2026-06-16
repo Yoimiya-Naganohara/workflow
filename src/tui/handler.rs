@@ -100,24 +100,6 @@ impl Tui {
                 }
             }
 
-            Action::RestoreContext => {
-                if let Some(ctx) = core.saved_context.take() {
-                    // Find or create the root agent and inject the saved context.
-                    let agent_id = crate::tui::controller::ensure_initial_agent_sync(core, "Continue previous task");
-                    if let Some(aid) = agent_id {
-                        if let Ok(mut pool) = core.agent_pool.try_write() {
-                            if let Some(agent) = pool.get_agent_mut(&aid) {
-                                agent.context = ctx;
-                            }
-                        }
-                    }
-                    let _ = crate::persistence::clear_context();
-                    core.messages.push(ChatMessage::system(
-                        "✅ Previous context restored. You can continue where you left off.",
-                    ));
-                }
-            }
-
             Action::MoveUp if !ui.tree_agent_ids.is_empty() => {
                 ui.selected_agent_idx = ui.selected_agent_idx.saturating_sub(1);
             }
@@ -306,12 +288,13 @@ impl Tui {
                             filtered.get(state.popup_selected.min(filtered.len().saturating_sub(1)))
                         {
                             let full_cmd = format!("{} {}", parent, name);
-                            state.popup_mode = PopupMode::ShellInput {
-                                cmd: full_cmd,
-                                input: String::new(),
-                            };
+                            // Submit directly — dispatch handler decides whether
+                            // to execute or open a further ShellInput prompt.
+                            state.popup_mode = PopupMode::None;
                             state.popup_selected = 0;
-                            return true;
+                            ui.input = full_cmd;
+                            ui.input_cursor = Self::char_count(&ui.input);
+                            return self.handle_input_submit(state);
                         }
                     }
                     PopupMode::ShellInput { cmd, input } => {

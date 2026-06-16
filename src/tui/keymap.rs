@@ -33,12 +33,11 @@ pub enum Action {
 
     // Global actions
     OpenProviderPicker,
+    RestoreContext,
     OpenCommandPicker,
 
     /// Open the agent detail popup for the selected tree item.
     InspectAgent,
-    /// Restore conversation context from the previous session.
-    RestoreContext,
 
     // No match
     None,
@@ -119,10 +118,6 @@ impl Default for Keymap {
             KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL),
             Action::InspectAgent,
         );
-        km.bind(
-            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
-            Action::RestoreContext,
-        );
 
         km
     }
@@ -185,9 +180,10 @@ pub fn format_action(action: &Action) -> String {
         Action::CommandPrev => "Previous command",
         Action::CommandNext => "Next command",
         Action::OpenProviderPicker => "Open provider picker",
+        Action::RestoreContext => "Restore previous context",
         Action::OpenCommandPicker => "Open command picker",
         Action::InspectAgent => "Inspect agent detail",
-        Action::RestoreContext => "Restore previous context",
+
         Action::None => "",
     }
     .to_string()
