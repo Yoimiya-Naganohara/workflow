@@ -344,9 +344,13 @@ impl Tui {
                         state.popup_mode = PopupMode::None;
                     }
                     PopupMode::KeyInput => {
-                        // Set API key
+                        // Set API key (resolve paste marker first)
                         if let Some(ref provider_id) = state.popup_key_provider.clone() {
-                            let key_value = ui.input.clone();
+                            let key_value = if let Some(paste_content) = ui.pending_paste.take() {
+                                paste_content
+                            } else {
+                                ui.input.clone()
+                            };
                             if !key_value.is_empty() {
                                 // Clone provider info before any mutable access
                                 let provider_info: Option<(String, String)> =
@@ -357,7 +361,7 @@ impl Tui {
                                     });
                                 if let Some((env_key, name)) = provider_info {
                                     if !env_key.is_empty() {
-                                        core.api_keys.insert(env_key.clone(), key_value);
+                                        core.api_keys.insert(env_key.clone(), key_value.clone());
                                         core.models.select_provider(provider_id);
                                         if !core.configured_providers.contains(provider_id) {
                                             core.configured_providers.push(provider_id.clone());
@@ -366,7 +370,7 @@ impl Tui {
                                         let _ =
                                             crate::tui::controller::get_or_create_provider_client(core, provider_id);
                                         core.messages.push(ChatMessage::system(format!("{} key set", name)));
-                                        let _ = crate::tui::controller::save_api_key(provider_id, &env_key, &ui.input);
+                                        let _ = crate::tui::controller::save_api_key(provider_id, &env_key, &key_value);
                                     }
                                 }
                             }
