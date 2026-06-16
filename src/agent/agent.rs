@@ -103,6 +103,10 @@ pub struct Agent {
     /// Used by the TUI diagnostic detail popup (Phase 3).
     /// The buffer is bounded at [`MAX_TOOL_TRACE`].
     pub tool_trace: VecDeque<ToolCallRecord>,
+    /// Cumulative token consumption for this agent's execution.
+    /// Updated by `ToolEvent::TokenUsage` during LLM streaming.
+    pub tokens_input: u32,
+    pub tokens_output: u32,
     /// Per-agent filesystem sandbox handle.
     /// Created on spawn, cleaned up on eviction.
     #[serde(skip)]
@@ -376,6 +380,8 @@ mod tests {
             child_results: Vec::new(),
             context: Vec::new(),
             last_active_at: 0,
+            tokens_input: 0,
+            tokens_output: 0,
             tool_trace: VecDeque::new(),
             sandbox: None,
         };
@@ -402,6 +408,8 @@ mod tests {
             child_results: Vec::new(),
             context: Vec::new(),
             last_active_at: 0,
+            tokens_input: 0,
+            tokens_output: 0,
             tool_trace: VecDeque::new(),
             sandbox: None,
         };

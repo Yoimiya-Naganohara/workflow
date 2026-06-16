@@ -666,6 +666,8 @@ mod tests {
                 context: Vec::new(),
                 child_results: vec![([1u8; 16], "sub-result".into())],
                 last_active_at: 0,
+                tokens_input: 0,
+                tokens_output: 0,
                 tool_trace: VecDeque::from(vec![
                     ToolCallRecord {
                         name: "grep".into(),
@@ -726,6 +728,8 @@ mod tests {
                 child_results: Vec::new(),
                 context: Vec::new(),
                 last_active_at: 0,
+                tokens_input: 0,
+                tokens_output: 0,
                 tool_trace: std::collections::VecDeque::new(),
                 sandbox: None,
             });

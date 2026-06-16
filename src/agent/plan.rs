@@ -451,6 +451,8 @@ impl Plan {
                     child_results: Vec::new(),
                     context: Vec::new(),
                     last_active_at: crate::agent::now_secs(),
+                    tokens_input: 0,
+                    tokens_output: 0,
                     tool_trace: std::collections::VecDeque::new(),
                     sandbox: None,
                 };

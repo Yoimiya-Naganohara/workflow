@@ -570,6 +570,8 @@ impl AgentRuntime {
             child_results: Vec::new(),
             context: Vec::new(),
             last_active_at: crate::agent::now_secs(),
+            tokens_input: 0,
+            tokens_output: 0,
             tool_trace: std::collections::VecDeque::new(),
             sandbox,
         };
@@ -651,6 +653,8 @@ impl AgentRuntime {
                     child_results: Vec::new(),
                     context: Vec::new(),
                     last_active_at: crate::agent::now_secs(),
+                    tokens_input: 0,
+                    tokens_output: 0,
                     tool_trace: std::collections::VecDeque::new(),
                     sandbox: sandbox.clone(),
                 };
@@ -745,6 +749,8 @@ impl AgentRuntime {
                     child_results: Vec::new(),
                     context: Vec::new(),
                     last_active_at: crate::agent::now_secs(),
+                    tokens_input: 0,
+                    tokens_output: 0,
                     tool_trace: std::collections::VecDeque::new(),
                     sandbox: sandbox.clone(),
                 };
@@ -1036,6 +1042,8 @@ impl AgentRuntime {
         let (response, tool_bitmap) = if let Some(handle) = &tool_server {
             let mut text = String::new();
             let mut tools_used: u64 = 0;
+            let mut tokens_input: u32 = 0;
+            let mut tokens_output: u32 = 0;
             let stream = match provider
                 .chat_with_tools_stream_mcp(&config.model_id, &system_prompt, &goal, &[], handle)
                 .await
@@ -1079,8 +1087,10 @@ impl AgentRuntime {
                             }
                         }
                     }
-                    crate::llm::ToolEvent::TokenUsage { .. } => {
-                        // Token usage tracking is handled at the TUI layer.
+                    crate::llm::ToolEvent::TokenUsage { input, output } => {
+                        // Track cumulative token usage for cost/consumption reporting.
+                        tokens_input = tokens_input.max(input);
+                        tokens_output = tokens_output.max(output);
                     }
                     crate::llm::ToolEvent::Done => break,
                 }
@@ -1212,6 +1222,8 @@ impl AgentRuntime {
         let (response, tool_bitmap) = if let Some(handle) = &tool_server {
             let mut text = String::new();
             let mut tools_used: u64 = 0;
+            let mut tokens_input: u32 = 0;
+            let mut tokens_output: u32 = 0;
             let stream = match provider
                 .chat_with_tools_stream_mcp(&config.model_id, &system_prompt, &goal, &[], handle)
                 .await
@@ -1255,7 +1267,10 @@ impl AgentRuntime {
                             }
                         } // try_write drops here — minimal lock duration
                     }
-                    crate::llm::ToolEvent::TokenUsage { .. } => {}
+                    crate::llm::ToolEvent::TokenUsage { input, output } => {
+                        tokens_input = tokens_input.max(input);
+                        tokens_output = tokens_output.max(output);
+                    }
                     crate::llm::ToolEvent::Done => break,
                 }
             }

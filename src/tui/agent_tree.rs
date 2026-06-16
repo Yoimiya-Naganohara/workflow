@@ -155,6 +155,8 @@ mod tests {
             child_results: Vec::new(),
             context: Vec::new(),
             last_active_at: 0,
+            tokens_input: 0,
+            tokens_output: 0,
             tool_trace: std::collections::VecDeque::new(),
             sandbox: None,
         }
@@ -378,6 +380,8 @@ mod tests {
             id,
             name: "busy".into(),
             status: AgentStatus::Completed,
+            tokens_input: 0,
+            tokens_output: 0,
             tool_trace: std::collections::VecDeque::from(vec![
                 ToolCallRecord {
                     name: "read_file".into(),
@@ -420,6 +424,8 @@ mod tests {
             id,
             name: "overdrive".into(),
             status: AgentStatus::Completed,
+            tokens_input: 0,
+            tokens_output: 0,
             tool_trace: trace,
             ..stub_agent()
         });
@@ -438,6 +444,8 @@ mod tests {
             id,
             name: "faulty".into(),
             status: AgentStatus::Failed,
+            tokens_input: 0,
+            tokens_output: 0,
             tool_trace: std::collections::VecDeque::from(vec![ToolCallRecord {
                 name: "sh".into(),
                 args_preview: "\"command\": \"rm -rf /\"".into(),
