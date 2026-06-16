@@ -501,18 +501,7 @@ impl Tui {
     // ── Input submit ──
 
     fn handle_input_submit(&self, state: &mut AppState) -> bool {
-        // Resolve paste marker → actual content
-        let raw = state.ui.input.clone();
-        let input = if let Some(paste_content) = state.ui.pending_paste.take() {
-            if let Some(start) = raw.find("[📋") {
-                let after = raw[start..].find(']').map(|e| start + e + 1).unwrap_or(raw.len());
-                format!("{}{}{}", &raw[..start], paste_content, &raw[after..])
-            } else {
-                raw
-            }
-        } else {
-            raw
-        };
+        let input = state.ui.input.clone();
         if input.is_empty() {
             return true;
         }
@@ -550,9 +539,15 @@ impl Tui {
         ui.input_history.push(input.clone());
         ui.input_history_idx = None;
 
+        let content = if let Some(paste) = ui.pending_paste.take() {
+            format!("{}\n```\n{}```", input, paste)
+        } else {
+            input.clone()
+        };
+
         core.messages.push(ChatMessage {
             role: MessageRole::User,
-            content: input.clone(),
+            content,
             timestamp: now.clone(),
             status: MessageStatus::Completed,
         });
