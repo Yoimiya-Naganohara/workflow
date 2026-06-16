@@ -440,9 +440,10 @@ impl AppState {
                 timestamp: _,
             } => {
                 // Tool call: "name — args" format.
-                // Truncate long args but preserve original newlines for Wrap rendering.
+                // Truncate long args at a safe char boundary (preserve original newlines).
                 let args_trunc = if args.len() > 200 {
-                    format!("{}…", &args[..200])
+                    let end = args.char_indices().nth(197).map(|(i, _)| i).unwrap_or(args.len());
+                    format!("{}…", &args[..end])
                 } else {
                     args
                 };

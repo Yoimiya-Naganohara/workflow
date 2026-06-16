@@ -579,28 +579,6 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
 // ═══════════════════════════════════════════════════════════════
 
 fn format_tool_args(args: &serde_json::Value) -> String {
-    match args {
-        serde_json::Value::Object(map) if map.len() <= 3 => {
-            let parts: Vec<String> = map
-                .iter()
-                .map(|(k, v)| {
-                    let val = match v {
-                        serde_json::Value::String(s) => {
-                            if s.len() > 60 {
-                                // Safe char-boundary truncation at 57 chars.
-                                let end = s.char_indices().nth(57).map(|(i, _)| i).unwrap_or(s.len());
-                                format!("\"{}…\"", &s[..end])
-                            } else {
-                                format!("\"{}\"", s)
-                            }
-                        }
-                        other => other.to_string(),
-                    };
-                    format!("{}: {}", k, val)
-                })
-                .collect();
-            parts.join(", ")
-        }
-        other => serde_json::to_string_pretty(other).unwrap_or_else(|_| format!("{:?}", other)),
-    }
+    // Always use pretty-printing so each argument is on its own line.
+    serde_json::to_string_pretty(args).unwrap_or_else(|_| format!("{:?}", args))
 }
