@@ -25,7 +25,8 @@ pub(crate) fn render_chat(
     scroll: usize,
     visible_height: usize,
 ) {
-    let input_lines = state.ui.input.lines().count().clamp(1, 5) as u16;
+    let max_input = (area.height / 3).max(3) as usize;
+    let input_lines = state.ui.input.lines().count().clamp(1, max_input) as u16;
     let input_height = input_lines.max(1);
     let pop_h = crate::tui::popup::popup_height(state);
 
@@ -175,10 +176,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
             }
             let batch_count = i - text_start;
             if batch_count > 0 {
-                let lines: Vec<Line<'static>> = output.rendered[text_start..i]
-                    .iter()
-                    .map(|r| r.line.clone())
-                    .collect();
+                let lines: Vec<Line<'static>> = output.rendered[text_start..i].iter().map(|r| r.line.clone()).collect();
 
                 let visual_h: usize = lines
                     .iter()
@@ -195,10 +193,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
                     (visual_h as u16).min(area.bottom().saturating_sub(y)),
                 );
                 if text_area.height > 0 {
-                    f.render_widget(
-                        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-                        text_area,
-                    );
+                    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }), text_area);
                 }
                 y += visual_h as u16;
             }

@@ -394,8 +394,10 @@ impl AppState {
                     self.ui.cached_output_tokens = 0;
                     self.ui.has_api_tokens = true;
                 }
-                self.ui.cached_input_tokens = self.ui.cached_input_tokens.saturating_add(input);
-                self.ui.cached_output_tokens = self.ui.cached_output_tokens.saturating_add(output);
+                // API reports cumulative token totals — use max() to capture the
+                // latest cumulative value without double-counting.
+                self.ui.cached_input_tokens = self.ui.cached_input_tokens.max(input);
+                self.ui.cached_output_tokens = self.ui.cached_output_tokens.max(output);
             }
             AppEvent::OptimizationResult {
                 role_name,

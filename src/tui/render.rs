@@ -32,7 +32,8 @@ impl Tui {
         let msg_count = state.core.messages.len();
         let is_streaming = state.ui.active_chat_requests > 0;
         let last_content_len = state.core.messages.last().map(|m| m.content.len()).unwrap_or(0);
-        let input_lines = state.ui.input.lines().count().clamp(1, 5) as u16;
+        let max_input = (term_size.height / 3).max(3) as usize;
+        let input_lines = state.ui.input.lines().count().clamp(1, max_input) as u16;
         let chat_width = term_size.width.saturating_sub(4).max(10) as usize;
 
         let cache_key = (

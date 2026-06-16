@@ -75,9 +75,7 @@ impl ChatRenderOutput {
                     while start < chars.len() {
                         let mut end = start;
                         let mut dw = 0;
-                        while end < chars.len()
-                            && dw + UnicodeWidthChar::width(chars[end]).unwrap_or(0) <= inner
-                        {
+                        while end < chars.len() && dw + UnicodeWidthChar::width(chars[end]).unwrap_or(0) <= inner {
                             dw += UnicodeWidthChar::width(chars[end]).unwrap_or(0);
                             end += 1;
                         }
@@ -377,7 +375,7 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
     }
 
     // ── Emit lines for each call, separated by blank lines ──
-    for (idx, call) in calls.iter().enumerate() {
+    for (_idx, call) in calls.iter().enumerate() {
         // Blank separator before first call or between calls
         // Don't double-up if the previous emission already added a blank.
         let last_blank = lines
