@@ -134,11 +134,11 @@ pub(crate) fn render_chat(
     }
 }
 
-/// Render the visible range of chat content, mixing Paragraph, Table, and tool-call blocks.
+/// Render the visible range of chat content.
 ///
-/// Each rendered line is drawn individually with its actual visual height so that
-/// scrolling by one rendered line produces a visually smooth 1–N row shift instead of jumping
-/// when wrapped lines or tables enter or leave the viewport.
+/// Text lines are rendered in batches via a single Paragraph whose Wrap handles
+/// line-breaking — the component calculates wrapping naturally.  Table regions
+/// are rendered as Table widgets overlaid on top.
 fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scroll: usize, visible_height: usize) {
     let max_line = output.rendered.len();
     if max_line == 0 {
@@ -148,12 +148,9 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
     let end = (scroll + visible_height).min(max_line);
     let mut y = area.y;
     let mut i = scroll;
-    let avail = area.width.max(1) as usize;
 
     while y < area.bottom() && i < end {
-        let rl = &output.rendered[i];
-
-        if let Some(ref td) = rl.table {
+        if let Some(ref td) = output.rendered[i].table {
             // ── Table region: render as a single Table widget ──
             let table_h = td.end_line - td.start_line;
             let table_area = Rect::new(
@@ -171,27 +168,32 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
             y += table_h as u16;
             i = td.end_line;
         } else {
-            // ── Text line: wrapped visual height ──
-            let line_width = rl.line.width();
-            // ceil(line_width / avail) — minimum 1 row even for empty lines
-            let visual_rows = if line_width == 0 { 1 } else { line_width.div_ceil(avail) };
-
-            let line_area = Rect::new(
-                area.x,
-                y,
-                area.width,
-                (visual_rows as u16).min(area.bottom().saturating_sub(y)),
-            );
-
-            if line_area.height > 0 {
-                f.render_widget(
-                    Paragraph::new(Text::from(rl.line.clone())).wrap(Wrap { trim: false }),
-                    line_area,
-                );
-            }
-
-            y += visual_rows as u16;
+            // ── Text batch: consecutive non-table lines rendered together ──
+            let text_start = i;
             i += 1;
+            while i < end && output.rendered[i].table.is_none() {
+                i += 1;
+            }
+            let batch_count = i - text_start;
+            if batch_count > 0 {
+                let lines: Vec<Line<'static>> = output.rendered[text_start..i]
+                    .iter()
+                    .map(|r| r.line.clone())
+                    .collect();
+                let text_area = Rect::new(
+                    area.x,
+                    y,
+                    area.width,
+                    (batch_count as u16).min(area.bottom().saturating_sub(y)),
+                );
+                if text_area.height > 0 {
+                    f.render_widget(
+                        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+                        text_area,
+                    );
+                }
+                y += batch_count as u16;
+            }
         }
     }
 }
