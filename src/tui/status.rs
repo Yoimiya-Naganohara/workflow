@@ -25,9 +25,7 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
     };
     spans.push(Span::styled(
         mode_label,
-        Style::default()
-            .fg(mode_color)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
     ));
 
     // ── 2. Separator ──
@@ -45,9 +43,7 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         // Model name
         spans.push(Span::styled(
             &sel.model_name,
-            Style::default()
-                .fg(style::BLUE)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(style::BLUE).add_modifier(Modifier::BOLD),
         ));
 
         // Capability badge + context window
@@ -59,20 +55,14 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
                 caps.max_context.to_string()
             };
             spans.push(Span::styled(" ", Style::default()));
-            spans.push(Span::styled(
-                badge,
-                Style::default().fg(style::TEXT_SECONDARY),
-            ));
+            spans.push(Span::styled(badge, Style::default().fg(style::TEXT_SECONDARY)));
             spans.push(Span::styled(
                 format!(" ctx:{}", ctx),
                 Style::default().fg(style::TEXT_MUTED),
             ));
         }
     } else {
-        spans.push(Span::styled(
-            "no model",
-            Style::default().fg(style::TEXT_MUTED),
-        ));
+        spans.push(Span::styled("no model", Style::default().fg(style::TEXT_MUTED)));
     }
 
     // ── 4. Separator ──
@@ -93,9 +83,7 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         spans.push(Span::styled("  ", Style::default()));
         spans.push(Span::styled(
             spinner[phase],
-            Style::default()
-                .fg(style::YELLOW)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(style::YELLOW).add_modifier(Modifier::BOLD),
         ));
     }
 

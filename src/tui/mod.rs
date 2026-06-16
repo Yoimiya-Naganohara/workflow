@@ -21,7 +21,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use futures::StreamExt;
-use ratatui::{Terminal, backend::CrosstermBackend, text::Line};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,11 +29,12 @@ use tokio::sync::RwLock;
 
 pub use self::state::AppState;
 use self::state::Panel;
+use crate::tui::chat_lines::ChatRenderOutput;
 
 pub struct Tui {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     state: Arc<RwLock<AppState>>,
-    chat_lines_cache: Vec<Line<'static>>,
+    chat_lines_cache: ChatRenderOutput,
     chat_cache_key: (usize, usize, bool, usize, Option<u8>, bool, usize),
     app_event_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::effect::AppEvent>,
     app_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::tui::effect::AppEvent>,
@@ -55,7 +56,10 @@ impl Tui {
         Ok(Self {
             terminal,
             state,
-            chat_lines_cache: Vec::new(),
+            chat_lines_cache: ChatRenderOutput {
+                rendered: Vec::new(),
+                tables: Vec::new(),
+            },
             chat_cache_key: (0, 0, false, 0, None, true, 0),
             app_event_tx,
             app_event_rx,

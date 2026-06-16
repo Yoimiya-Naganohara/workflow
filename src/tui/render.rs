@@ -16,7 +16,7 @@ use super::{Tui, style};
 use crate::agent::AgentStatus;
 use crate::tui::agent_tree::{build_agent_tree_lines, has_active_delegations};
 use crate::tui::chat::render_chat;
-use crate::tui::chat_lines::build_chat_lines;
+use crate::tui::chat_lines::build_chat_content;
 use crate::tui::status::render_status_bar;
 
 impl Tui {
@@ -44,30 +44,26 @@ impl Tui {
             state.ui.auto_scroll,
             if state.ui.auto_scroll { 0 } else { state.ui.chat_scroll },
         );
+
+        // Rebuild cache when content has changed
         if cache_key != self.chat_cache_key {
-            self.chat_lines_cache = build_chat_lines(&state.core, chat_width, state.ui.think_frame);
+            let new_content = build_chat_content(&state.core, chat_width, state.ui.think_frame);
+            self.chat_lines_cache = new_content;
             self.chat_cache_key = cache_key;
         }
 
         let visible_height = (term_size.height.saturating_sub(input_lines + 3)).max(1) as usize;
 
         let chat_scroll = if state.ui.auto_scroll {
-            self.chat_lines_cache.len().saturating_sub(visible_height)
+            self.chat_lines_cache.total_lines().saturating_sub(visible_height)
         } else {
-            state.ui.chat_scroll.min(self.chat_lines_cache.len().saturating_sub(1))
+            state
+                .ui
+                .chat_scroll
+                .min(self.chat_lines_cache.total_lines().saturating_sub(1))
         };
-        let visible_lines: Vec<_> = self
-            .chat_lines_cache
-            .iter()
-            .skip(chat_scroll)
-            .take(visible_height)
-            .cloned()
-            .collect();
 
         // ── Diagnostic tree (Phase 1/3) ──
-        // Build the tree snapshot from the shared pool.
-        // The tree is tiny (≤ 12 lines) so fresh rebuild each frame is free.
-        // Cache is provided for future optimisation; currently unused.
         let tree_lines = if let Some(rid) = state.core.responsible_agent_id {
             match state.core.agent_pool.try_read() {
                 Ok(pool) => {
@@ -83,9 +79,7 @@ impl Tui {
             Vec::new()
         };
 
-        // Sync tree_agent_ids with the current tree.
-        // This is a cheap write-lock update outside the draw closure.
-        // If the lock is contended we skip (the tree will re-sync next frame).
+        // Sync tree_agent_ids with the current tree
         if let Ok(mut s) = self.state.try_write() {
             s.ui.tree_agent_ids = tree_lines.iter().map(|tl| tl.agent_id).collect();
             s.ui.selected_agent_idx = s.ui.selected_agent_idx.min(tree_lines.len().saturating_sub(1));
@@ -125,7 +119,16 @@ impl Tui {
             let chat_border = crate::tui::style::panel_chat("");
             let chat_inner = chat_border.inner(chat_area);
             f.render_widget(chat_border, chat_area);
-            render_chat(f, chat_inner, &state, &visible_lines);
+
+            // Pass the full output + scroll info to render_chat
+            render_chat(
+                f,
+                chat_inner,
+                &state,
+                &self.chat_lines_cache,
+                chat_scroll,
+                visible_height,
+            );
 
             // ── Diagnostic tree ──
             if show_tree {
