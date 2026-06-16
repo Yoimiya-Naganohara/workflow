@@ -376,8 +376,21 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
         }
     }
 
-    // ── Emit lines for each call ──
-    for call in &calls {
+    // ── Emit lines for each call, separated by blank lines ──
+    for (idx, call) in calls.iter().enumerate() {
+        // Blank separator before first call or between calls
+        // Don't double-up if the previous emission already added a blank.
+        let last_blank = lines
+            .last()
+            .map(|l| l.line.to_string().trim().is_empty())
+            .unwrap_or(true);
+        if !last_blank {
+            lines.push(RenderedLine {
+                line: Line::from(Span::raw("")),
+                table: None,
+            });
+        }
+
         // Tool name (purple bold)
         lines.push(RenderedLine {
             line: Line::from(Span::styled(
@@ -406,6 +419,12 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
                 });
             }
         }
+
+        // Blank line after each call
+        lines.push(RenderedLine {
+            line: Line::from(Span::raw("")),
+            table: None,
+        });
     }
 }
 
