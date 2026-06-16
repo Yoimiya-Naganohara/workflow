@@ -499,7 +499,18 @@ impl Tui {
     // ── Input submit ──
 
     fn handle_input_submit(&self, state: &mut AppState) -> bool {
-        let input = state.ui.input.clone();
+        // Resolve paste marker → actual content
+        let raw = state.ui.input.clone();
+        let input = if let Some(ref paste) = state.ui.pending_paste.take() {
+            if let Some(start) = raw.rfind("[📋") {
+                let marker_end = raw[start..].find(']').map(|e| start + e + 1).unwrap_or(raw.len());
+                format!("{}{}{}", &raw[..start], paste, &raw[marker_end..])
+            } else {
+                raw
+            }
+        } else {
+            raw
+        };
         if input.is_empty() {
             return true;
         }

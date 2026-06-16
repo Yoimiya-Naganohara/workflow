@@ -160,6 +160,9 @@ pub struct UiState {
     /// Whether `ChatTokenUsage` events have been received in the current stream.
     /// When `true`, API‑reported token counts take precedence over local estimates.
     pub has_api_tokens: bool,
+    /// When a paste is pending, stores the full text to be sent on submit.
+    /// The input shows a summary marker instead of the raw text.
+    pub pending_paste: Option<String>,
     pub current_plan: Option<crate::agent::plan::Plan>,
 
     // ── Phase 1: Agent diagnostic tree ──
@@ -781,6 +784,7 @@ impl Default for UiState {
             cached_message_count: 0,
             tokenizer_initialized: false,
             has_api_tokens: false,
+            pending_paste: None,
             active_chat_abort: None,
             active_chat_requests: 0,
             budget_used: 0,
