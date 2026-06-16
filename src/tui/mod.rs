@@ -154,16 +154,13 @@ impl Tui {
                                 }
                                 Event::Paste(text) => {
                                     let mut state = self.state.write().await;
-                                    if state.ui.focus == crate::tui::state::Focus::Input
-                                        || state.popup_mode == crate::tui::state::PopupMode::KeyInput
-                                    {
+                                    if state.ui.focus == crate::tui::state::Focus::Input {
+                                        // Normal input: show summary marker, store full text
                                         state.ui.pending_paste = Some(text.clone());
-                                        let char_count = text.chars().count();
-                                        let line_count = text.lines().count();
-                                        let summary = if line_count > 1 {
-                                            format!("[📋 Pasted {} chars / {} lines]", char_count, line_count)
+                                        let summary = if text.lines().count() > 1 {
+                                            format!("[📋 Pasted {} chars / {} lines]", text.chars().count(), text.lines().count())
                                         } else {
-                                            format!("[📋 Pasted {} chars]", char_count)
+                                            format!("[📋 Pasted {} chars]", text.chars().count())
                                         };
                                         let byte_idx = crate::tui::chat_lines::char_idx_to_byte_idx(
                                             &state.ui.input,
@@ -171,6 +168,14 @@ impl Tui {
                                         );
                                         state.ui.input.insert_str(byte_idx, &summary);
                                         state.ui.input_cursor += summary.chars().count();
+                                    } else if state.popup_mode == crate::tui::state::PopupMode::KeyInput {
+                                        // KeyInput: paste directly (no marker, no pending_paste)
+                                        let byte_idx = crate::tui::chat_lines::char_idx_to_byte_idx(
+                                            &state.ui.input,
+                                            state.ui.input_cursor,
+                                        );
+                                        state.ui.input.insert_str(byte_idx, &text);
+                                        state.ui.input_cursor += text.chars().count();
                                     }
                                 }
                                 _ => {}

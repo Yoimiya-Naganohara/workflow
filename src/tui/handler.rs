@@ -344,13 +344,9 @@ impl Tui {
                         state.popup_mode = PopupMode::None;
                     }
                     PopupMode::KeyInput => {
-                        // Set API key (resolve paste marker first)
+                        // Set API key
                         if let Some(ref provider_id) = state.popup_key_provider.clone() {
-                            let key_value = if let Some(paste_content) = ui.pending_paste.take() {
-                                paste_content
-                            } else {
-                                ui.input.clone()
-                            };
+                            let key_value = ui.input.clone();
                             if !key_value.is_empty() {
                                 // Clone provider info before any mutable access
                                 let provider_info: Option<(String, String)> =
