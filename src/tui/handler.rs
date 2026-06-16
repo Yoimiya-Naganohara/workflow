@@ -25,8 +25,10 @@ impl Tui {
         let ui = &mut state.ui;
         let core = &mut state.core;
 
-        // ── Shift+Enter: insert newline ──
-        if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::SHIFT) {
+        // ── Ctrl+J / Ctrl+Enter: insert newline ──
+        // Enter (0x0D) and Shift+Enter are indistinguishable in terminals.
+        // Ctrl+Enter sends 0x0A (Ctrl+J) which IS distinguishable.
+        if key.code == KeyCode::Char('j') && key.modifiers.contains(KeyModifiers::CONTROL) {
             let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
             ui.input.insert(byte_idx, '\n');
             ui.input_cursor += 1;
