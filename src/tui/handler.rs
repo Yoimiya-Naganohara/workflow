@@ -25,10 +25,8 @@ impl Tui {
         let ui = &mut state.ui;
         let core = &mut state.core;
 
-        // ── Shift+Enter / Alt+Enter: insert newline ──
-        if key.code == KeyCode::Enter
-            && (key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::ALT))
-        {
+        // ── Shift+Enter: insert newline ──
+        if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::SHIFT) {
             let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
             ui.input.insert(byte_idx, '\n');
             ui.input_cursor += 1;
