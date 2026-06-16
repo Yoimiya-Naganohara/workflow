@@ -68,15 +68,6 @@ impl Tui {
             Vec::new()
         };
 
-        let total = self.chat_lines_cache.total_lines();
-
-        // Sync tree_agent_ids with the current tree
-        if let Ok(mut s) = self.state.try_write() {
-            s.ui.tree_agent_ids = tree_lines.iter().map(|tl| tl.agent_id).collect();
-            s.ui.selected_agent_idx = s.ui.selected_agent_idx.min(tree_lines.len().saturating_sub(1));
-            s.ui.total_chat_lines = total;
-        }
-
         let tree_item_count = tree_lines.len();
         let tree_height = if tree_item_count > 0 {
             let max_tree = (term_size.height as usize / 3).clamp(3, 12);
@@ -90,12 +81,14 @@ impl Tui {
         // Layout: chat_area (with 2-pixel border) [+ tree_sep + tree] + status_bar.
         // Inside chat_area: msg_area [+ popup] + input.
         let pop_h: u16 = crate::tui::popup::popup_height(&state);
-        let visible_height = (term_size.height
-            .saturating_sub(input_lines + 3)          // border(2) + status_bar(1)
+        let visible_height = (term_size
+            .height
+            .saturating_sub(input_lines + 3) // border(2) + status_bar(1)
             .saturating_sub(if show_tree { 1 + tree_height } else { 0 })
             .saturating_sub(pop_h))
-            .max(1) as usize;
+        .max(1) as usize;
 
+        let total = self.chat_lines_cache.total_lines();
         let max_scroll = total.saturating_sub(visible_height);
         let chat_scroll = if state.ui.auto_scroll {
             max_scroll
@@ -103,10 +96,18 @@ impl Tui {
             state.ui.chat_scroll.min(max_scroll)
         };
 
-        // Update last_max_scroll for scroll handlers
+        // ── Batch all state writes after dropping the read lock ──
+        drop(state);
         if let Ok(mut s) = self.state.try_write() {
+            s.ui.tree_agent_ids = tree_lines.iter().map(|tl| tl.agent_id).collect();
+            s.ui.selected_agent_idx = s.ui.selected_agent_idx.min(tree_lines.len().saturating_sub(1));
+            s.ui.total_chat_lines = total;
             s.ui.last_max_scroll = max_scroll;
+            if s.ui.auto_scroll || chat_scroll != s.ui.chat_scroll {
+                s.ui.chat_scroll = chat_scroll;
+            }
         }
+        let state = self.state.read().await;
 
         self.terminal.draw(|f| {
             let area = f.area();

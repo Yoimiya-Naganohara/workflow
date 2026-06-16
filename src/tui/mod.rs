@@ -27,8 +27,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-pub use self::state::{AppState, Focus};
 use self::state::Panel;
+pub use self::state::{AppState, Focus};
 use crate::tui::chat_lines::ChatRenderOutput;
 
 pub struct Tui {

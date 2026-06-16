@@ -178,7 +178,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
             let visual_rows = if line_width == 0 {
                 1
             } else {
-                (line_width + avail - 1) / avail
+                line_width.div_ceil(avail)
             };
 
             let line_area = Rect::new(

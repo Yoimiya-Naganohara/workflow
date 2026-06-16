@@ -160,7 +160,7 @@ impl Tool for SpawnAgent {
 
         // Dispatch to the background event loop — the event loop owns
         // the ToolServerHandle and will execute the agent asynchronously.
-        let _ = runtime_tx
+        runtime_tx
             .send(crate::runtime::event::RuntimeEvent::ActivateAgent {
                 agent_id: child_id,
                 parent_id: Some(parent_id),

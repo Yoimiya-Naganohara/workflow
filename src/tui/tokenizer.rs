@@ -12,7 +12,7 @@ fn tokenizer() -> Option<&'static CoreBPE> {
     // downloads the BPE file (~1 MB) and caches it for subsequent calls.
     // We wrap in catch-unwind to handle the case where the download fails
     // (e.g. no network during first run).
-    std::panic::catch_unwind(|| tiktoken_rs::cl100k_base_singleton()).ok()
+    std::panic::catch_unwind(tiktoken_rs::cl100k_base_singleton).ok()
 }
 
 /// Count tokens in `text` using cl100k_base encoding.

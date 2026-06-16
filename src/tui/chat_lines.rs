@@ -36,7 +36,6 @@ pub(crate) struct TableDef {
 #[derive(Debug, Clone)]
 pub(crate) struct ChatRenderOutput {
     pub rendered: Vec<RenderedLine>,
-    #[allow(dead_code)]
     pub tables: Vec<TableDef>,
 }
 
@@ -1092,10 +1091,10 @@ fn make_spans_for_range(all: &[Span<'static>], start: usize, end: usize) -> Vec<
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Legacy helpers (used by old tests)
+//  Legacy helpers (test-only)
 // ═══════════════════════════════════════════════════════════════════════════
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn truncate_display(s: &str, max_display_width: usize) -> String {
     let mut width = 0;
     let mut result = String::new();
