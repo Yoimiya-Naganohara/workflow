@@ -1079,6 +1079,9 @@ impl AgentRuntime {
                             }
                         }
                     }
+                    crate::llm::ToolEvent::TokenUsage { .. } => {
+                        // Token usage tracking is handled at the TUI layer.
+                    }
                     crate::llm::ToolEvent::Done => break,
                 }
             }
@@ -1252,6 +1255,7 @@ impl AgentRuntime {
                             }
                         } // try_write drops here — minimal lock duration
                     }
+                    crate::llm::ToolEvent::TokenUsage { .. } => {}
                     crate::llm::ToolEvent::Done => break,
                 }
             }

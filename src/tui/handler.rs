@@ -25,8 +25,11 @@ impl Tui {
         let ui = &mut state.ui;
         let core = &mut state.core;
 
-        // ── Shift+Enter: insert newline ──
-        if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::SHIFT) {
+        // ── Shift+Enter / Alt+Enter: insert newline ──
+        if key.code == KeyCode::Enter
+            && (key.modifiers.contains(KeyModifiers::SHIFT)
+                || key.modifiers.contains(KeyModifiers::ALT))
+        {
             let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
             ui.input.insert(byte_idx, '\n');
             ui.input_cursor += 1;
@@ -531,11 +534,7 @@ impl Tui {
         if ui.active_chat_requests > 0 {
             core.messages.push(ChatMessage::system(
                 "Already processing a request. Wait or press Ctrl+X to cancel.",
-        // Reset API token tracking for the new request
-        ui.has_api_tokens = false;
             ));
-            ui.input.clear();
-            ui.input_cursor = 0;
             return true;
         }
 
@@ -647,6 +646,8 @@ impl Tui {
         };
 
         if let Some(provider) = provider {
+            // Reset API token tracking for the new request
+            ui.has_api_tokens = false;
             state.effects.push(Effect::StartChat {
                 input: input.clone(),
                 response_index,

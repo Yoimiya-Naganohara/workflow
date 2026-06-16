@@ -157,6 +157,9 @@ pub struct UiState {
     pub cached_message_count: usize,
     /// Whether the tiktoken BPE file has been downloaded.
     pub tokenizer_initialized: bool,
+    /// Whether `ChatTokenUsage` events have been received in the current stream.
+    /// When `true`, API‑reported token counts take precedence over local estimates.
+    pub has_api_tokens: bool,
     pub current_plan: Option<crate::agent::plan::Plan>,
 
     // ── Phase 1: Agent diagnostic tree ──
@@ -207,12 +210,10 @@ pub enum PopupMode {
     },
     Providers,
     KeyInput,
-    pub cached_message_count: usize,
-    /// Whether the tiktoken BPE file has been downloaded.
-    pub tokenizer_initialized: bool,
-    /// Whether `ChatTokenUsage` events have been received in the current stream.
-    /// When `true`, API‑reported token counts take precedence over local estimates.
-    pub has_api_tokens: bool,
+    ModelPicker,
+    FilePicker {
+        query: String,
+    },
     AgentDetail {
         agent_id: crate::core::types::AgentId,
     },
@@ -252,7 +253,6 @@ impl AppState {
                     status: MessageStatus::Completed,
                 });
             }
-            has_api_tokens: false,
             AppEvent::ShellError { error, timestamp } => {
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::System,
@@ -290,6 +290,9 @@ impl AppState {
                         if was_thinking && !self.ui.has_api_tokens {
                             self.recalc_tokens();
                         }
+                    }
+                }
+            }
             AppEvent::ChatCompleted {
                 response_index,
                 request_id,
@@ -379,6 +382,8 @@ impl AppState {
                 }
                 self.ui.active_chat_requests = 0;
                 self.ui.active_chat_abort = None;
+                self.recalc_tokens();
+            }
             AppEvent::ChatTokenUsage {
                 response_index: _,
                 input,
@@ -390,15 +395,9 @@ impl AppState {
                     self.ui.cached_input_tokens = 0;
                     self.ui.cached_output_tokens = 0;
                     self.ui.has_api_tokens = true;
-                if !self.ui.has_api_tokens {
-                    self.recalc_tokens();
                 }
                 self.ui.cached_input_tokens = self.ui.cached_input_tokens.saturating_add(input);
                 self.ui.cached_output_tokens = self.ui.cached_output_tokens.saturating_add(output);
-            }
-                self.ui.active_chat_requests = 0;
-                self.ui.active_chat_abort = None;
-                self.recalc_tokens();
             }
             AppEvent::OptimizationResult {
                 role_name,
@@ -780,6 +779,7 @@ impl Default for UiState {
             cached_output_tokens: 0,
             cached_message_count: 0,
             tokenizer_initialized: false,
+            has_api_tokens: false,
             active_chat_abort: None,
             active_chat_requests: 0,
             budget_used: 0,
