@@ -1062,10 +1062,12 @@ impl AgentRuntime {
             };
             use futures::StreamExt;
             futures::pin_mut!(stream);
+            let mut tool_call_count = 0usize;
             while let Some(event) = stream.next().await {
                 match event {
                     crate::llm::ToolEvent::Text(t) => text.push_str(&t),
                     crate::llm::ToolEvent::ToolCall { name, args, .. } => {
+                        tool_call_count += 1;
                         tools_used |= Self::tool_bit(&name);
                         let args_preview = serde_json::to_string(&args).unwrap_or_default();
                         let args_preview = if args_preview.len() > 80 {
@@ -1094,6 +1096,15 @@ impl AgentRuntime {
                     }
                     crate::llm::ToolEvent::Done => break,
                 }
+            }
+            // If the LLM hit max turns without producing a final message,
+            // generate a concise summary so the user sees completion feedback.
+            if text.trim().is_empty() && tool_call_count > 0 {
+                text = format!(
+                    "Completed after {} tool call{}.",
+                    tool_call_count,
+                    if tool_call_count == 1 { "" } else { "s" }
+                );
             }
             (text, tools_used)
         } else {

@@ -24,7 +24,7 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
         PopupMode::None => 0,
         PopupMode::Commands => {
             let prefix = state.ui.input.trim().to_lowercase();
-            if prefix.is_empty() || prefix == "/" {
+            if prefix.is_empty() {
                 return 0;
             }
             let query = prefix.trim_start_matches('/');
@@ -117,7 +117,7 @@ fn filter_text_for_subcommand<'a>(input: &'a str, parent: &str) -> &'a str {
 
 fn render_command_popup(f: &mut Frame, area: Rect, state: &AppState) {
     let prefix = state.ui.input.trim().to_lowercase();
-    if prefix.is_empty() || prefix == "/" {
+    if prefix.is_empty() {
         return;
     }
 

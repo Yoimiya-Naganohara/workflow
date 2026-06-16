@@ -217,6 +217,13 @@ pub enum PopupMode {
     AgentDetail {
         agent_id: crate::core::types::AgentId,
     },
+    /// Popup asking the user to type argument(s) for a command.
+    /// `cmd` is the base command (e.g. `/sh`), and once Enter is pressed
+    /// the full line `/sh <input>` is dispatched.
+    ShellInput {
+        cmd: String,
+        input: String,
+    },
 }
 
 impl AppState {
@@ -799,6 +806,7 @@ impl Default for UiState {
             tree_agent_ids: Vec::new(),
             input_disabled: false,
             total_chat_lines: 0,
+            pending_shell_cmd: false,
         }
     }
 }
