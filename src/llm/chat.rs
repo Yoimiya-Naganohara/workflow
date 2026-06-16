@@ -232,6 +232,24 @@ impl LlmProvider {
                         yield ToolEvent::Text(err.to_string());
                         yield ToolEvent::Done;
                         break;
+                    Ok(MultiTurnStreamItem::CompletionCall(call)) => {
+                        if let Some(usage) = call.usage {
+                            yield ToolEvent::TokenUsage {
+                                input: usage.input_tokens as u32,
+                    Ok(MultiTurnStreamItem::FinalResponse(response)) => {
+                        // Also yield the aggregated usage from FinalResponse
+                        // so single-turn (no CompletionCall) scenarios are covered.
+                        let usage = response.usage();
+                        if usage.input_tokens > 0 || usage.output_tokens > 0 {
+                            yield ToolEvent::TokenUsage {
+                                input: usage.input_tokens as u32,
+                                output: usage.output_tokens as u32,
+                            };
+                        }
+                        yield ToolEvent::Done;
+                        break;
+                    }
+                    }
                     }
                 }
             }
@@ -249,6 +267,20 @@ mod tests {
         let history: Vec<(String, String)> = vec![];
         let msgs = LlmProvider::build_history(&history);
         assert!(msgs.is_empty());
+    #[test]
+    fn test_tool_event_token_usage() {
+        let event = ToolEvent::TokenUsage {
+            input: 150,
+            output: 75,
+        };
+        match event {
+            ToolEvent::TokenUsage { input, output } => {
+                assert_eq!(input, 150);
+                assert_eq!(output, 75);
+            }
+            _ => panic!("expected TokenUsage"),
+        }
+    }
     }
 
     #[test]

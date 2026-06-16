@@ -531,6 +531,8 @@ impl Tui {
         if ui.active_chat_requests > 0 {
             core.messages.push(ChatMessage::system(
                 "Already processing a request. Wait or press Ctrl+X to cancel.",
+        // Reset API token tracking for the new request
+        ui.has_api_tokens = false;
             ));
             ui.input.clear();
             ui.input_cursor = 0;

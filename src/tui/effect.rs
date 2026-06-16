@@ -98,6 +98,13 @@ pub enum AppEvent {
     },
     ChatToken {
         response_index: usize,
+    /// Per‑turn token usage reported by the LLM provider.
+    /// Accumulated by the state to show accurate ↑/↓ metrics.
+    ChatTokenUsage {
+        response_index: usize,
+        input: u32,
+        output: u32,
+    },
         text: String,
     },
     ChatToolCall {
@@ -320,9 +327,13 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                                 let args_str = format_tool_args(&args);
                                 let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
                                 let _ = tx.send(AppEvent::ChatToolCall {
+                            ToolEvent::TokenUsage { input, output } => {
+                                let _ = tx.send(AppEvent::ChatTokenUsage {
                                     response_index,
-                                    name,
-                                    args: args_str,
+                                    input,
+                                    output,
+                                });
+                            }
                                     timestamp,
                                 });
                             }

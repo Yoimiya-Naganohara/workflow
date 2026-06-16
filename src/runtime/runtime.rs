@@ -974,7 +974,11 @@ impl AgentRuntime {
         // Phase 1: Extract needed data under a brief read lock
         let (provider, role_template_store, embedding_service) = {
             let rt = runtime.read().await;
-            (rt.provider.clone(), Arc::clone(&rt.role_template_store), rt.pipeline.embedding().clone())
+            (
+                rt.provider.clone(),
+                Arc::clone(&rt.role_template_store),
+                rt.pipeline.embedding().clone(),
+            )
         };
 
         let (goal, role, config) = {
@@ -1080,10 +1084,7 @@ impl AgentRuntime {
             }
             (text, tools_used)
         } else {
-            let text = match provider
-                .chat(&config.model_id, &system_prompt, &goal)
-                .await
-            {
+            let text = match provider.chat(&config.model_id, &system_prompt, &goal).await {
                 Ok(t) => t,
                 Err(e) => {
                     let mut pool = agent_pool.write().await;

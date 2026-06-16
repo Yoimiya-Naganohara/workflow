@@ -130,6 +130,14 @@ pub enum ToolEvent {
         args: serde_json::Value,
         result: String,
     },
+    /// Per-turn token usage from the LLM provider.
+    ///
+    /// Emitted after each completion request in a multi‑turn tool chain.
+    /// Values come from [`rig::completion::Usage`] reported by the provider.
+    TokenUsage {
+        input: u32,
+        output: u32,
+    },
     Done,
 }
 

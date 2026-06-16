@@ -176,10 +176,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
             }
             let batch_count = i - text_start;
             if batch_count > 0 {
-                let lines: Vec<Line<'static>> = output.rendered[text_start..i]
-                    .iter()
-                    .map(|r| r.line.clone())
-                    .collect();
+                let lines: Vec<Line<'static>> = output.rendered[text_start..i].iter().map(|r| r.line.clone()).collect();
 
                 // Compute total wrapped visual height for the batch.
                 // Paragraph::Wrap handles the actual line-breaking; this is only
@@ -200,10 +197,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
                     (visual_h as u16).min(area.bottom().saturating_sub(y)),
                 );
                 if text_area.height > 0 {
-                    f.render_widget(
-                        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-                        text_area,
-                    );
+                    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }), text_area);
                 }
                 y += visual_h as u16;
             }

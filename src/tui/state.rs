@@ -207,11 +207,12 @@ pub enum PopupMode {
     },
     Providers,
     KeyInput,
-    ModelPicker,
-    FilePicker {
-        query: String,
-    },
-    /// Detail popup for a single agent (Phase 3).
+    pub cached_message_count: usize,
+    /// Whether the tiktoken BPE file has been downloaded.
+    pub tokenizer_initialized: bool,
+    /// Whether `ChatTokenUsage` events have been received in the current stream.
+    /// When `true`, API‑reported token counts take precedence over local estimates.
+    pub has_api_tokens: bool,
     AgentDetail {
         agent_id: crate::core::types::AgentId,
     },
@@ -251,6 +252,7 @@ impl AppState {
                     status: MessageStatus::Completed,
                 });
             }
+            has_api_tokens: false,
             AppEvent::ShellError { error, timestamp } => {
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::System,
@@ -285,9 +287,9 @@ impl AppState {
                         if was_thinking {
                             self.recalc_tokens();
                         }
-                    }
-                }
-            }
+                        if was_thinking && !self.ui.has_api_tokens {
+                            self.recalc_tokens();
+                        }
             AppEvent::ChatCompleted {
                 response_index,
                 request_id,
@@ -375,6 +377,25 @@ impl AppState {
                         msg.status = MessageStatus::Completed;
                     }
                 }
+                self.ui.active_chat_requests = 0;
+                self.ui.active_chat_abort = None;
+            AppEvent::ChatTokenUsage {
+                response_index: _,
+                input,
+                output,
+            } => {
+                // On first API token report, clear the local‑estimate baseline
+                // so we only accumulate actual API‑reported tokens.
+                if !self.ui.has_api_tokens {
+                    self.ui.cached_input_tokens = 0;
+                    self.ui.cached_output_tokens = 0;
+                    self.ui.has_api_tokens = true;
+                if !self.ui.has_api_tokens {
+                    self.recalc_tokens();
+                }
+                self.ui.cached_input_tokens = self.ui.cached_input_tokens.saturating_add(input);
+                self.ui.cached_output_tokens = self.ui.cached_output_tokens.saturating_add(output);
+            }
                 self.ui.active_chat_requests = 0;
                 self.ui.active_chat_abort = None;
                 self.recalc_tokens();
@@ -490,6 +511,8 @@ impl AppState {
                 });
 
                 let mut new_history = history.clone();
+                // Reset API token tracking for the retry stream
+                self.ui.has_api_tokens = false;
                 new_history.push(("user".to_string(), feedback.clone()));
 
                 let new_response_index = self.core.messages.len();
