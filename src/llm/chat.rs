@@ -223,13 +223,9 @@ impl LlmProvider {
                             }
                         }
                     }
-                    Ok(MultiTurnStreamItem::CompletionCall(call)) => {
-                        if let Some(usage) = call.usage {
-                            yield ToolEvent::TokenUsage {
-                                input: usage.input_tokens as u32,
-                                output: usage.output_tokens as u32,
-                            };
-                        }
+                    Ok(MultiTurnStreamItem::CompletionCall(_call)) => {
+                        // Per-request usage skipped — FinalResponse below carries
+                        // the aggregate across all turns in the multi-turn stream.
                     }
                     Ok(MultiTurnStreamItem::FinalResponse(response)) => {
                         let usage = response.usage();
