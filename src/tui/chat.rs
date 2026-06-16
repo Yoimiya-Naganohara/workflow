@@ -156,7 +156,8 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
 
         if let Some(ref tc) = rl.tool_call {
             // ── Tool-call block: bordered Paragraph with Wrap ──
-            let inner_w = area.width.saturating_sub(4).max(1) as usize;
+            // Block border takes 1 char on each side → content width = area.width - 2.
+            let inner_w = area.width.saturating_sub(2).max(1) as usize;
             let content_height: usize = tc.args.lines()
                 .map(|l| {
                     let w = UnicodeWidthStr::width(l);
@@ -165,15 +166,11 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
                 .sum::<usize>()
                 .max(1);
             let block_h = 2 + content_height; // top-border + content + bottom-border
+            let avail_h = area.bottom().saturating_sub(y);
+            let actual_h = (block_h as u16).min(avail_h);
 
-            let block_area = Rect::new(
-                area.x,
-                y,
-                area.width,
-                (block_h as u16).min(area.bottom().saturating_sub(y)),
-            );
-
-            if block_area.height > 0 {
+            if actual_h > 0 {
+                let block_area = Rect::new(area.x, y, area.width, actual_h);
                 let block = Block::default()
                     .borders(Borders::ALL)
                     .border_set(ratatui::symbols::border::ROUNDED)
@@ -190,7 +187,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
                 f.render_widget(para, block_area);
             }
 
-            y += block_h as u16;
+            y += actual_h;
             i += 1;
         } else if let Some(ref td) = rl.table {
             // ── Table region: render as a single Table widget ──
