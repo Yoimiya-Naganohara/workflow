@@ -107,11 +107,16 @@ impl RuntimeEventLoop {
             _ => tool_server.clone(),
         };
 
-        // Execute the agent (LLM call + tools).
-        let (result, status) = {
-            let rt = runtime.read().await;
-            rt.execute_agent_inner(agent_id, &pool, Some(tool_handle)).await
-        };
+        // Execute the agent (LLM call + tools) without holding the runtime
+        // read lock.  This allows other tasks (e.g. pool consolidation) to
+        // acquire a write lock while the LLM request is in-flight.
+        let (result, status) = AgentRuntime::execute_agent_detached(
+            runtime.clone(),
+            agent_id,
+            pool.clone(),
+            Some(tool_handle),
+        )
+        .await;
 
         // Report completion.
         match status {

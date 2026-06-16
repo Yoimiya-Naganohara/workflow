@@ -44,7 +44,7 @@ use crate::llm::LlmProvider;
 /// ```
 pub struct AgentRuntime {
     /// Injected decision pipeline (L-1 / L0 / L1 / L2).
-    pipeline: DecisionPipeline,
+    pipeline: Arc<DecisionPipeline>,
     /// LLM provider for chat / embedding.
     pub provider: Option<Arc<LlmProvider>>,
     /// Active model identifier.
@@ -109,6 +109,7 @@ impl AgentRuntime {
     /// Use this when you want full control over every layer's
     /// implementation (mocking, custom audit engines, etc.).
     pub fn from_pipeline(pipeline: DecisionPipeline) -> Self {
+        let pipeline = Arc::new(pipeline);
         let store_path = Self::default_store_path();
         let store = RoleTemplateStore::open(&store_path).expect("Failed to open role template store");
 
@@ -958,9 +959,192 @@ impl AgentRuntime {
         }
     }
 
+    /// Execute an agent without holding the runtime read lock across the LLM call.
+    ///
+    /// This is the deadlock-safe variant for use from spawned tasks where the
+    /// caller cannot hold `&self` behind a read guard across `.await` points.
+    /// The method internally acquires the lock only for brief data extraction
+    /// and experience recording, releasing it before the async LLM call.
+    pub(crate) async fn execute_agent_detached(
+        runtime: Arc<RwLock<Self>>,
+        agent_id: AgentId,
+        agent_pool: Arc<RwLock<AgentPool>>,
+        tool_server: Option<crate::tools::ToolServerHandle>,
+    ) -> (String, AgentStatus) {
+        // Phase 1: Extract needed data under a brief read lock
+        let (provider, role_template_store, embedding_service) = {
+            let rt = runtime.read().await;
+            (rt.provider.clone(), Arc::clone(&rt.role_template_store), rt.pipeline.embedding().clone())
+        };
+
+        let (goal, role, config) = {
+            let pool = agent_pool.read().await;
+            let agent = match pool.get_agent(&agent_id) {
+                Some(a) => a.clone(),
+                None => return (String::new(), AgentStatus::Failed),
+            };
+            (agent.goal, agent.role, agent.config.clone())
+        };
+
+        let provider: Arc<LlmProvider> = match provider {
+            Some(p) => p,
+            None => {
+                let mut pool = agent_pool.write().await;
+                if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                    agent.status = AgentStatus::Failed;
+                    agent.result = Some("No LLM provider configured".to_string());
+                    pool.release_budget_guard(&agent_id);
+                    pool.notify_completed(&agent_id);
+                }
+                return ("No LLM provider configured".to_string(), AgentStatus::Failed);
+            }
+        };
+
+        // Mark planning
+        {
+            let mut pool = agent_pool.write().await;
+            if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                agent.status = AgentStatus::Planning;
+            }
+        }
+
+        // Phase 2: Build system prompt (no lock on runtime needed)
+        let role_system_prompt = role_template_store
+            .get_by_role(&role)
+            .map(|t| t.system_prompt)
+            .unwrap_or_else(|| format!("You are a {}. Execute the given goal.", role));
+
+        let memo_block = {
+            let pool = agent_pool.read().await;
+            pool.format_role_memos(&role)
+        };
+        let memos = memo_block.as_deref().unwrap_or("");
+        let system_prompt = format!(
+            "{}\n\nYour goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\n{}\n\n{}{}",
+            role_system_prompt,
+            goal,
+            crate::core::types::MEMO_INSTRUCTIONS,
+            crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
+            memos,
+        );
+
+        // Phase 3: Execute LLM call (no lock held on runtime)
+        let (response, tool_bitmap) = if let Some(handle) = &tool_server {
+            let mut text = String::new();
+            let mut tools_used: u64 = 0;
+            let stream = match provider
+                .chat_with_tools_stream_mcp(&config.model_id, &system_prompt, &goal, &[], handle)
+                .await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    let mut pool = agent_pool.write().await;
+                    if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                        agent.status = AgentStatus::Failed;
+                        agent.result = Some(format!("LLM error: {}", e));
+                        pool.release_budget_guard(&agent_id);
+                        pool.notify_completed(&agent_id);
+                    }
+                    return (format!("LLM error: {}", e), AgentStatus::Failed);
+                }
+            };
+            use futures::StreamExt;
+            futures::pin_mut!(stream);
+            while let Some(event) = stream.next().await {
+                match event {
+                    crate::llm::ToolEvent::Text(t) => text.push_str(&t),
+                    crate::llm::ToolEvent::ToolCall { name, args, .. } => {
+                        tools_used |= Self::tool_bit(&name);
+                        let args_preview = serde_json::to_string(&args).unwrap_or_default();
+                        let args_preview = if args_preview.len() > 80 {
+                            format!("{}…", &args_preview[..80])
+                        } else {
+                            args_preview
+                        };
+                        if let Ok(mut pool) = agent_pool.try_write() {
+                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                                agent.tool_trace.push_back(crate::agent::ToolCallRecord {
+                                    name,
+                                    args_preview,
+                                    status: crate::agent::ToolStatus::Success,
+                                });
+                                // Keep ring buffer bounded
+                                if agent.tool_trace.len() > 128 {
+                                    agent.tool_trace.pop_front();
+                                }
+                            }
+                        }
+                    }
+                    crate::llm::ToolEvent::Done => break,
+                }
+            }
+            (text, tools_used)
+        } else {
+            let text = match provider
+                .chat(&config.model_id, &system_prompt, &goal)
+                .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    let mut pool = agent_pool.write().await;
+                    if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                        agent.status = AgentStatus::Failed;
+                        agent.result = Some(format!("LLM error: {}", e));
+                        pool.release_budget_guard(&agent_id);
+                        pool.notify_completed(&agent_id);
+                    }
+                    return (format!("LLM error: {}", e), AgentStatus::Failed);
+                }
+            };
+            (text, 0)
+        };
+
+        // Phase 4: Record result under brief lock
+        {
+            let mut pool = agent_pool.write().await;
+            if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                agent.status = AgentStatus::Completed;
+                agent.result = Some(response.clone());
+            }
+        }
+
+        // Phase 5: Record experience (re-acquire runtime lock briefly)
+        if !response.is_empty() {
+            let goal_for_emb = goal.clone();
+            if let Ok(emb) = embedding_service.embed(&goal_for_emb).await {
+                let rt = runtime.read().await;
+                rt.pipeline.add_experience(crate::core::types::ExperienceEntry {
+                    embedding: emb,
+                    applicability_vector: [0.0f32; 128],
+                    tool_bitmap,
+                    role_template_id: role_template_store.get_by_role(&role).map(|t| t.template_id),
+                    weight: 1.0,
+                    domain_version: 0,
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    l2_override_weight: 0.0,
+                    l2_override_created_at: 0,
+                });
+            }
+        }
+
+        // Phase 6: Release budget guard and notify completion
+        let mut pool = agent_pool.write().await;
+        pool.release_budget_guard(&agent_id);
+        pool.notify_completed(&agent_id);
+
+        (response, AgentStatus::Completed)
+    }
+
     /// Execute a single leaf agent: LLM call, store result, record experience.
     ///
     /// If `tool_server` is provided, the agent can call tools.
+    ///
+    /// NOTE: This method takes `&self` and holds the runtime read lock for the
+    /// entire duration. Prefer [`execute_agent_detached`] from long-lived contexts
+    /// to avoid blocking other runtime operations.
     pub(crate) async fn execute_agent_inner(
         &self,
         agent_id: AgentId,
