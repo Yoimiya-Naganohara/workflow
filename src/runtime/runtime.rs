@@ -362,11 +362,6 @@ impl AgentRuntime {
         self.pipeline.add_experience(entry);
     }
 
-    /// Record an experience entry into the pool (feedback loop).
-    pub fn record_experience(&self, entry: ExperienceEntry) {
-        self.pipeline.record_experience(entry);
-    }
-
     /// Embed text using the pipeline's embedding service.
     pub async fn embed(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
         self.pipeline.embedding().embed(text).await
@@ -1101,7 +1096,7 @@ impl AgentRuntime {
 
         // Record experience entry (feedback loop).
         if let Ok(emb) = self.pipeline.embedding().embed(&goal).await {
-            self.pipeline.record_experience(ExperienceEntry {
+            self.pipeline.add_experience(ExperienceEntry {
                 embedding: emb,
                 applicability_vector: [0.0f32; 128],
                 tool_bitmap: recorded_tool_bitmap,
@@ -1164,7 +1159,7 @@ mod tests {
         }
 
         fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
-            crate::core::simd::cosine_similarity_768(a, b)
+            crate::core::simd::cosine_similarity_384(a, b)
         }
 
         fn cache_size(&self) -> usize {

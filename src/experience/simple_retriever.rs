@@ -4,7 +4,7 @@
 //! [`DualTrackMemory`] is not injected. It stores experiences in a `Vec`
 //! and performs linear search with weighted cosine similarity.
 
-use crate::core::simd::cosine_similarity_768;
+use crate::core::simd::cosine_similarity_384;
 use crate::core::types::{EMBEDDING_DIM, ExperienceEntry, SpawnRejection};
 use crate::l1::{ExperienceRetrieval, L1Assessment};
 
@@ -29,7 +29,7 @@ impl ExperienceRetrieval for SimpleRetriever {
             .experiences
             .iter()
             .map(|entry| {
-                let sim = cosine_similarity_768(query, &entry.embedding);
+                let sim = cosine_similarity_384(query, &entry.embedding);
                 (entry, sim * entry.weight)
             })
             .collect();

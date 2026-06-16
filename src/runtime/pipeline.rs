@@ -283,11 +283,6 @@ impl DecisionPipeline {
         self.pending_guard.lock().expect("pending_guard poisoned").take()
     }
 
-    /// Record an experience entry into the pool (alias for add_experience).
-    pub fn record_experience(&self, entry: ExperienceEntry) {
-        self.add_experience(entry);
-    }
-
     /// Search the experience pool by text query.
     pub fn search_experience(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)> {
         self.experience

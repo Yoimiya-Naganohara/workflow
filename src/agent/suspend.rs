@@ -57,10 +57,14 @@ impl SuspendQueue {
         let pos = self
             .queue
             .binary_search_by(|r| {
-                priority
-                    .partial_cmp(&r.priority)
-                    // NaN: map to Less so NaN-priority requests go first.
-                    .unwrap_or(std::cmp::Ordering::Less)
+                match (priority.is_nan(), r.priority.is_nan()) {
+                    // NaN always sorts first (Less = before existing)
+                    (true, _) => std::cmp::Ordering::Less,
+                    // Non-NaN goes after NaN
+                    (_, true) => std::cmp::Ordering::Greater,
+                    // Both normal floats: use partial_cmp
+                    _ => priority.partial_cmp(&r.priority).unwrap_or(std::cmp::Ordering::Equal),
+                }
             })
             .unwrap_or_else(|p| p);
         self.queue.insert(pos, entry);

@@ -10,8 +10,9 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
+use unicode_width::UnicodeWidthStr;
 
 use super::chat_lines::ChatRenderOutput;
 use super::state::{AppState, PopupMode};
@@ -134,10 +135,9 @@ pub(crate) fn render_chat(
     }
 }
 
-/// Render the visible range of chat content, mixing Paragraph and Table widgets.
+/// Render the visible range of chat content, mixing Paragraph, Table, and tool-call blocks.
 ///
-/// Each rendered line is drawn individually with its actual visual height (accounting for
-/// text-wrapping).  This keeps the y cursor in sync with the terminal's visual rows so that
+/// Each rendered line is drawn individually with its actual visual height so that
 /// scrolling by one rendered line produces a visually smooth 1–N row shift instead of jumping
 /// when wrapped lines or tables enter or leave the viewport.
 fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scroll: usize, visible_height: usize) {
@@ -154,7 +154,45 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
     while y < area.bottom() && i < end {
         let rl = &output.rendered[i];
 
-        if let Some(ref td) = rl.table {
+        if let Some(ref tc) = rl.tool_call {
+            // ── Tool-call block: bordered Paragraph with Wrap ──
+            let inner_w = area.width.saturating_sub(4).max(1) as usize;
+            let content_height: usize = tc.args.lines()
+                .map(|l| {
+                    let w = UnicodeWidthStr::width(l);
+                    if w == 0 { 1 } else { w.div_ceil(inner_w) }
+                })
+                .sum::<usize>()
+                .max(1);
+            let block_h = 2 + content_height; // top-border + content + bottom-border
+
+            let block_area = Rect::new(
+                area.x,
+                y,
+                area.width,
+                (block_h as u16).min(area.bottom().saturating_sub(y)),
+            );
+
+            if block_area.height > 0 {
+                let block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_set(ratatui::symbols::border::ROUNDED)
+                    .title(Span::styled(
+                        tc.name.clone(),
+                        Style::default().fg(style::PURPLE).add_modifier(ratatui::style::Modifier::BOLD),
+                    ))
+                    .border_style(Style::default().fg(style::TEXT_MUTED));
+
+                let para = Paragraph::new(Text::from(tc.args.clone()))
+                    .wrap(Wrap { trim: false })
+                    .block(block);
+
+                f.render_widget(para, block_area);
+            }
+
+            y += block_h as u16;
+            i += 1;
+        } else if let Some(ref td) = rl.table {
             // ── Table region: render as a single Table widget ──
             let table_h = td.end_line - td.start_line;
             let table_area = Rect::new(
@@ -172,7 +210,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
             y += table_h as u16;
             i = td.end_line;
         } else {
-            // ── Text line: compute wrapped visual height ──
+            // ── Text line: wrapped visual height ──
             let line_width = rl.line.width();
             // ceil(line_width / avail) — minimum 1 row even for empty lines
             let visual_rows = if line_width == 0 { 1 } else { line_width.div_ceil(avail) };

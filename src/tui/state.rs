@@ -419,17 +419,17 @@ impl AppState {
                 args,
                 timestamp: _,
             } => {
-                // Tool call: "name — args" format, args truncated.
-                let args_flat = args.replace('\n', " ").replace('\r', "");
-                let args_flat = if args_flat.len() > 80 {
-                    format!("{}…", &args_flat[..80])
+                // Tool call: "name — args" format.
+                // Truncate long args but preserve original newlines for Wrap rendering.
+                let args_trunc = if args.len() > 200 {
+                    format!("{}…", &args[..200])
                 } else {
-                    args_flat
+                    args
                 };
-                let line = if args_flat.is_empty() {
+                let line = if args_trunc.is_empty() {
                     name.clone()
                 } else {
-                    format!("{} — {}", name, args_flat)
+                    format!("{} — {}", name, args_trunc)
                 };
 
                 if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {

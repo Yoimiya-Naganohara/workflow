@@ -4,7 +4,7 @@
 //! threshold.  Within each cluster, the representative embedding is
 //! the Welford running mean, tracking variance for quality estimation.
 
-use crate::core::simd::cosine_similarity_768;
+use crate::core::simd::cosine_similarity_384;
 use crate::core::types::{EMBEDDING_DIM, ExperienceEntry};
 
 // ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ impl Cluster {
 
     /// Distance between the centroid and `embedding` (1 - cosine similarity).
     pub fn distance_to(&self, embedding: &[f32; EMBEDDING_DIM]) -> f64 {
-        (1.0 - cosine_similarity_768(&self.centroid, embedding) as f64).max(0.0)
+        (1.0 - cosine_similarity_384(&self.centroid, embedding) as f64).max(0.0)
     }
 
     /// Update with Welford's online algorithm.

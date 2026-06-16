@@ -1,7 +1,7 @@
 pub mod arbitration;
 pub mod classifier;
 
-use crate::core::simd::cosine_similarity_768;
+use crate::core::simd::cosine_similarity_384;
 use crate::core::types::EMBEDDING_DIM;
 use crate::core::types::{ExperienceEntry, SpawnRejection};
 pub use arbitration::L1ArbitrationResult;
@@ -33,7 +33,7 @@ impl L1Retriever {
             .experiences
             .iter()
             .map(|entry| {
-                let sim = cosine_similarity_768(query_embedding, &entry.embedding);
+                let sim = cosine_similarity_384(query_embedding, &entry.embedding);
                 (entry, sim * entry.weight)
             })
             .collect();

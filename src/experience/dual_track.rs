@@ -23,7 +23,7 @@ use anyhow::Result;
 use std::collections::VecDeque;
 use tracing::trace;
 
-use crate::core::simd::cosine_similarity_768;
+use crate::core::simd::cosine_similarity_384;
 use crate::core::types::{EMBEDDING_DIM, ExperienceEntry, SpawnRejection};
 use crate::experience::clustering::ClusterConsolidator;
 use crate::experience::pool::ExperiencePool;
@@ -112,7 +112,7 @@ impl FluidTrack {
             .iter()
             .enumerate()
             .map(|(i, e)| {
-                let sim = cosine_similarity_768(query, &e.embedding);
+                let sim = cosine_similarity_384(query, &e.embedding);
                 (i, sim * e.weight)
             })
             .collect();

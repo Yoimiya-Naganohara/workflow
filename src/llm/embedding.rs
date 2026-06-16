@@ -13,7 +13,7 @@ use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use ort::execution_providers::{CPUExecutionProvider, CUDAExecutionProvider, CoreMLExecutionProvider};
 use tokio::sync::Mutex;
 
-use crate::core::simd::cosine_similarity_768;
+use crate::core::simd::cosine_similarity_384;
 use crate::core::types::EMBEDDING_DIM;
 use crate::llm::{LlmProvider, ProviderProtocol};
 
@@ -120,7 +120,7 @@ impl EmbeddingService {
 
     /// Cosine similarity between two embeddings.
     pub fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
-        cosine_similarity_768(a, b)
+        cosine_similarity_384(a, b)
     }
 
     /// Number of cached embeddings.
@@ -313,7 +313,7 @@ impl crate::llm::EmbeddingService for EmbeddingRouter {
     }
 
     fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
-        cosine_similarity_768(a, b)
+        cosine_similarity_384(a, b)
     }
 
     fn cache_size(&self) -> usize {
@@ -379,7 +379,7 @@ mod tests {
     fn test_cosine_similarity() {
         let a = [1.0f32; EMBEDDING_DIM];
         let b = [1.0f32; EMBEDDING_DIM];
-        let sim = cosine_similarity_768(&a, &b);
+        let sim = cosine_similarity_384(&a, &b);
         assert!((sim - 1.0).abs() < 1e-6);
     }
 }

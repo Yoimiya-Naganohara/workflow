@@ -20,6 +20,16 @@ pub(crate) struct RenderedLine {
     pub line: Line<'static>,
     /// If this line is part of a table region, the table definition.
     pub table: Option<TableDef>,
+    /// If this line is a tool-call block, the tool call definition.
+    pub tool_call: Option<ToolCallDef>,
+}
+
+/// Metadata for rendering a tool-call as a bordered Paragraph block.
+#[derive(Debug, Clone)]
+pub(crate) struct ToolCallDef {
+    pub name: String,
+    /// Args text, with original newlines preserved.
+    pub args: String,
 }
 
 /// Metadata for rendering a markdown table as a ratatui Table widget.
@@ -117,6 +127,7 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
                 rendered.push(RenderedLine {
                     line: Line::from(styled),
                     table: None,
+                    tool_call: None,
                 });
             }
             continue;
@@ -158,6 +169,7 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
                             rendered.push(RenderedLine {
                                 line: Line::from(Span::raw("")),
                                 table: Some(table_def.clone()),
+                                tool_call: None,
                             });
                         }
 
@@ -173,6 +185,7 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
                     rendered.push(RenderedLine {
                         line: Line::from(styled),
                         table: None,
+                        tool_call: None,
                     });
                     line_idx += 1;
                 }
@@ -185,6 +198,7 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
                 rendered.push(RenderedLine {
                     line: Line::from(styled),
                     table: None,
+                    tool_call: None,
                 });
             }
         }
@@ -194,6 +208,7 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
         rendered.push(RenderedLine {
             line: Line::from("No messages yet."),
             table: None,
+            tool_call: None,
         });
     }
 
@@ -307,13 +322,9 @@ fn render_md(text: &str, body_width: usize) -> MdRenderResult {
 ///   `tool_name` or `tool_name — args`
 /// Newlines separate multiple calls in the same message (streaming).
 ///
-/// Each call renders as:
-///   ┃ tool_name
-///   ┃   args line 1
-///   ┃   args line 2
-///   …
+/// Each call renders as a bordered block (via ToolCallDef), letting ratatui's
+/// built-in Wrap handle line-breaking while preserving original newlines.
 fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::ChatMessage) {
-    let bar = Span::styled("┃", Style::default().fg(style::TEXT_MUTED));
     let content = &message.content;
 
     for call_line in content.lines() {
@@ -323,76 +334,17 @@ fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::C
         }
 
         let (name, args) = if let Some(pos) = call_line.find(" — ") {
-            (&call_line[..pos], call_line[pos + 3..].trim())
+            (call_line[..pos].trim().to_string(), call_line[pos + 3..].to_string())
         } else {
-            (call_line, "")
+            (call_line.to_string(), String::new())
         };
 
-        // Tool name line (purple bold)
         lines.push(RenderedLine {
-            line: Line::from(vec![
-                bar.clone(),
-                Span::styled(
-                    name.trim().to_string(),
-                    Style::default().fg(style::PURPLE).add_modifier(Modifier::BOLD),
-                ),
-            ]),
+            line: Line::from(Span::raw("")),     // placeholder — rendered as block widget
             table: None,
+            tool_call: Some(ToolCallDef { name, args }),
         });
-
-        // Args — each on its own indented line
-        if !args.is_empty() {
-            let arg_lines = split_args_for_display(args);
-            for arg_seg in arg_lines {
-                lines.push(RenderedLine {
-                    line: Line::from(vec![
-                        bar.clone(),
-                        Span::styled(
-                            format!("  {}", arg_seg),
-                            Style::default().fg(style::TEXT_MUTED),
-                        ),
-                    ]),
-                    table: None,
-                });
-            }
-        }
     }
-}
-
-/// Split tool-call arguments into display-friendly segments.
-/// Breaks on `, ` (JSON key-value boundaries) rather than one huge line.
-fn split_args_for_display(args: &str) -> Vec<String> {
-    let args = args.trim();
-    if args.len() <= 60 {
-        return vec![args.to_string()];
-    }
-
-    // Try breaking on `, ` — JSON-style key-value pairs
-    let comma_segs: Vec<&str> = args.split(", ").collect();
-    if comma_segs.len() >= 2 {
-        let mut result: Vec<String> = Vec::new();
-        let mut line = String::new();
-        for seg in comma_segs {
-            if !line.is_empty() && line.len() + seg.len() + 2 > 55 {
-                result.push(line);
-                line = seg.to_string();
-            } else {
-                if !line.is_empty() {
-                    line.push_str(", ");
-                }
-                line.push_str(seg);
-            }
-        }
-        if !line.is_empty() {
-            result.push(line);
-        }
-        if result.len() >= 2 {
-            return result;
-        }
-    }
-
-    // Fallback: return as-is (the wrapping engine in render_chat_content handles it)
-    vec![args.to_string()]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

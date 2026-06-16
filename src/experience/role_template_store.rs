@@ -16,7 +16,7 @@ use std::sync::RwLock;
 
 use anyhow::{Context, Result};
 
-use crate::core::simd::cosine_similarity_768;
+use crate::core::simd::cosine_similarity_384;
 use crate::core::types::EMBEDDING_DIM;
 use crate::runtime::RoleTemplate;
 
@@ -87,7 +87,7 @@ impl RoleTemplateStore {
                 Some(e) => e,
                 None => continue,
             };
-            let sim = cosine_similarity_768(query, emb);
+            let sim = cosine_similarity_384(query, emb);
             if sim > threshold {
                 let is_better = best.as_ref().is_none_or(|(best_sim, _)| sim > *best_sim);
                 if is_better {

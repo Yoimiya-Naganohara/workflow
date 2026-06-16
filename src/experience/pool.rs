@@ -30,7 +30,7 @@ use anyhow::{Context, Result};
 use memmap2::{Mmap, MmapMut};
 use tracing::{trace, warn};
 
-use crate::core::simd::cosine_similarity_768;
+use crate::core::simd::cosine_similarity_384;
 use crate::core::types::{EMBEDDING_DIM, ExperienceEntry};
 
 // ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ impl ExperiencePool {
             .iter()
             .enumerate()
             .map(|(i, e)| {
-                let sim = cosine_similarity_768(query, &e.embedding);
+                let sim = cosine_similarity_384(query, &e.embedding);
                 (i, sim * e.weight)
             })
             .collect();

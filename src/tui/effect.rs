@@ -344,7 +344,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                             if let Ok(emb) = rt.embed(&input).await {
                                 // TUI chat lacks agent context — role_template_id is None
                                 // (agent-executed experiences set this in runtime.rs)
-                                rt.record_experience(ExperienceEntry {
+                                rt.add_experience(ExperienceEntry {
                                     embedding: emb,
                                     applicability_vector: [0.0f32; 128],
                                     tool_bitmap: 0,

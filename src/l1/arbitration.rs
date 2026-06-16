@@ -1,5 +1,5 @@
 use crate::core::conflict::{ConflictManifest, ConflictType};
-use crate::core::simd::cosine_similarity_768;
+use crate::core::simd::cosine_similarity_384;
 use crate::core::types::AgentId;
 use crate::core::types::EMBEDDING_DIM;
 use smallvec::SmallVec;
@@ -18,7 +18,7 @@ impl L1Arbitrator {
         embedding_a: &[f32; EMBEDDING_DIM],
         embedding_b: &[f32; EMBEDDING_DIM],
     ) -> bool {
-        let sim = cosine_similarity_768(embedding_a, embedding_b);
+        let sim = cosine_similarity_384(embedding_a, embedding_b);
         sim < self.semantic_threshold
     }
 
@@ -30,7 +30,7 @@ impl L1Arbitrator {
         embedding_b: [f32; EMBEDDING_DIM],
         trace_id: [u8; 16],
     ) -> ConflictManifest {
-        let sim = cosine_similarity_768(&embedding_a, &embedding_b);
+        let sim = cosine_similarity_384(&embedding_a, &embedding_b);
 
         // Use agent_id bytes as deterministic tiebreaker when embeddings are
         // near-identical (sim > 0.99) to avoid artificially favoring one agent.

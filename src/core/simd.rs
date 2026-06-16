@@ -20,12 +20,6 @@ pub fn cosine_similarity_384(a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM])
     cosine_similarity(a, b)
 }
 
-/// Deprecated: use [`cosine_similarity_384`] instead.
-#[allow(unused)]
-pub fn cosine_similarity_768(a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
-    cosine_similarity_384(a, b)
-}
-
 pub fn find_top_k(query: &[f32; EMBEDDING_DIM], entries: &[[f32; EMBEDDING_DIM]], k: usize) -> Vec<(usize, f32)> {
     let mut scores: Vec<(usize, f32)> = entries
         .iter()
