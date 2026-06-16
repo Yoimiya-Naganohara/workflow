@@ -501,7 +501,24 @@ impl Tui {
     // ── Input submit ──
 
     fn handle_input_submit(&self, state: &mut AppState) -> bool {
-        let input = state.ui.input.clone();
+        let raw = state.ui.input.clone();
+        if raw.is_empty() {
+            return true;
+        }
+
+        // Resolve paste marker → actual text so commands like /role work
+        // even when a paste marker is at the start of the input.
+        let (input, paste_content) = if let Some(pc) = state.ui.pending_paste.take() {
+            if let Some(start) = raw.find("[Pasted") {
+                let after = raw[start..].find(']').map(|e| start + e + 1).unwrap_or(raw.len());
+                (format!("{}{}{}", &raw[..start], pc, &raw[after..]), None)
+            } else {
+                (raw, Some(pc))
+            }
+        } else {
+            (raw, None)
+        };
+
         if input.is_empty() {
             return true;
         }
@@ -539,8 +556,9 @@ impl Tui {
         ui.input_history.push(input.clone());
         ui.input_history_idx = None;
 
-        let content = if let Some(paste) = ui.pending_paste.take() {
-            format!("{}\n```\n{}```", input, paste)
+        // Append paste content (if not merged into input above) as a code block
+        let content = if let Some(pc) = paste_content {
+            format!("{}\n```\n{}```", input, pc)
         } else {
             input.clone()
         };

@@ -160,9 +160,9 @@ impl Tui {
                                     {
                                         state.ui.pending_paste = Some(text.clone());
                                         let summary = if text.lines().count() > 1 {
-                                            format!("[📋 Pasted {} chars / {} lines]", text.chars().count(), text.lines().count())
+                                            format!("[Pasted {} chars / {} lines]", text.chars().count(), text.lines().count())
                                         } else {
-                                            format!("[📋 Pasted {} chars]", text.chars().count())
+                                            format!("[Pasted {} chars]", text.chars().count())
                                         };
                                         let byte_idx = crate::tui::chat_lines::char_idx_to_byte_idx(
                                             &state.ui.input,
