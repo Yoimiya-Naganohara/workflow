@@ -81,7 +81,9 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
 pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
     match &state.popup_mode {
         PopupMode::None => {}
-        PopupMode::ShellInput { cmd, input } => render_shell_input_popup(f, area, cmd, input),
+        PopupMode::ShellInput { cmd, input: _ } => {
+            render_shell_input_popup(f, area, cmd, &state.ui.input)
+        }
         PopupMode::Commands => render_command_popup(f, area, state),
         PopupMode::SubCommand { parent, items } => render_subcommand_popup(f, area, state, parent, items),
         PopupMode::Providers => render_provider_popup(f, area, state),
@@ -209,11 +211,19 @@ fn highlight_matches(cmd: &str, query: &str) -> Vec<Span<'static>> {
     spans
 }
 
-fn render_shell_input_popup(f: &mut Frame, area: Rect, cmd: &str, input: &str) {
-    let preview = if input.is_empty() {
+fn render_shell_input_popup(f: &mut Frame, area: Rect, cmd: &str, current_input: &str) {
+    // Strip the cmd prefix from input to get just the user's argument.
+    // This handles both bare text (input was cleared, user typed fresh)
+    // and prefixed text (input still contains the cmd).
+    let arg = current_input
+        .strip_prefix(cmd)
+        .map(|s| s.trim())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) })
+        .unwrap_or("");
+    let preview = if arg.is_empty() {
         format!("{} …", cmd)
     } else {
-        format!("{} {}", cmd, input)
+        format!("{} {}", cmd, arg)
     };
     f.render_widget(
         ratatui::widgets::Paragraph::new(preview)

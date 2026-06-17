@@ -297,8 +297,15 @@ impl Tui {
                             return self.handle_input_submit(state);
                         }
                     }
-                    PopupMode::ShellInput { cmd, input } => {
-                        let full_cmd = format!("{} {}", cmd, input.trim());
+                    PopupMode::ShellInput { cmd, input: _ } => {
+                        // Read the actual typed text from ui.input (the popup's stored
+                        // input field is never updated — keyboard input goes to ui.input).
+                        let arg = ui.input.trim();
+                        if arg.is_empty() {
+                            // Don't close popup on empty input — show the hint.
+                            return true;
+                        }
+                        let full_cmd = format!("{} {}", cmd, arg);
                         state.popup_mode = PopupMode::None;
                         state.popup_selected = 0;
                         ui.input = full_cmd;
@@ -523,8 +530,16 @@ impl Tui {
 
         // ── Slash commands ──
         if trimmed.starts_with('/') && commands::dispatch(trimmed, state, &now) {
-            state.ui.input.clear();
-            state.ui.input_cursor = 0;
+            // Keep input for interactive popups where the user continues
+            // typing to filter args (parent with space like "/role default").
+            let is_interactive = matches!(
+                &state.popup_mode,
+                PopupMode::SubCommand { parent, .. } if parent.contains(' ')
+            );
+            if !is_interactive {
+                state.ui.input.clear();
+                state.ui.input_cursor = 0;
+            }
             return true;
         }
 
