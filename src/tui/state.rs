@@ -308,12 +308,13 @@ impl AppState {
             } => {
                 if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
-                        // Only overwrite if the message hasn't already been completed.
-                        // Prevents duplicate events from overwriting completed content.
+                        // Don't overwrite content — it was already accumulated via
+                        // ChatToken (text) and ChatToolCall (tool call lines) events
+                        // during streaming. Overwriting would erase the tool call
+                        // entries that were appended to the message content.
                         if matches!(msg.status, MessageStatus::Thinking | MessageStatus::Streaming) {
-                            msg.content = full_response.clone();
+                            msg.status = MessageStatus::Completed;
                         }
-                        msg.status = MessageStatus::Completed;
                     }
                 }
                 if self.ui.active_chat_requests > 0 {

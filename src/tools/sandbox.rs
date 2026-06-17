@@ -118,6 +118,31 @@ impl SandboxHandle {
         anyhow::bail!("Read-only sandbox: path '{}' is outside the source tree", raw);
     }
 
+    /// Resolve a path for **write** operations.
+    ///
+    /// Same as [`resolve_path`] but with an additional safety check:
+    /// the resolved path must land in the **writable workdir**, not the
+    /// read-only source tree.  This prevents a hallucinating agent from
+    /// overwriting project source files via absolute paths that resolve
+    /// through the `src` symlink into the real project root.
+    ///
+    /// Agents without a sandbox bypass this check (no isolation), but
+    /// the sandbox path is the primary execution path for spawned agents.
+    pub fn resolve_write_path(&self, raw: &str) -> Result<PathBuf> {
+        let resolved = self.resolve_path(raw)?;
+        if !resolved.starts_with(&self.workdir) {
+            anyhow::bail!(
+                "Write access denied: path '{}' resolves to '{}' which is outside the \
+                 writable workdir '{}'. Use relative paths for write operations; \
+                 absolute paths are rejected by the sandbox write guard.",
+                raw,
+                resolved.display(),
+                self.workdir.display()
+            );
+        }
+        Ok(resolved)
+    }
+
     /// Best-effort removal of the entire sandbox directory.
     /// Called during agent eviction; errors are logged but not propagated.
     pub fn cleanup(&self) {

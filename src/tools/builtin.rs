@@ -205,14 +205,16 @@ impl Tool for WriteFile {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         // Resolve path through sandbox — writes land in workdir only.
+        // Uses resolve_write_path which rejects paths that would escape
+        // the writable workdir into the read-only source tree (P0 safety).
         let path = match self.sandbox.as_ref() {
             Some(sb) => sb
-                .resolve_path(&args.path)
+                .resolve_write_path(&args.path)
                 .map_err(|e| ToolCallError(format!("Sandbox: {}", e)))?,
             None => PathBuf::from(&args.path),
         };
 
-        // Create parent directories (safe — resolve_path already asserted boundary).
+        // Create parent directories (safe — resolve_write_path already asserted boundary).
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
