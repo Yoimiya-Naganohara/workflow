@@ -117,7 +117,8 @@ pub fn load() -> PersistedState {
                                     .api_keys
                                     .iter()
                                     .filter_map(|(k, v)| {
-                                        KeyStore::deobfuscate(v).map(|decrypted| (k.clone(), decrypted))
+                                        KeyStore::deobfuscate(v)
+                                            .map(|decrypted| (k.clone(), decrypted))
                                     })
                                     .collect();
                                 state.api_keys = deobfuscated;
@@ -182,10 +183,7 @@ pub fn load_session() -> Option<Vec<crate::tui::state::ChatMessage>> {
 }
 
 /// Save messages to a named session file under sessions/.
-pub fn save_session_as(
-    name: &str,
-    messages: &[crate::tui::state::ChatMessage],
-) -> Result<()> {
+pub fn save_session_as(name: &str, messages: &[crate::tui::state::ChatMessage]) -> Result<()> {
     let dir = config_dir()?.join("sessions");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{}.json", name));
@@ -195,7 +193,10 @@ pub fn save_session_as(
 
 /// Load messages from a named session.
 pub fn load_session_as(name: &str) -> Option<Vec<crate::tui::state::ChatMessage>> {
-    let path = config_dir().ok()?.join("sessions").join(format!("{}.json", name));
+    let path = config_dir()
+        .ok()?
+        .join("sessions")
+        .join(format!("{}.json", name));
     if !path.exists() {
         return None;
     }
@@ -233,7 +234,9 @@ pub fn list_sessions() -> Vec<String> {
 
 /// Delete a named session file.
 pub fn delete_session(name: &str) -> Result<()> {
-    let path = config_dir()?.join("sessions").join(format!("{}.json", name));
+    let path = config_dir()?
+        .join("sessions")
+        .join(format!("{}.json", name));
     if path.exists() {
         std::fs::remove_file(&path)?;
     }
@@ -248,10 +251,15 @@ pub fn save_selected_models(models: &[SelectedModel]) -> Result<()> {
 
 pub fn save_configured_provider(provider_id: &str, env_key: &str, api_key: &str) -> Result<()> {
     let mut state = load();
-    if !state.configured_providers.contains(&provider_id.to_string()) {
+    if !state
+        .configured_providers
+        .contains(&provider_id.to_string())
+    {
         state.configured_providers.push(provider_id.to_string());
     }
-    state.api_keys.insert(env_key.to_string(), api_key.to_string());
+    state
+        .api_keys
+        .insert(env_key.to_string(), api_key.to_string());
     state.key_store_mode = KeyStore::Obfuscated;
     save(&state)
 }
@@ -266,7 +274,10 @@ pub fn load_custom_providers() -> Vec<CustomProvider> {
 
 pub fn save_custom_provider(provider: &CustomProvider) -> Result<()> {
     let mut state = load();
-    let idx = state.custom_providers.iter().position(|p| p.id == provider.id);
+    let idx = state
+        .custom_providers
+        .iter()
+        .position(|p| p.id == provider.id);
     if let Some(i) = idx {
         state.custom_providers[i] = provider.clone();
     } else {
@@ -309,7 +320,10 @@ pub fn load_provider_cache() -> Option<ModelRegistry> {
 }
 
 fn write_atomic(path: &Path, contents: &str) -> Result<()> {
-    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("state.json");
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("state.json");
     let temp_path = path.with_file_name(format!("{}.tmp-{}", file_name, uuid::Uuid::new_v4()));
 
     std::fs::write(&temp_path, contents)?;

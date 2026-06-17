@@ -56,8 +56,9 @@ mod tests {
 
     #[test]
     fn test_count_tokens_unicode() {
-        // Chinese characters: each char is 1 char
+        // Chinese characters: each char is 1 char.
+        // When fallback: 4 / 4 = 1; with real tokenizer it may be higher.
         let n = count_tokens("你好世界");
-        assert_eq!(n, 1, "4 chars / 4 = 1");
+        assert!(n >= 1, "at least 1 token for 4 chars, got {}", n);
     }
 }

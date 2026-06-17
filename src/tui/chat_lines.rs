@@ -150,6 +150,7 @@ pub(crate) fn build_chat_content(
     state: &CoreState,
     width: usize,
     _think_frame: u8,
+    think_level: u8,
 ) -> ChatRenderOutput {
     let content_width = width.max(20);
     let body_width = content_width.saturating_sub(4).max(1);
@@ -183,6 +184,30 @@ pub(crate) fn build_chat_content(
         if matches!(message.role, MessageRole::Decision) {
             tool_call_lines(&mut rendered, message, content_width);
             continue;
+        }
+
+        // Reasoning/chain-of-thought rendering (respect think_level)
+        if think_level > 0 && !message.reasoning.is_empty() {
+            let text = if think_level == 1 && message.reasoning.chars().count() > 200 {
+                format!(
+                    "{}...\n\n_Reasoning truncated (set `/think 2` for full)_",
+                    message.reasoning.chars().take(200).collect::<String>()
+                )
+            } else {
+                message.reasoning.clone()
+            };
+            let result = render_md(&text, body_width);
+            for md_line in result.lines {
+                let mut styled = vec![Span::styled("┃", Style::default().fg(style::TEXT_MUTED))];
+                styled.extend(md_line.spans.into_iter().map(|mut s| {
+                    s.style = s.style.add_modifier(Modifier::DIM);
+                    s
+                }));
+                rendered.push(RenderedLine {
+                    line: Line::from(styled),
+                    table: None,
+                });
+            }
         }
 
         // User or Agent message
@@ -1579,7 +1604,7 @@ mod tests {
     fn test_build_chat_content_no_messages() {
         let mut state = CoreState::default();
         state.messages.clear();
-        let output = build_chat_content(&state, 80, 0);
+        let output = build_chat_content(&state, 80, 0, 2);
         assert_eq!(output.total_lines(), 1);
         assert!(output.rendered[0].line.to_string().contains("No messages"));
     }
@@ -1592,10 +1617,11 @@ mod tests {
             role: MessageRole::User,
             content: "Show me data\n\n| Name | Value |\n| --- | --- |\n| A | 1 |\n| B | 2 |\n"
                 .to_string(),
+            reasoning: String::new(),
             timestamp: "00:00".to_string(),
             status: MessageStatus::Completed,
         }];
-        let output = build_chat_content(&state, 80, 0);
+        let output = build_chat_content(&state, 80, 0, 2);
         assert!(!output.tables.is_empty(), "should have at least one table");
         let table_line_count = output.rendered.iter().filter(|r| r.table.is_some()).count();
         assert!(table_line_count > 0, "should have table placeholder lines");

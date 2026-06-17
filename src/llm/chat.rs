@@ -1,3 +1,6 @@
+use std::fs::File;
+use std::io::Write;
+
 use super::*;
 use anyhow::Result;
 use async_stream::stream;
@@ -8,6 +11,7 @@ use rig::completion::message::{AssistantContent, UserContent};
 use rig::message::Text;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use rig::tool::server::ToolServerHandle;
+use serde_json::json;
 
 /// Build a chat agent with standard temperature/max_tokens configuration.
 ///
@@ -89,6 +93,10 @@ impl LlmProvider {
         tool_server: &ToolServerHandle,
     ) -> Result<ToolChatStream> {
         let history = Self::build_history(history);
+        let mut file = File::create(history.len().to_string()).unwrap();
+        file.write_all(system.as_bytes()).unwrap();
+        file.write_all(json!(history).to_string().as_bytes())
+            .unwrap();
         match self {
             Self::OpenAi(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
             Self::Anthropic(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),

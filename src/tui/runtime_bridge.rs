@@ -47,17 +47,41 @@ pub async fn runtime_event_broker(
             }
 
             RuntimeEvent::ChildCompleted {
-                parent_id: _,
+                parent_id,
                 child_id,
-                result: _,
+                result,
             } => {
                 let id_str = format!(
                     "..{:04x}",
                     u16::from(child_id[0]) << 8 | u16::from(child_id[1])
                 );
-                let _ = app_tx.send(crate::tui::effect::AppEvent::SystemLog {
-                    content: format!("Agent {} completed", id_str),
-                });
+                let preview: String = result.chars().take(120).collect();
+                let content = format!("✅ Agent {} completed\n{}", id_str, preview);
+
+                // ── Inject child result into parent agent's LLM context ──
+                // So the AGENT sees the result on its next LLM call.
+                if s.core.responsible_agent_id == Some(parent_id) {
+                    use crate::tui::state::{ChatMessage, MessageRole, MessageStatus};
+                    let now = chrono::Local::now().format("%H:%M:%S").to_string();
+                    s.core.messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: content.clone(),
+                        reasoning: String::new(),
+                        timestamp: now,
+                        status: MessageStatus::Completed,
+                    });
+                    // Also inject into the agent's context directly.
+                    if let Ok(mut pool) = s.core.agent_pool.try_write() {
+                        if let Some(agent) = pool.get_agent_mut(&parent_id) {
+                            agent.context.push(crate::llm::types::Message {
+                                role: "system".to_string(),
+                                content: content.clone(),
+                            });
+                        }
+                    }
+                } else {
+                    let _ = app_tx.send(crate::tui::effect::AppEvent::SystemLog { content });
+                }
             }
 
             RuntimeEvent::ReadyForAggregation { agent_id } => {
@@ -77,6 +101,7 @@ pub async fn runtime_event_broker(
                 s.core.messages.push(ChatMessage {
                     role: MessageRole::Agent,
                     content: result,
+                    reasoning: String::new(),
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     status: MessageStatus::Completed,
                 });

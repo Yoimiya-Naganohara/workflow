@@ -57,7 +57,12 @@ impl Tui {
 
         // Rebuild cache when content has changed
         if cache_key != self.chat_cache_key {
-            let new_content = build_chat_content(&state.core, chat_width, state.ui.think_frame);
+            let new_content = build_chat_content(
+                &state.core,
+                chat_width,
+                state.ui.think_frame,
+                state.ui.think_level,
+            );
             self.chat_lines_cache = new_content;
             self.chat_cache_key = cache_key;
         }
@@ -106,6 +111,21 @@ impl Tui {
             state.ui.chat_scroll.min(max_scroll)
         };
 
+        // ── Snapshot embedding cache stats before dropping the read lock ──
+        let embedding_cache = state
+            .core
+            .runtime
+            .as_ref()
+            .and_then(|rt| rt.try_read().ok())
+            .map(|rt_guard| {
+                let emb = rt_guard.embedding_service();
+                crate::tui::state::CacheStats {
+                    hits: emb.cache_hits(),
+                    misses: emb.cache_misses(),
+                }
+            })
+            .unwrap_or_default();
+
         // ── Batch all state writes after dropping the read lock ──
         drop(state);
         if let Ok(mut s) = self.state.try_write() {
@@ -115,6 +135,7 @@ impl Tui {
                     .min(tree_lines.len().saturating_sub(1));
             s.ui.total_chat_lines = total;
             s.ui.chat_scroll = chat_scroll;
+            s.ui.embedding_cache = embedding_cache;
         }
         let state = self.state.read().await;
 

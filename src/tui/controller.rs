@@ -108,6 +108,7 @@ pub fn switch_session(core: &mut CoreState, name: &str) {
         core.messages.push(ChatMessage {
             role: msg.role.clone(),
             content: msg.content.clone(),
+            reasoning: String::new(),
             timestamp: msg.timestamp.clone(),
             status: MessageStatus::Completed,
         });
@@ -337,6 +338,7 @@ pub fn save_custom_provider(
         state.messages.push(ChatMessage {
             role: MessageRole::System,
             content: format!("Failed to save custom provider: {}", e),
+            reasoning: String::new(),
             timestamp: now,
             status: MessageStatus::Error,
         });
@@ -369,6 +371,7 @@ pub fn save_custom_provider(
             models.len(),
             model_list
         ),
+        reasoning: String::new(),
         timestamp: now,
         status: MessageStatus::Completed,
     });

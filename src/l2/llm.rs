@@ -84,6 +84,7 @@ impl L2LlmAuditEngine {
             max_tokens: self.max_tokens,
             timeout_secs: Some(30),
             max_retries: Some(2),
+
         };
 
         let response = self.provider.complete(request).await?;

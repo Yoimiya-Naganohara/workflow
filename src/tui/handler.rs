@@ -626,6 +626,7 @@ impl Tui {
         core.messages.push(ChatMessage {
             role: MessageRole::User,
             content,
+            reasoning: String::new(),
             timestamp: now.clone(),
             status: MessageStatus::Completed,
         });
@@ -634,6 +635,7 @@ impl Tui {
         core.messages.push(ChatMessage {
             role: MessageRole::Agent,
             content: String::new(),
+            reasoning: String::new(),
             timestamp: now.clone(),
             status: MessageStatus::Thinking,
         });
@@ -722,6 +724,11 @@ impl Tui {
                 match msg.role {
                     MessageRole::User => hist.push(("user".to_string(), msg.content.clone())),
                     MessageRole::Agent => hist.push(("assistant".to_string(), msg.content.clone())),
+                    MessageRole::System => {
+                        // System messages (child completion notifications, etc.)
+                        // are included so the agent sees async results.
+                        hist.push(("system".to_string(), msg.content.clone()))
+                    }
                     _ => {}
                 }
             }

@@ -128,7 +128,33 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         spans.push(Span::styled(" ⚠T", Style::default().fg(style::WARNING)));
     }
 
-    // ── 9. Permits indicator (if constrained) ──
+    // ── 9. Think level badge ──
+    let think_labels = ["", " T1", " T2"];
+    let level = state.ui.think_level.min(2) as usize;
+    spans.push(Span::styled(
+        think_labels[level],
+        Style::default().fg(style::TEXT_MUTED),
+    ));
+
+    // ── 10. Embedding cache hit rate ──
+    let cache = state.ui.embedding_cache;
+    let total = cache.hits + cache.misses;
+    if total > 0 {
+        let rate = cache.hit_rate();
+        let (color, icon) = if rate >= 90.0 {
+            (style::GREEN, "📈")
+        } else if rate >= 50.0 {
+            (style::YELLOW, "📈")
+        } else {
+            (style::WARNING, "📉")
+        };
+        spans.push(Span::styled(
+            format!("  {}{:.0}%", icon, rate),
+            Style::default().fg(color),
+        ));
+    }
+
+    // ── 11. Permits indicator (if constrained) ──
     let permits_used = state
         .ui
         .permits_total

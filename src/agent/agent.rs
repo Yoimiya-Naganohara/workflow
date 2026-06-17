@@ -77,10 +77,37 @@ pub struct AgentMessage {
     pub from: AgentId,
     /// Sender's human-readable name (for display).
     pub from_name: String,
-    /// Message body.
+    /// Plain-text message body (short summary for small messages).
     pub content: String,
+    /// Structured payload for handle-first messaging.
+    /// When `Some(AssetPointer)`, the receiver should use `search_asset`
+    /// to retrieve details rather than relying on the raw content.
+    #[serde(default)]
+    pub payload: Option<MessagePayload>,
     /// Unix timestamp.
     pub timestamp: u64,
+}
+
+/// Structured message payload for handle-first inter-agent communication.
+///
+/// - [`StateSummary`](MessagePayload::StateSummary): lightweight structured status
+///   paired with JSON metrics (no raw text).
+/// - [`AssetPointer`](MessagePayload::AssetPointer): references a large asset
+///   stored in the sender's sandbox. The receiver must call `search_asset`
+///   to retrieve relevant chunks — the raw bytes never enter the LLM context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MessagePayload {
+    StateSummary {
+        status: String,
+        summary: String,
+        #[serde(default)]
+        metrics: serde_json::Value,
+    },
+    AssetPointer {
+        asset_id: String,
+        tool_name: String,
+        hint: String,
+    },
 }
 
 /// A single tool call recorded during agent execution.
@@ -245,6 +272,7 @@ impl AgentPool {
         from: AgentId,
         from_name: &str,
         content: &str,
+        payload: Option<MessagePayload>,
     ) -> Result<(), String> {
         let Some(agent) = self.get_agent_mut(&recipient) else {
             return Err(format!("Agent {:02x} not found", recipient[0]));
@@ -253,6 +281,7 @@ impl AgentPool {
             from,
             from_name: from_name.to_string(),
             content: content.to_string(),
+            payload,
             timestamp: now_secs(),
         };
         if agent.inbox.len() >= MAX_INBOX_SIZE {

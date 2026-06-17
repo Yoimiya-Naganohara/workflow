@@ -326,11 +326,17 @@ mod tests {
         let mid_id = [1u8; 16];
         let leaf_id = [2u8; 16];
 
+        let other_id = [3u8; 16];
+        pool.add_agent(Agent {
+            id: other_id,
+            name: "sibling".into(),
+            ..stub_agent()
+        });
         pool.add_agent(Agent {
             id: root_id,
             name: "root".into(),
             status: AgentStatus::AwaitingChildren,
-            children: vec![mid_id],
+            children: vec![mid_id, other_id],
             ..stub_agent()
         });
         pool.add_agent(Agent {
@@ -350,18 +356,32 @@ mod tests {
         });
 
         let lines = build_agent_tree_lines(&pool, &root_id);
-        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.len(), 4, "root + middle + leaf + sibling");
 
         // Root: ●
-        assert!(lines[0].display_text.starts_with("● "));
+        assert!(
+            lines[0].display_text.starts_with("● "),
+            "root: {:?}",
+            lines[0].display_text
+        );
         // Middle (first child of root, not last): ├─◆
-        assert!(lines[1].display_text.starts_with("├─◆ "));
+        assert!(
+            lines[1].display_text.starts_with("├─◆ "),
+            "middle: {:?}",
+            lines[1].display_text
+        );
         // Leaf (first child of middle, only child, thus last):   └─◆
-        // Depth=2, parent is "├─◆ " so indent is "  "
+        // Depth=2, indent is "  "
         assert!(
             lines[2].display_text.starts_with("  └─◆ "),
             "leaf prefix: {:?}",
             lines[2].display_text
+        );
+        // Sibling (second child of root, last child, thus last): └─◆
+        assert!(
+            lines[3].display_text.starts_with("└─◆ "),
+            "sibling prefix: {:?}",
+            lines[3].display_text
         );
     }
 

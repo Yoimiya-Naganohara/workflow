@@ -66,6 +66,7 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 "/pool           - Pool management (stats/flush/clear/query)",
                 "/role           - Role templates (list/show/create/edit/delete/default)",
                 "/sh <cmd>       - Run a shell command",
+                "/think [0|1|2]  - Set reasoning display level",
                 "/clear          - Clear conversation",
                 "/help           - Show this help",
                 "",
@@ -74,6 +75,24 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             ]
             .join("\n");
             core.messages.push(ChatMessage::system(help_text));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/think" => {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            let level = parts.get(1).and_then(|s| s.parse::<u8>().ok()).unwrap_or({
+                // Toggle: 2→0→1→2
+                (ui.think_level + 1) % 3
+            });
+            let lvl = level.min(2);
+            ui.think_level = lvl;
+            let labels = ["hidden", "brief", "full"];
+            core.messages.push(ChatMessage::system(format!(
+                "Reasoning display set to: {} ({})",
+                labels[lvl as usize], lvl
+            )));
             ui.input.clear();
             ui.input_cursor = 0;
             true
@@ -170,6 +189,7 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             core.messages.push(ChatMessage {
                 role: crate::tui::state::MessageRole::System,
                 content: msg,
+                reasoning: String::new(),
                 timestamp: now.to_string(),
                 status,
             });
@@ -201,6 +221,7 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             core.messages.push(ChatMessage {
                 role: crate::tui::state::MessageRole::System,
                 content: msg,
+                reasoning: String::new(),
                 timestamp: now.to_string(),
                 status,
             });

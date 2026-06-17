@@ -125,6 +125,10 @@ pub type ChatStream = Pin<Box<dyn Stream<Item = Result<String>> + Send>>;
 #[derive(Debug, Clone)]
 pub enum ToolEvent {
     Text(String),
+    /// Reasoning/chain-of-thought content emitted by the model.
+    /// Separate from Text so the TUI can render it with distinct styling
+    /// (dimmed/italic) and track it independently of the final response.
+    Reasoning(String),
     ToolCall {
         name: String,
         args: serde_json::Value,

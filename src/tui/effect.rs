@@ -100,6 +100,12 @@ pub enum AppEvent {
         response_index: usize,
         text: String,
     },
+    /// Streamed reasoning/chain-of-thought content.
+    /// Rendered separately from ChatToken with distinct styling.
+    ChatReasoning {
+        response_index: usize,
+        text: String,
+    },
     /// Per‑turn token usage reported by the LLM provider.
     /// Accumulated by the state to show accurate ↑/↓ metrics.
     ChatTokenUsage {
@@ -328,6 +334,13 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                             ToolEvent::Text(text) => {
                                 full_response.push_str(&text);
                                 let _ = tx.send(AppEvent::ChatToken {
+                                    response_index,
+                                    text,
+                                });
+                            }
+                            ToolEvent::Reasoning(text) => {
+                                // Reasoning is NOT added to full_response.
+                                let _ = tx.send(AppEvent::ChatReasoning {
                                     response_index,
                                     text,
                                 });

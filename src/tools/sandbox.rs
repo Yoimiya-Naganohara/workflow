@@ -17,9 +17,16 @@
 //! - **`../` escapes**, absolute paths outside the boundary, and symlink
 //!   traversal that leaves the project root are all rejected.
 
+use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
+
+use crate::core::simd::cosine_similarity_384;
+use crate::llm::EmbeddingService;
 
 // ── Constants ──
 
@@ -27,10 +34,95 @@ const WORK_DIR: &str = "work";
 const SOURCE_LINK: &str = "src";
 const MAX_CANON_DEPTH: usize = 64;
 
+// ── AssetIndex — in-memory semantic chunk index ──
+
+/// A semantic slice index for one dynamically generated asset.
+/// Built during `create_embedded_asset()` and destroyed with the sandbox.
+#[derive(Clone, Debug)]
+pub struct AssetIndex {
+    pub chunks: Vec<IndexedChunk>,
+}
+
+#[derive(Clone, Debug)]
+pub struct IndexedChunk {
+    pub embedding: [f32; 384],
+    pub line_start: usize,
+    pub line_end: usize,
+    pub text: String,
+}
+
+impl AssetIndex {
+    /// Slice `raw_content` into `chunk_lines`-line blocks and
+    /// compute a 384-d embedding for each block using the project's
+    /// local fastembed (ONNX) engine.
+    pub async fn build(
+        model: &dyn EmbeddingService,
+        raw_content: &str,
+        chunk_lines: usize,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let lines: Vec<&str> = raw_content.lines().collect();
+        let mut chunks = Vec::new();
+        let chunk_lines = if chunk_lines == 0 { 20 } else { chunk_lines };
+
+        for (chunk_idx, line_group) in lines.chunks(chunk_lines).enumerate() {
+            let text = line_group.join("\n");
+            if text.trim().is_empty() {
+                continue;
+            }
+
+            let embedding = model.embed(&text).await?;
+
+            let line_start = chunk_idx * chunk_lines + 1;
+            let line_end = (line_start + line_group.len() - 1).min(lines.len());
+
+            chunks.push(IndexedChunk {
+                embedding,
+                line_start,
+                line_end,
+                text,
+            });
+        }
+
+        Ok(Self { chunks })
+    }
+
+    /// Semantic search using AVX2+FMA SIMD cosine similarity.
+    /// Returns top-K (score > 0.5) chunks with their display line numbers.
+    pub fn search(&self, query_emb: &[f32; 384], k: usize) -> Vec<(usize, String)> {
+        let mut scored: Vec<(f32, usize)> = self
+            .chunks
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (cosine_similarity_384(query_emb, &c.embedding), i))
+            .collect();
+
+        // partial_cmp is safe because SIMD output is always a valid f32
+        // (never NaN unless inputs are NaN, which we ensure by construction)
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        scored
+            .iter()
+            .take(k)
+            .filter(|(score, _)| *score > 0.5)
+            .map(|(_, i)| {
+                let c = &self.chunks[*i];
+                (
+                    c.line_start,
+                    format!("[{}:{}]\n{}", c.line_start, c.line_end, c.text),
+                )
+            })
+            .collect()
+    }
+}
+
 // ── SandboxHandle ──
 
 /// Lightweight, cloneable handle to an agent's filesystem sandbox.
-#[derive(Debug, Clone)]
+///
+/// Now carries a local embedding engine (`embedder`) and a pool of
+/// in-memory semantic asset indices for the "semantic asset retrieval"
+/// pattern — large Shell / ReadFile outputs are indexed on creation
+/// and queried via `search_asset()` without polluting the LLM context.
 pub struct SandboxHandle {
     /// Sandbox root: `~/.workflow/sandbox/{agent_id:8}/`
     pub root: PathBuf,
@@ -38,6 +130,51 @@ pub struct SandboxHandle {
     pub workdir: PathBuf,
     /// Source tree root (canonical, follows symlink).
     pub source_root: PathBuf,
+    /// Local embedding engine for on-demand asset indexing.
+    /// Injected at runtime via [`attach_embedder`]; absent = no indexing.
+    pub embedder: RwLock<Option<Arc<dyn EmbeddingService>>>,
+    /// In-memory semantic asset indices keyed by `asset_id`.
+    pub asset_indices: RwLock<HashMap<String, AssetIndex>>,
+}
+
+impl std::fmt::Debug for SandboxHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SandboxHandle")
+            .field("root", &self.root)
+            .field("workdir", &self.workdir)
+            .field("source_root", &self.source_root)
+            .field(
+                "embedder",
+                &self.embedder.read().map(|g| g.is_some()).unwrap_or(false),
+            )
+            .field(
+                "asset_indices",
+                &self.asset_indices.read().map(|g| g.len()).unwrap_or(0),
+            )
+            .finish()
+    }
+}
+
+impl Clone for SandboxHandle {
+    fn clone(&self) -> Self {
+        let embedder = self
+            .embedder
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let indices = self
+            .asset_indices
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        Self {
+            root: self.root.clone(),
+            workdir: self.workdir.clone(),
+            source_root: self.source_root.clone(),
+            embedder: RwLock::new(embedder),
+            asset_indices: RwLock::new(indices),
+        }
+    }
 }
 
 impl SandboxHandle {
@@ -83,6 +220,8 @@ impl SandboxHandle {
             root,
             workdir,
             source_root,
+            embedder: RwLock::new(None),
+            asset_indices: RwLock::new(HashMap::new()),
         })
     }
 
@@ -163,6 +302,79 @@ impl SandboxHandle {
         }
     }
 
+    /// Dynamically attach the locally-available embedding engine.
+    /// Called once when the agent runtime wires the sandbox into the
+    /// tool server — `None` means `create_embedded_asset` falls back
+    /// to plain physical writes (no indexing).
+    pub fn attach_embedder(&self, embedder: Arc<dyn EmbeddingService>) {
+        let mut guard = self.embedder.write().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(embedder);
+    }
+
+    /// Path to the asset artifact dir inside the sandbox workdir.
+    fn artifacts_dir(&self) -> PathBuf {
+        let path = self.workdir.join(".artifacts");
+        if !path.exists() {
+            let _ = std::fs::create_dir_all(&path);
+        }
+        path
+    }
+
+    /// Core replacement for blind `std::fs::write`: persist the raw
+    /// content to the sandbox AND build a semantic index in memory.
+    ///
+    /// # Returns
+    /// A compact handle string that tells the LLM about the asset and
+    /// instructs it to use `search_asset(asset_id, query)` for precise
+    /// retrieval — zero large-text leakage into the conversation history.
+    pub async fn create_embedded_asset(
+        &self,
+        tool_name: &str,
+        raw_content: &str,
+    ) -> std::result::Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        // 1. Deterministic hash → asset_id
+        let mut hasher = DefaultHasher::new();
+        raw_content.hash(&mut hasher);
+        let asset_id = format!("{}_{:x}", tool_name.to_lowercase(), hasher.finish());
+
+        // 2. Persist to physical sandbox (for fallback ReadFile / PatchFile)
+        let asset_path = self.artifacts_dir().join(&asset_id);
+        if !asset_path.exists() {
+            std::fs::write(&asset_path, raw_content)?;
+        }
+
+        // 3. Build semantic index if embedder is attached.
+        //    Clone the Arc out of the lock guard so the lock is dropped
+        //    before the async `AssetIndex::build` call (clippy: await_holding_lock).
+        let model = self
+            .embedder
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(model) = model {
+            let index = AssetIndex::build(model.as_ref(), raw_content, 20).await?;
+            let mut index_guard = self
+                .asset_indices
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            index_guard.insert(asset_id.clone(), index);
+        }
+
+        let line_count = raw_content.lines().count();
+        let size_kb = raw_content.len() as f64 / 1024.0;
+        let preview: Vec<&str> = raw_content.lines().take(3).collect();
+
+        // 4. Compact handle — the LLM sees this instead of the raw bytes
+        Ok(format!(
+            "[💾 资产已完成 SIMD 语义索引 | ID: {}]\n- 大小: {:.2} KB (共 {} 行)\n- 头部预览:\n  {}\n  ...\n💡 提示: 调用 search_asset(asset_id: \"{}\", query: \"...\") 可直接定向爆破相关错误栈。",
+            asset_id,
+            size_kb,
+            line_count,
+            preview.join("\n  "),
+            asset_id
+        ))
+    }
+
     // ── Internal ──
 
     fn canonicalise_or_reject(&self, path: &Path) -> Result<PathBuf> {
@@ -238,8 +450,13 @@ fn hex_prefix(id: &[u8; 16]) -> String {
 mod tests {
     use super::*;
 
+    /// Atomic counter for unique sandbox IDs across parallel tests.
+    static TEST_IDX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
     fn test_handle() -> SandboxHandle {
-        let id = [0xde, 0xad, 0xbe, 0xef, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let n = TEST_IDX.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut id = [0u8; 16];
+        id[0..8].copy_from_slice(&n.to_le_bytes());
         SandboxHandle::new(&id).expect("sandbox creation")
     }
 

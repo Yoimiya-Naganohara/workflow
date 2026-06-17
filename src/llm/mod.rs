@@ -25,6 +25,8 @@ pub trait EmbeddingService: Send + Sync {
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; EMBEDDING_DIM]>>;
     fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32;
     fn cache_size(&self) -> usize;
+    fn cache_hits(&self) -> u64;
+    fn cache_misses(&self) -> u64;
     fn clear_cache(&self);
 }
 

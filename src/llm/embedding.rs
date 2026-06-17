@@ -6,6 +6,7 @@
 //!   LLM provider embedding API when available.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Result;
 use dashmap::DashMap;
@@ -43,6 +44,8 @@ pub enum EmbeddingStrategy {
 pub struct EmbeddingService {
     model: Mutex<TextEmbedding>,
     cache: DashMap<String, [f32; EMBEDDING_DIM]>,
+    cache_hits: AtomicU64,
+    cache_misses: AtomicU64,
 }
 
 impl EmbeddingService {
@@ -64,6 +67,8 @@ impl EmbeddingService {
         Self {
             model: Mutex::new(model),
             cache: DashMap::new(),
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
         }
     }
 
@@ -72,8 +77,10 @@ impl EmbeddingService {
     /// Results are cached by exact text match to avoid recomputation.
     pub async fn embed(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
         if let Some(cached) = self.cache.get(text) {
+            self.cache_hits.fetch_add(1, Ordering::Relaxed);
             return Ok(*cached);
         }
+        self.cache_misses.fetch_add(1, Ordering::Relaxed);
 
         let model = self.model.lock().await;
         let embeddings = model.embed(vec![text], Some(1))?;
@@ -94,11 +101,15 @@ impl EmbeddingService {
 
         for (i, text) in texts.iter().enumerate() {
             if let Some(cached) = self.cache.get(*text) {
+                self.cache_hits.fetch_add(1, Ordering::Relaxed);
                 results[i] = *cached;
             } else {
                 uncached.push((i, text.to_string()));
             }
         }
+
+        self.cache_misses
+            .fetch_add(uncached.len() as u64, Ordering::Relaxed);
 
         if uncached.is_empty() {
             return Ok(results);
@@ -130,9 +141,21 @@ impl EmbeddingService {
         self.cache.len()
     }
 
-    /// Clear the embedding cache.
+    /// Number of cache hits since creation or last reset.
+    pub fn cache_hits(&self) -> u64 {
+        self.cache_hits.load(Ordering::Relaxed)
+    }
+
+    /// Number of cache misses since creation or last reset.
+    pub fn cache_misses(&self) -> u64 {
+        self.cache_misses.load(Ordering::Relaxed)
+    }
+
+    /// Clear the embedding cache and reset hit/miss counters.
     pub fn clear_cache(&self) {
         self.cache.clear();
+        self.cache_hits.store(0, Ordering::Relaxed);
+        self.cache_misses.store(0, Ordering::Relaxed);
     }
 }
 
@@ -211,6 +234,8 @@ pub struct EmbeddingRouter {
     remote: Option<RemoteEmbedder>,
     strategy: EmbeddingStrategy,
     cache: DashMap<String, [f32; EMBEDDING_DIM]>,
+    cache_hits: AtomicU64,
+    cache_misses: AtomicU64,
 }
 
 impl EmbeddingRouter {
@@ -224,6 +249,8 @@ impl EmbeddingRouter {
             remote: remote.map(RemoteEmbedder::new),
             strategy,
             cache: DashMap::new(),
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
         }
     }
 
@@ -252,11 +279,13 @@ impl EmbeddingRouter {
 
     async fn embed_impl(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
         if let Some(cached) = self.cache.get(text) {
+            self.cache_hits.fetch_add(1, Ordering::Relaxed);
             return Ok(*cached);
         }
+        self.cache_misses.fetch_add(1, Ordering::Relaxed);
 
         let result = if self.use_remote() {
-            let remote = self.remote.as_ref().unwrap();
+            let remote = self.remote.as_ref().unwrap(); //TODO: remove unwrap()
             match remote.embed(text).await {
                 Ok(emb) => {
                     if self.strategy == EmbeddingStrategy::LocalFallback {
@@ -295,11 +324,15 @@ impl crate::llm::EmbeddingService for EmbeddingRouter {
 
         for (i, text) in texts.iter().enumerate() {
             if let Some(cached) = self.cache.get(*text) {
+                self.cache_hits.fetch_add(1, Ordering::Relaxed);
                 results[i] = *cached;
             } else {
                 uncached.push((i, text.to_string()));
             }
         }
+
+        self.cache_misses
+            .fetch_add(uncached.len() as u64, Ordering::Relaxed);
 
         if uncached.is_empty() {
             return Ok(results);
@@ -324,6 +357,16 @@ impl crate::llm::EmbeddingService for EmbeddingRouter {
 
     fn clear_cache(&self) {
         self.cache.clear();
+        self.cache_hits.store(0, Ordering::Relaxed);
+        self.cache_misses.store(0, Ordering::Relaxed);
+    }
+
+    fn cache_hits(&self) -> u64 {
+        self.cache_hits.load(Ordering::Relaxed)
+    }
+
+    fn cache_misses(&self) -> u64 {
+        self.cache_misses.load(Ordering::Relaxed)
     }
 }
 
@@ -352,6 +395,14 @@ impl crate::llm::EmbeddingService for EmbeddingService {
 
     fn clear_cache(&self) {
         self.clear_cache();
+    }
+
+    fn cache_hits(&self) -> u64 {
+        self.cache_hits()
+    }
+
+    fn cache_misses(&self) -> u64 {
+        self.cache_misses()
     }
 }
 

@@ -106,8 +106,22 @@ impl RuntimeEventLoop {
             let p = pool.read().await;
             p.get_agent(&agent_id).and_then(|a| a.sandbox.clone())
         };
+        // Build the tool handle and, when a sandbox is available, inject
+        // the local embedding engine so SearchAsset tool can perform
+        // semantic retrieval against large assets (Shell output, etc.).
         let tool_handle = match (&agent_sandbox, &state) {
             (Some(sb), Some(st)) => {
+                // Inject the local ONNX embedding engine into the sandbox
+                // before the tool server is constructed.  This wires
+                // SearchAsset -> SandboxHandle.embedder -> fastembed.
+                if let Ok(state_guard) = st.try_read() {
+                    if let Some(rt) = &state_guard.core.runtime {
+                        if let Ok(runtime_guard) = rt.try_read() {
+                            let embedder = runtime_guard.embedding_service();
+                            sb.attach_embedder(embedder);
+                        }
+                    }
+                }
                 crate::tools::create_sandboxed_agent_tool_server(st.clone(), Some(sb.clone()))
             }
             _ => tool_server.clone(),
@@ -124,21 +138,113 @@ impl RuntimeEventLoop {
         )
         .await;
 
-        // Report completion.
+        // Report completion with structured handoff.
         match status {
             AgentStatus::Completed => {
                 if let Some(pid) = parent_id {
+                    // ── Phase 1: Extract child agent metadata (brief lock) ──
+                    let (child_sandbox, child_name) = {
+                        let p = pool.read().await;
+                        let child = p.get_agent(&agent_id);
+                        (
+                            child.and_then(|a| a.sandbox.clone()),
+                            child.map(|a| a.name.clone()).unwrap_or_default(),
+                        )
+                    };
+
+                    // ── Phase 2: Build structured handoff (no lock held) ──
+                    // If the result exceeds 1 KB, create a semantic asset in
+                    // the child's sandbox so the parent can SearchAsset it.
+                    let (summary, payload) = if result.len() > 1024 {
+                        if let Some(ref sb) = child_sandbox {
+                            match sb.create_embedded_asset("agent_result", &result).await {
+                                Ok(handle) => {
+                                    // Parse asset_id from the handle string
+                                    let asset_id = handle
+                                        .find("ID: ")
+                                        .and_then(|i| {
+                                            let rest = &handle[i + 4..];
+                                            rest.find(']').map(|j| rest[..j].trim().to_string())
+                                        })
+                                        .unwrap_or_default();
+                                    // Compact summary (first 200 chars + size)
+                                    let preview: String = result.chars().take(200).collect();
+                                    let summary = format!(
+                                        "[≈{}KB, asset: {}]\n{}",
+                                        result.len() / 1024,
+                                        asset_id,
+                                        preview,
+                                    );
+                                    let payload =
+                                        Some(crate::agent::MessagePayload::AssetPointer {
+                                            asset_id,
+                                            tool_name: "agent_result".into(),
+                                            hint: format!("Agent produced {} bytes", result.len()),
+                                        });
+                                    (summary, payload)
+                                }
+                                Err(_) => {
+                                    // Fallback: truncated raw text
+                                    let preview: String = result.chars().take(512).collect();
+                                    (preview, None)
+                                }
+                            }
+                        } else {
+                            let preview: String = result.chars().take(512).collect();
+                            (preview, None)
+                        }
+                    } else {
+                        // Small result: pass through directly
+                        (result.clone(), None)
+                    };
+
+                    // ── Phase 3: Deliver to parent inbox (brief lock) ──
                     {
                         let mut p = pool.write().await;
+
+                        // Copy asset indices from child sandbox → parent sandbox
+                        // so the parent's SearchAsset tool can find child assets.
+                        if payload.is_some() {
+                            if let (Some(child_sb), Some(parent)) =
+                                (&child_sandbox, p.get_agent_mut(&pid))
+                            {
+                                if let Some(ref parent_sb) = parent.sandbox {
+                                    let child_idx = child_sb
+                                        .asset_indices
+                                        .read()
+                                        .unwrap_or_else(|e| e.into_inner());
+                                    let mut parent_idx = parent_sb
+                                        .asset_indices
+                                        .write()
+                                        .unwrap_or_else(|e| e.into_inner());
+                                    for (k, v) in child_idx.iter() {
+                                        parent_idx.entry(k.clone()).or_insert_with(|| v.clone());
+                                    }
+                                }
+                            }
+                        }
+
+                        // Send structured message to parent's inbox
                         if let Some(parent) = p.get_agent_mut(&pid) {
-                            parent.child_results.push((agent_id, result.clone()));
+                            let msg = crate::agent::AgentMessage {
+                                from: agent_id,
+                                from_name: child_name.clone(),
+                                content: summary.clone(),
+                                payload,
+                                timestamp: crate::agent::now_secs(),
+                            };
+                            if parent.inbox.len() >= crate::agent::MAX_INBOX_SIZE {
+                                parent.inbox.pop_front();
+                            }
+                            parent.inbox.push_back(msg);
                         }
                     }
+
                     let _ = broker_tx
                         .send(RuntimeEvent::ChildCompleted {
                             parent_id: pid,
                             child_id: agent_id,
-                            result: result.clone(),
+                            result: summary.clone(),
                         })
                         .await;
                     Self::maybe_advance_parent_inner(

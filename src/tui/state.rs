@@ -23,6 +23,25 @@ pub struct ExperiencePoolStats {
     pub last_flush_result: Option<String>,
 }
 
+/// Cache hit/miss statistics for the embedding service.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CacheStats {
+    pub hits: u64,
+    pub misses: u64,
+}
+
+impl CacheStats {
+    /// Cache hit rate as a percentage (0.0–100.0).
+    pub fn hit_rate(&self) -> f64 {
+        let total = self.hits + self.misses;
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f64 / total as f64 * 100.0
+        }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub enum Focus {
     Sidebar,
@@ -53,6 +72,8 @@ pub enum MessageStatus {
 pub struct ChatMessage {
     pub role: MessageRole,
     pub content: String,
+    #[serde(default)]
+    pub reasoning: String,
     pub timestamp: String,
     pub status: MessageStatus,
 }
@@ -63,6 +84,7 @@ impl ChatMessage {
         Self {
             role: MessageRole::System,
             content: content.into(),
+            reasoning: String::new(),
             timestamp: now,
             status: MessageStatus::Completed,
         }
@@ -179,6 +201,13 @@ pub struct UiState {
     pub input_disabled: bool,
     /// Last known total chat lines (updated each render for scroll clamping).
     pub total_chat_lines: usize,
+    /// Controls how much reasoning/chain-of-thought is shown:
+    /// 0 = hidden, 1 = brief (first 200 chars), 2 = full.
+    pub think_level: u8,
+
+    // ── Cache metrics ──
+    /// Embedding service cache hit/miss stats (refreshed each render tick).
+    pub embedding_cache: CacheStats,
 }
 
 // ── AppState ──
@@ -245,6 +274,7 @@ impl AppState {
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::System,
                     content: error,
+                    reasoning: String::new(),
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     status,
                 });
@@ -253,6 +283,7 @@ impl AppState {
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::System,
                     content,
+                    reasoning: String::new(),
                     timestamp,
                     status: MessageStatus::Completed,
                 });
@@ -261,6 +292,7 @@ impl AppState {
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::System,
                     content: error,
+                    reasoning: String::new(),
                     timestamp,
                     status: MessageStatus::Error,
                 });
@@ -273,6 +305,7 @@ impl AppState {
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::System,
                     content,
+                    reasoning: String::new(),
                     timestamp,
                     status: if is_error {
                         MessageStatus::Error
@@ -298,6 +331,18 @@ impl AppState {
                         if was_thinking && !self.ui.has_api_tokens {
                             self.recalc_tokens();
                         }
+                    }
+                }
+            }
+            AppEvent::ChatReasoning {
+                response_index,
+                text,
+            } => {
+                if let Some(slot) =
+                    find_streaming_slot_response(&self.core.messages, response_index)
+                {
+                    if let Some(msg) = self.core.messages.get_mut(slot) {
+                        msg.reasoning.push_str(&text);
                     }
                 }
             }
@@ -415,17 +460,10 @@ impl AppState {
                 input,
                 output,
             } => {
-                // On first API token report, clear the local‑estimate baseline
-                // so we only accumulate actual API‑reported tokens.
-                if !self.ui.has_api_tokens {
-                    self.ui.cached_input_tokens = 0;
-                    self.ui.cached_output_tokens = 0;
-                    self.ui.has_api_tokens = true;
-                }
-                // API reports cumulative token totals — use max() to capture the
-                // latest cumulative value without double-counting.
-                self.ui.cached_input_tokens = self.ui.cached_input_tokens.max(input);
-                self.ui.cached_output_tokens = self.ui.cached_output_tokens.max(output);
+                // API reports per-request cumulative — trust it over local estimate
+                self.ui.cached_input_tokens = input;
+                self.ui.cached_output_tokens = output;
+                self.ui.has_api_tokens = true;
             }
             AppEvent::OptimizationResult {
                 role_name,
@@ -498,6 +536,7 @@ impl AppState {
                     self.core.messages.push(ChatMessage {
                         role: MessageRole::Decision,
                         content: line,
+                        reasoning: String::new(),
                         timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                         status: MessageStatus::Completed,
                     });
@@ -543,6 +582,7 @@ impl AppState {
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::System,
                     content: feedback_msg,
+                    reasoning: String::new(),
                     timestamp: now,
                     status: MessageStatus::Completed,
                 });
@@ -556,6 +596,7 @@ impl AppState {
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::Agent,
                     content: String::new(),
+                    reasoning: String::new(),
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     status: MessageStatus::Thinking,
                 });
@@ -589,6 +630,7 @@ impl AppState {
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::System,
                     content,
+                    reasoning: String::new(),
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     status: MessageStatus::Completed,
                 });
@@ -856,6 +898,8 @@ impl Default for UiState {
             tree_agent_ids: Vec::new(),
             input_disabled: false,
             total_chat_lines: 0,
+            think_level: 2,
+            embedding_cache: CacheStats::default(),
         }
     }
 }

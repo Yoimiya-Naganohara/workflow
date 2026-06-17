@@ -101,7 +101,7 @@ impl Tool for SendMessage {
         let mut retries = 0u32;
         loop {
             if let Ok(mut pool) = s.core.agent_pool.try_write() {
-                pool.send_message(recipient, agent_id, &sender_name, &args.message)
+                pool.send_message(recipient, agent_id, &sender_name, &args.message, None)
                     .map_err(ToolCallError)?;
                 break;
             }

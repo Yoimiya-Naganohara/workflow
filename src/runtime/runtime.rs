@@ -923,30 +923,58 @@ impl AgentRuntime {
         owner_id: AgentId,
         agent_pool: &Arc<RwLock<AgentPool>>,
     ) -> Result<String> {
-        let (config, role, provider, child_count, child_summaries, goal) = {
-            let pool = agent_pool.read().await;
+        // Phase 1: Drain inbox + child_results under a single write lock.
+        // Collect raw data; closures must NOT borrow `pool` to avoid conflicts.
+        let (config, role, provider, all_summaries, goal): (
+            crate::agent::AgentConfig,
+            String,
+            Option<std::sync::Arc<crate::llm::LlmProvider>>,
+            Vec<String>,
+            String,
+        ) = {
+            let mut pool = agent_pool.write().await;
             let agent = pool
-                .get_agent(&owner_id)
+                .get_agent_mut(&owner_id)
                 .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
-            let summaries: Vec<String> = agent
-                .child_results
+
+            // Drain both inbox (structured handoff) and child_results (legacy).
+            let inbox_msgs: Vec<crate::agent::AgentMessage> = agent.inbox.drain(..).collect();
+            let cr_raw: Vec<(crate::core::types::AgentId, String)> =
+                agent.child_results.drain(..).collect();
+
+            let cfg = agent.config.clone();
+            let rl = agent.role.clone();
+            let gl = agent.goal.clone();
+
+            // Build inbox summaries inline (no pool access needed).
+            let inbox_summaries: Vec<String> = inbox_msgs
                 .iter()
-                .map(|(id, result)| {
-                    let name = pool
-                        .get_agent(id)
-                        .map(|a| a.name.as_str())
-                        .unwrap_or("unknown");
-                    format!("[{}]\n{}", name, result)
+                .map(|msg| {
+                    let hint = match &msg.payload {
+                        Some(crate::agent::MessagePayload::AssetPointer {
+                            asset_id, hint, ..
+                        }) => format!(" (asset: {}, hint: {})", asset_id, hint),
+                        Some(crate::agent::MessagePayload::StateSummary { summary, .. }) => {
+                            format!(" (summary: {})", summary)
+                        }
+                        None => String::new(),
+                    };
+                    format!("[{}]{}[{}]", msg.from_name, hint, msg.content)
                 })
                 .collect();
-            (
-                agent.config.clone(),
-                agent.role.clone(),
-                self.provider.clone(),
-                summaries.len(),
-                summaries,
-                agent.goal.clone(),
-            )
+
+            // Build legacy summaries (no pool access — use raw IDs).
+            let cr_summaries: Vec<String> = cr_raw
+                .iter()
+                .map(|(_, result)| format!("[agent]\n{}", result))
+                .collect();
+
+            let all_summaries: Vec<String> = inbox_summaries
+                .into_iter()
+                .chain(cr_summaries.into_iter())
+                .collect();
+
+            (cfg, rl, self.provider.clone(), all_summaries, gl)
         };
 
         let provider = provider.ok_or_else(|| anyhow::anyhow!("No LLM provider configured"))?;
@@ -957,10 +985,25 @@ impl AgentRuntime {
             .map(|t| t.system_prompt)
             .unwrap_or_else(|| format!("You are a {}. Execute the given goal.", role));
 
-        let task_summary = child_summaries.join("\n\n---\n\n");
+        let child_count = all_summaries.len();
+        let task_summary = all_summaries.join("\n\n---\n\n");
+
+        // Include a note about SearchAsset when there are asset pointers.
+        let has_assets = all_summaries.iter().any(|s| s.contains("(asset:"));
+        let asset_note = if has_assets {
+            concat!(
+                "\n\n📌 Some sub-tasks produced large outputs that are stored as assets. ",
+                "If you need details, use `search_asset(asset_id, query)`. ",
+                "Your current context only contains compact summaries. ",
+                "Do not ask for the full raw output unless you truly need it."
+            )
+        } else {
+            ""
+        };
+
         let prompt = format!(
-            "You delegated this goal to {} sub-agent(s).\n\nOriginal goal: {}\n\nCompleted sub-task results:\n{}\n\nSynthesize the final result for the user.",
-            child_count, goal, task_summary
+            "You delegated this goal to {} sub-agent(s).\n\nOriginal goal: {}\n\nCompleted sub-task results:\n{}{}\n\nSynthesize the final result for the user.",
+            child_count, goal, task_summary, asset_note
         );
 
         let result = provider
@@ -1118,6 +1161,9 @@ impl AgentRuntime {
             while let Some(event) = stream.next().await {
                 match event {
                     crate::llm::ToolEvent::Text(t) => text.push_str(&t),
+                    crate::llm::ToolEvent::Reasoning(_t) => {
+                        // Agent execution — reasoning is informational only.
+                    }
                     crate::llm::ToolEvent::ToolCall { name, args, .. } => {
                         tool_call_count += 1;
                         tools_used |= Self::tool_bit(&name);
@@ -1314,6 +1360,9 @@ impl AgentRuntime {
             while let Some(event) = stream.next().await {
                 match event {
                     crate::llm::ToolEvent::Text(t) => text.push_str(&t),
+                    crate::llm::ToolEvent::Reasoning(_t) => {
+                        // Agent execution — reasoning is informational only.
+                    }
                     crate::llm::ToolEvent::ToolCall { name, args, .. } => {
                         tools_used |= Self::tool_bit(&name);
                         // Record tool call trace (ring buffer, bounded).
@@ -1449,6 +1498,12 @@ mod tests {
             0
         }
         fn clear_cache(&self) {}
+        fn cache_hits(&self) -> u64 {
+            0
+        }
+        fn cache_misses(&self) -> u64 {
+            0
+        }
     }
 
     fn dummy_embedding() -> Arc<dyn EmbeddingService> {
