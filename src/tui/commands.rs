@@ -275,6 +275,200 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             true
         }
 
+        // ── Session management commands ──
+        "/sessions" | "/sessions help" => {
+            if let Some(items) = get_subcommand_items("/sessions") {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/sessions".to_string(),
+                    items: items.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
+                };
+            }
+            state.popup_selected = 0;
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/sessions list" => {
+            let sessions = crate::persistence::list_sessions();
+            if sessions.is_empty() {
+                core.messages.push(ChatMessage::system(
+                    "No saved sessions. Use \"/sessions save <name>\" to save the current conversation.",
+                ));
+            } else {
+                let mut lines = vec!["Saved Sessions:".to_string()];
+                for name in &sessions {
+                    // Load the session briefly to count messages
+                    let count = crate::persistence::load_session_as(name)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    lines.push(format!("  {}  ({} messages)", name, count));
+                }
+                core.messages.push(ChatMessage::system(lines.join("\n")));
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/sessions save" => {
+            state.popup_mode = PopupMode::ShellInput {
+                cmd: "/sessions save".to_string(),
+                input: String::new(),
+            };
+            state.popup_selected = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/sessions save ") => {
+            let name = if let Some(s) = trimmed.strip_prefix("/sessions save ") {
+                s.trim().to_string()
+            } else {
+                String::new()
+            };
+            if name.is_empty() || name.contains('/') {
+                core.messages.push(ChatMessage::system(
+                    "Usage: /sessions save <name> (name cannot contain '/')",
+                ));
+            } else if core.messages.is_empty() {
+                core.messages
+                    .push(ChatMessage::system("Nothing to save — conversation is empty."));
+            } else {
+                match crate::persistence::save_session_as(&name, &core.messages) {
+                    Ok(()) => {
+                        core.messages.push(ChatMessage::system(format!(
+                            "📋 Session '{}' saved ({} messages).",
+                            name,
+                            core.messages.len(),
+                        )));
+                    }
+                    Err(e) => {
+                        core.messages.push(ChatMessage::system(format!(
+                            "Failed to save session: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/sessions switch" => {
+            let items = resolve_dynamic_items("/sessions switch", core);
+            if items.is_empty() {
+                core.messages.push(ChatMessage::system(
+                    "No saved sessions. Use \"/sessions save <name>\" first.",
+                ));
+            } else {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/sessions switch".to_string(),
+                    items,
+                };
+                state.popup_selected = 0;
+                return true;
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/sessions switch ") => {
+            let name = if let Some(s) = trimmed.strip_prefix("/sessions switch ") {
+                s.trim().to_string()
+            } else {
+                String::new()
+            };
+            if name.is_empty() {
+                core.messages
+                    .push(ChatMessage::system("Usage: /sessions switch <name>"));
+            } else {
+                let count = crate::persistence::load_session_as(&name)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                if count == 0 {
+                    core.messages.push(ChatMessage::system(format!(
+                        "Session '{}' not found.",
+                        name
+                    )));
+                } else {
+                    crate::tui::controller::switch_session(core, &name);
+                    core.messages.push(ChatMessage::system(format!(
+                        "🔄 Switched to session '{}' ({} messages).",
+                        name, count
+                    )));
+                }
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        "/sessions delete" => {
+            let items = resolve_dynamic_items("/sessions delete", core);
+            if items.is_empty() {
+                core.messages.push(ChatMessage::system(
+                    "No saved sessions to delete.",
+                ));
+            } else {
+                state.popup_mode = PopupMode::SubCommand {
+                    parent: "/sessions delete".to_string(),
+                    items,
+                };
+                state.popup_selected = 0;
+                return true;
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/sessions delete ") => {
+            let name = if let Some(s) = trimmed.strip_prefix("/sessions delete ") {
+                s.trim().to_string()
+            } else {
+                String::new()
+            };
+            if name.is_empty() {
+                core.messages
+                    .push(ChatMessage::system("Usage: /sessions delete <name>"));
+            } else {
+                match crate::persistence::delete_session(&name) {
+                    Ok(()) => {
+                        core.messages.push(ChatMessage::system(format!(
+                            "Session '{}' deleted.",
+                            name
+                        )));
+                    }
+                    Err(e) => {
+                        core.messages.push(ChatMessage::system(format!(
+                            "Failed to delete session: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
+        _ if trimmed.starts_with("/sessions ") => {
+            let rest = if let Some(s) = trimmed.strip_prefix("/sessions ") {
+                s.trim()
+            } else {
+                ""
+            };
+            core.messages.push(ChatMessage::system(format!(
+                "Unknown session command: {}. Use /sessions for help.",
+                rest
+            )));
+            ui.input.clear();
+            ui.input_cursor = 0;
+            true
+        }
+
         // ── Role management commands ──
         "/role" | "/role help" => {
             if let Some(items) = get_subcommand_items("/role") {
@@ -953,6 +1147,14 @@ pub fn get_subcommand_items(cmd: &str) -> Option<&'static [(&'static str, &'stat
             ("list", "List all agents with status"),
             ("inspect", "Show agent detail by ID"),
         ]),
+        "/sessions" => Some(&[
+            ("list", "List saved sessions"),
+            ("save", "Save current session"),
+            ("switch", "Switch to a saved session"),
+            ("delete", "Delete a session"),
+        ]),
+        "/sessions switch" => Some(&[("", "")]),
+        "/sessions delete" => Some(&[("", "")]),
         "/memo" => Some(&[
             ("list", "List role memos"),
             ("show", "Show a memo by key"),
@@ -987,6 +1189,20 @@ pub fn resolve_dynamic_items(parent: &str, core: &crate::tui::state::CoreState) 
                     .collect()
             })
             .unwrap_or_default(),
+        "/sessions switch" | "/sessions delete" => {
+            let sessions = crate::persistence::list_sessions();
+            if sessions.is_empty() {
+                vec![]
+            } else {
+                sessions
+                    .into_iter()
+                    .map(|name| {
+                        let label = format!("session: {}", name);
+                        (name, label)
+                    })
+                    .collect()
+            }
+        }
         "/agent inspect" => core
             .agent_pool
             .try_read()
@@ -1015,6 +1231,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/agent", "Agent management (list/inspect)"),
     ("/sh", "Run a shell command"),
     ("/clear", "Clear conversation"),
+    ("/sessions", "Manage sessions (list/save/delete/switch)"),
     ("/memo", "Role memo management (list/show/write/delete/roles)"),
     ("/help", "Show help"),
 ];

@@ -85,6 +85,48 @@ pub fn ensure_initial_agent_sync(core: &mut CoreState, goal_hint: &str) -> Optio
     }
 }
 
+/// Switch to a named session: clear current messages and restore the saved ones.
+pub fn switch_session(core: &mut CoreState, name: &str) {
+    let Some(messages) = crate::persistence::load_session_as(name) else {
+        return;
+    };
+
+    // Clear current state
+    core.messages.clear();
+    core.responsible_agent_id = None;
+    core.agents.clear();
+
+    // Restore saved messages
+    for msg in &messages {
+        core.messages.push(ChatMessage {
+            role: msg.role.clone(),
+            content: msg.content.clone(),
+            timestamp: msg.timestamp.clone(),
+            status: MessageStatus::Completed,
+        });
+    }
+
+    // Inject into agent context if an agent already exists
+    if let Some(agent_id) = core.responsible_agent_id {
+        if let Ok(mut pool) = core.agent_pool.try_write() {
+            if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                agent.context.clear();
+                for msg in &messages {
+                    let role = match msg.role {
+                        MessageRole::User => "user",
+                        MessageRole::Agent => "assistant",
+                        _ => continue,
+                    };
+                    agent.context.push(crate::llm::types::Message {
+                        role: role.to_string(),
+                        content: msg.content.clone(),
+                    });
+                }
+            }
+        }
+    }
+}
+
 // ============================================================================
 //  Provider management
 // ============================================================================

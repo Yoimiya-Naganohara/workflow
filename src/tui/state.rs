@@ -574,7 +574,17 @@ impl AppState {
 
     /// Recalculate cached token counts from all messages.
     /// Uses the tiktoken-based tokenizer; falls back to char/4 estimate.
+    ///
+    /// **Guarded**: if `has_api_tokens` is already true, this is a no-op.
+    /// The API-reported per-request totals from `ChatTokenUsage` events are
+    /// strictly more accurate than a local lifetime estimate, so we never let
+    /// the local counter overwrite them.
     pub fn recalc_tokens(&mut self) {
+        // ── Guard: never overwrite API-reported token data ──
+        if self.ui.has_api_tokens {
+            return;
+        }
+
         use crate::tui::tokenizer;
         let mut input_tokens = 0u32;
         let mut output_tokens = 0u32;

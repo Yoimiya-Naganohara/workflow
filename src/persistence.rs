@@ -181,6 +181,65 @@ pub fn load_session() -> Option<Vec<crate::tui::state::ChatMessage>> {
     serde_json::from_str(&text).ok()
 }
 
+/// Save messages to a named session file under sessions/.
+pub fn save_session_as(
+    name: &str,
+    messages: &[crate::tui::state::ChatMessage],
+) -> Result<()> {
+    let dir = config_dir()?.join("sessions");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{}.json", name));
+    let json = serde_json::to_string_pretty(messages)?;
+    write_atomic(&path, &json)
+}
+
+/// Load messages from a named session.
+pub fn load_session_as(name: &str) -> Option<Vec<crate::tui::state::ChatMessage>> {
+    let path = config_dir().ok()?.join("sessions").join(format!("{}.json", name));
+    if !path.exists() {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// List all saved session names, ordered newest-first by mtime.
+pub fn list_sessions() -> Vec<String> {
+    let dir = match config_dir() {
+        Ok(d) => d.join("sessions"),
+        Err(_) => return vec![],
+    };
+    if !dir.exists() {
+        return vec![];
+    }
+    let mut sessions: Vec<(String, std::time::SystemTime)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                    if let Ok(meta) = path.metadata() {
+                        if let Ok(modified) = meta.modified() {
+                            sessions.push((name.to_string(), modified));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    sessions.sort_by(|a, b| b.1.cmp(&a.1));
+    sessions.into_iter().map(|(n, _)| n).collect()
+}
+
+/// Delete a named session file.
+pub fn delete_session(name: &str) -> Result<()> {
+    let path = config_dir()?.join("sessions").join(format!("{}.json", name));
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
+    Ok(())
+}
+
 pub fn save_selected_models(models: &[SelectedModel]) -> Result<()> {
     let mut state = load();
     state.selected_models = models.to_vec();
