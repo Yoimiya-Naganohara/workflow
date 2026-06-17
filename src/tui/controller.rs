@@ -223,12 +223,14 @@ pub async fn load_initial_state(state: &mut AppState) {
         }
     }
 
-    // ── Load persisted context ──
-    if let Some(saved) = crate::persistence::load_context() {
-        state.core.saved_context = Some(saved.context);
-        state.core.messages.push(ChatMessage::system(
-            "📋 Previous session context found. Press Ctrl+R to restore.",
-        ));
+    // ── Load persisted session (opencode-style) ──
+    if let Some(mut session) = crate::persistence::load_session() {
+        let count = session.len();
+        state.core.messages.append(&mut session);
+        state.core.messages.push(ChatMessage::system(format!(
+            "📋 Restored {} messages from previous session",
+            count,
+        )));
     }
 }
 

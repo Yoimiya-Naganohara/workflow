@@ -41,7 +41,7 @@ pub enum AppMode {
     Build,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MessageStatus {
     Thinking,
     Streaming,
@@ -49,7 +49,7 @@ pub enum MessageStatus {
     Error,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub role: MessageRole,
     pub content: String,
@@ -69,7 +69,7 @@ impl ChatMessage {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MessageRole {
     System,
     User,
@@ -123,9 +123,7 @@ pub struct CoreState {
     /// Channel sender to the background [`RuntimeEventLoop`].
     /// Tools use this to dispatch async work without blocking the LLM stream.
     pub runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
-    /// Saved conversation context from the previous session.
-    /// Loaded on startup by `load_initial_state`, cleared on restore or new task.
-    pub saved_context: Option<Vec<crate::llm::types::Message>>,
+
 }
 
 /// Transient UI state — reset on restart.
@@ -766,7 +764,6 @@ impl Default for CoreState {
             reflection: ReflectionConfig::default(),
             last_chat_request_id: 0,
             runtime_event_tx: None,
-            saved_context: None,
         }
     }
 }

@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use tracing;
 
 use crate::agent::MemoEntry;
-use crate::llm::types::Message;
 use crate::models::{CustomProvider, ModelRegistry};
 use crate::tui::state::SelectedModel;
 
@@ -163,45 +162,23 @@ pub fn save(state: &PersistedState) -> Result<()> {
     write_atomic(&path, &json)
 }
 
-// ── Context persistence (lightweight checkpoint) ──
+// ── Session persistence (opencode-style) ──
 
-/// Lightweight context snapshot for cross-session continuation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContextSave {
-    pub agent_id: crate::core::types::AgentId,
-    pub role: String,
-    pub context: Vec<Message>,
-    pub saved_at: u64,
-}
-
-fn context_file() -> Result<PathBuf> {
-    Ok(config_dir()?.join("context.json"))
-}
-
-/// Save the current conversation context for the next session.
-pub fn save_context(ctx: &ContextSave) -> Result<()> {
-    let path = context_file()?;
-    let json = serde_json::to_string_pretty(ctx)?;
+/// Save the current conversation messages for the next session.
+pub fn save_session(messages: &[crate::tui::state::ChatMessage]) -> Result<()> {
+    let path = config_dir()?.join("session.json");
+    let json = serde_json::to_string_pretty(messages)?;
     write_atomic(&path, &json)
 }
 
-/// Load a previously saved context, if one exists.
-pub fn load_context() -> Option<ContextSave> {
-    let path = context_file().ok()?;
+/// Load a previously saved session, if one exists.
+pub fn load_session() -> Option<Vec<crate::tui::state::ChatMessage>> {
+    let path = config_dir().ok()?.join("session.json");
     if !path.exists() {
         return None;
     }
     let text = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&text).ok()
-}
-
-/// Remove the context checkpoint file (called after restore or on new task).
-pub fn clear_context() -> Result<()> {
-    let path = context_file()?;
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
-    Ok(())
 }
 
 pub fn save_selected_models(models: &[SelectedModel]) -> Result<()> {

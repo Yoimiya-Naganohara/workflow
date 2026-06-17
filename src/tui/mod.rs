@@ -124,7 +124,7 @@ impl Tui {
                                     match state.ui.panel {
                                         Panel::Chat => {
                                             if !self.handle_chat_keys(&mut state, key) {
-                                                self.save_context_on_shutdown().await;
+                                                self.save_session().await;
                                                 return Ok(());
                                             }
                                         }
@@ -184,7 +184,7 @@ impl Tui {
                         }
                         Some(Err(e)) => { eprintln!("Event stream error: {}", e); }
                         None => {
-                            self.save_context_on_shutdown().await;
+                            self.save_session().await;
                             return Ok(());
                         },
                     }
@@ -210,26 +210,11 @@ impl Tui {
         }
     }
 
-    /// Save conversation context for the next session.
-    async fn save_context_on_shutdown(&self) {
+    /// Save conversation messages for the next session (opencode-style).
+    async fn save_session(&self) {
         let state = self.state.read().await;
-        if let Some(agent_id) = state.core.responsible_agent_id {
-            if let Ok(pool) = state.core.agent_pool.try_read() {
-                if let Some(agent) = pool.get_agent(&agent_id) {
-                    if !agent.context.is_empty() {
-                        let ctx = crate::persistence::ContextSave {
-                            agent_id: agent.id,
-                            role: agent.role.clone(),
-                            context: agent.context.clone(),
-                            saved_at: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs(),
-                        };
-                        let _ = crate::persistence::save_context(&ctx);
-                    }
-                }
-            }
+        if !state.core.messages.is_empty() {
+            let _ = crate::persistence::save_session(&state.core.messages);
         }
     }
 }
