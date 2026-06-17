@@ -75,7 +75,9 @@ impl ChatRenderOutput {
                     while start < chars.len() {
                         let mut end = start;
                         let mut dw = 0;
-                        while end < chars.len() && dw + UnicodeWidthChar::width(chars[end]).unwrap_or(0) <= inner {
+                        while end < chars.len()
+                            && dw + UnicodeWidthChar::width(chars[end]).unwrap_or(0) <= inner
+                        {
                             dw += UnicodeWidthChar::width(chars[end]).unwrap_or(0);
                             end += 1;
                         }
@@ -97,7 +99,9 @@ impl ChatRenderOutput {
             .map(|h| {
                 Cell::from(Text::from(Line::from(Span::styled(
                     format!(" {} ", h),
-                    Style::default().fg(style::BLUE).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(style::BLUE)
+                        .add_modifier(Modifier::BOLD),
                 ))))
             })
             .collect();
@@ -142,7 +146,11 @@ impl ChatRenderOutput {
 //  Main entry point
 // ═══════════════════════════════════════════════════════════════════════════
 
-pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: u8) -> ChatRenderOutput {
+pub(crate) fn build_chat_content(
+    state: &CoreState,
+    width: usize,
+    _think_frame: u8,
+) -> ChatRenderOutput {
     let content_width = width.max(20);
     let body_width = content_width.saturating_sub(4).max(1);
     let mut rendered: Vec<RenderedLine> = Vec::new();
@@ -150,15 +158,20 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
 
     for message in &state.messages {
         if matches!(message.role, MessageRole::System) {
-            let result = render_md(&message.content, body_width);
-            for md_line in result.lines {
+            // Render system messages as plain text (not markdown) so that
+            // all original line breaks, including blank lines, are preserved.
+            // The markdown parser would collapse blank lines between
+            // paragraphs, losing intentional formatting.
+            // str::lines() correctly handles trailing newlines without
+            // producing an extra empty line.
+            for line in message.content.lines() {
                 let mut styled = vec![Span::styled("· ", Style::default().fg(style::TEXT_MUTED))];
-                styled.extend(
-                    md_line
-                        .spans
-                        .into_iter()
-                        .map(|s| Span::styled(s.content, s.style.fg(style::TEXT_MUTED))),
-                );
+                if !line.is_empty() {
+                    styled.push(Span::styled(
+                        line.to_string(),
+                        Style::default().fg(style::TEXT_MUTED),
+                    ));
+                }
                 rendered.push(RenderedLine {
                     line: Line::from(styled),
                     table: None,
@@ -210,7 +223,12 @@ pub(crate) fn build_chat_content(state: &CoreState, width: usize, _think_frame: 
                 continue;
             }
             let mut styled = vec![Span::styled(bar_char, Style::default().fg(bar_color))];
-            styled.extend(md_line.spans.into_iter().map(|s| Span::styled(s.content, s.style)));
+            styled.extend(
+                md_line
+                    .spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content, s.style)),
+            );
             rendered.push(RenderedLine {
                 line: Line::from(styled),
                 table: None,
@@ -256,7 +274,10 @@ impl MdRenderResult {
     }
 
     fn push_line(&mut self, spans: Vec<Span<'static>>) {
-        self.lines.push(MdLine { spans, table_ref: None });
+        self.lines.push(MdLine {
+            spans,
+            table_ref: None,
+        });
     }
 }
 
@@ -351,7 +372,11 @@ fn render_md(text: &str, body_width: usize) -> MdRenderResult {
 ///     path=/foo.txt     ← gray, 2-space indent
 ///     count=42
 ///
-fn tool_call_lines(lines: &mut Vec<RenderedLine>, message: &crate::tui::state::ChatMessage, _box_width: usize) {
+fn tool_call_lines(
+    lines: &mut Vec<RenderedLine>,
+    message: &crate::tui::state::ChatMessage,
+    _box_width: usize,
+) {
     let content = &message.content;
 
     // ── Parse content into tool-call groups ──
@@ -459,10 +484,11 @@ fn is_separator_row(line: &str) -> bool {
     } else {
         trimmed
     };
-    inner
-        .split('|')
-        .all(|cell| cell.trim().chars().all(|c| c == '-' || c == ':' || c == ' '))
-        && inner.contains('-')
+    inner.split('|').all(|cell| {
+        cell.trim()
+            .chars()
+            .all(|c| c == '-' || c == ':' || c == ' ')
+    }) && inner.contains('-')
 }
 
 fn collect_paragraph_table_block<'a, I>(
@@ -545,7 +571,11 @@ fn extract_table_from_block(block: &[String], result: &mut MdRenderResult) {
                 .chain(data_rows.iter().filter_map(|r| r.get(ci)))
                 .map(|s| s.as_str())
                 .collect();
-            let max_width = all_cells.iter().map(|c| UnicodeWidthStr::width(*c)).max().unwrap_or(4);
+            let max_width = all_cells
+                .iter()
+                .map(|c| UnicodeWidthStr::width(*c))
+                .max()
+                .unwrap_or(4);
             max_width.min(max_col).max(4)
         })
         .collect();
@@ -575,8 +605,11 @@ fn extract_table_from_block(block: &[String], result: &mut MdRenderResult) {
 //  Table rendering (pulldown-cmark parsed tables → TableDef)
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn render_table_into<'a, I>(events: &mut std::iter::Peekable<I>, result: &mut MdRenderResult, body_width: usize)
-where
+fn render_table_into<'a, I>(
+    events: &mut std::iter::Peekable<I>,
+    result: &mut MdRenderResult,
+    body_width: usize,
+) where
     I: Iterator<Item = Event<'a>>,
 {
     // Collect rows as plain strings (inline formatting stripped for Table widget)
@@ -647,8 +680,16 @@ where
     let max_col = (body_width / col_count).saturating_sub(2).clamp(4, 60);
     let col_widths: Vec<usize> = (0..col_count)
         .map(|ci| {
-            let all_cells: Vec<&str> = rows.iter().filter_map(|r| r.get(ci)).map(|s| s.as_str()).collect();
-            let max_w = all_cells.iter().map(|c| UnicodeWidthStr::width(*c)).max().unwrap_or(4);
+            let all_cells: Vec<&str> = rows
+                .iter()
+                .filter_map(|r| r.get(ci))
+                .map(|s| s.as_str())
+                .collect();
+            let max_w = all_cells
+                .iter()
+                .map(|c| UnicodeWidthStr::width(*c))
+                .max()
+                .unwrap_or(4);
             max_w.min(max_col).max(4)
         })
         .collect();
@@ -747,7 +788,9 @@ where
                 flush_buf(&mut spans, &mut buf, &istyle);
                 spans.push(Span::styled(
                     format!("`{}`", t),
-                    Style::default().fg(style::GREEN).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(style::GREEN)
+                        .add_modifier(Modifier::ITALIC),
                 ));
             }
             Some(Event::Start(tag)) => {
@@ -818,7 +861,22 @@ where
     let mut line = String::new();
     loop {
         match events.next() {
-            Some(Event::Text(t)) => line.push_str(&t),
+            Some(Event::Text(t)) => {
+                // Split text by newlines so embedded \n (common in code block
+                // content from pulldown_cmark) produce separate lines.
+                let text = t.to_string();
+                let mut parts = text.split('\n').peekable();
+                while let Some(part) = parts.next() {
+                    if parts.peek().is_some() {
+                        // This part is followed by a newline — complete line.
+                        line.push_str(part);
+                        lines.push(std::mem::take(&mut line));
+                    } else {
+                        // Last part — may be continued by the next Text event.
+                        line.push_str(part);
+                    }
+                }
+            }
             Some(Event::End(TagEnd::CodeBlock)) => {
                 if !line.is_empty() {
                     lines.push(line);
@@ -839,7 +897,10 @@ fn flush_code_block_into(result: &mut MdRenderResult, lang: &str, code_lines: &[
     if !lang.is_empty() {
         result.push_line(vec![
             Span::raw("  "),
-            Span::styled(format!("# {} ", lang), Style::default().fg(style::TEXT_MUTED)),
+            Span::styled(
+                format!("# {} ", lang),
+                Style::default().fg(style::TEXT_MUTED),
+            ),
         ]);
     }
     for code_line in code_lines {
@@ -854,7 +915,10 @@ fn flush_code_block_into(result: &mut MdRenderResult, lang: &str, code_lines: &[
 //  Blockquote
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn collect_blockquote_into<'a, I>(events: &mut std::iter::Peekable<I>, body_width: usize) -> Vec<MdLine>
+fn collect_blockquote_into<'a, I>(
+    events: &mut std::iter::Peekable<I>,
+    body_width: usize,
+) -> Vec<MdLine>
 where
     I: Iterator<Item = Event<'a>>,
 {
@@ -877,7 +941,8 @@ where
                 let _ = events.next();
                 let line_groups = collect_inline_spans(events);
                 for spans in &line_groups {
-                    let mut quote_spans = vec![Span::styled("│ ", Style::default().fg(style::YELLOW))];
+                    let mut quote_spans =
+                        vec![Span::styled("│ ", Style::default().fg(style::YELLOW))];
                     for s in spans {
                         let mut merged = s.style;
                         if merged.fg.is_none() {
@@ -900,8 +965,11 @@ where
 //  List
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn render_list_into<'a, I>(events: &mut std::iter::Peekable<I>, result: &mut MdRenderResult, body_width: usize)
-where
+fn render_list_into<'a, I>(
+    events: &mut std::iter::Peekable<I>,
+    result: &mut MdRenderResult,
+    body_width: usize,
+) where
     I: Iterator<Item = Event<'a>>,
 {
     let mut list_depth = 1u32;
@@ -920,7 +988,10 @@ where
                 let prefix = format!("{}{} ", indent, bullet);
                 for (idx, spans) in line_groups.iter().enumerate() {
                     let mut prefix_spans = if idx == 0 {
-                        vec![Span::styled(prefix.clone(), Style::default().fg(style::BLUE))]
+                        vec![Span::styled(
+                            prefix.clone(),
+                            Style::default().fg(style::BLUE),
+                        )]
                     } else {
                         vec![Span::raw(format!("{}  ", indent))]
                     };
@@ -947,7 +1018,12 @@ where
 //  Heading
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn render_heading_into(result: &mut MdRenderResult, spans: &[Span<'static>], level: HeadingLevel, body_width: usize) {
+fn render_heading_into(
+    result: &mut MdRenderResult,
+    spans: &[Span<'static>],
+    level: HeadingLevel,
+    body_width: usize,
+) {
     let level_num: u8 = match level {
         HeadingLevel::H1 => 1,
         HeadingLevel::H2 => 2,
@@ -992,7 +1068,12 @@ fn render_hr_into(result: &mut MdRenderResult, body_width: usize) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Wraps styled spans, pushing lines to `MdRenderResult`.
-fn wrap_spans_into(result: &mut MdRenderResult, spans: &[Span<'static>], max_width: usize, indent: &str) {
+fn wrap_spans_into(
+    result: &mut MdRenderResult,
+    spans: &[Span<'static>],
+    max_width: usize,
+    indent: &str,
+) {
     let full_text: String = spans.iter().map(|s| s.content.as_ref()).collect();
     let chars: Vec<char> = full_text.chars().collect();
     let indent_w = UnicodeWidthStr::width(indent);
@@ -1018,7 +1099,10 @@ fn wrap_spans_into(result: &mut MdRenderResult, spans: &[Span<'static>], max_wid
 
     let mut start = 0usize;
     let len = chars.len();
-    let char_to_display: Vec<usize> = chars.iter().map(|c| UnicodeWidthChar::width(*c).unwrap_or(0)).collect();
+    let char_to_display: Vec<usize> = chars
+        .iter()
+        .map(|c| UnicodeWidthChar::width(*c).unwrap_or(0))
+        .collect();
 
     while start < len {
         // Measure display width from start to end of available space
@@ -1042,7 +1126,8 @@ fn wrap_spans_into(result: &mut MdRenderResult, spans: &[Span<'static>], max_wid
         }
 
         // Try to break at a space (avoid breaking inside code spans)
-        let break_point = if let Some(space_pos) = chars[start..end].iter().rposition(|&c| c == ' ') {
+        let break_point = if let Some(space_pos) = chars[start..end].iter().rposition(|&c| c == ' ')
+        {
             let real_pos = start + space_pos;
             if !is_inside_code_span(real_pos, &code_ranges) {
                 Some(real_pos)
@@ -1076,7 +1161,12 @@ fn wrap_spans_into(result: &mut MdRenderResult, spans: &[Span<'static>], max_wid
 }
 
 /// Like wrap_spans_into but returns Vec<MdLine> (used by blockquote).
-fn wrap_spans_no_indent(out: &mut Vec<MdLine>, spans: &[Span<'static>], max_width: usize, indent: &str) {
+fn wrap_spans_no_indent(
+    out: &mut Vec<MdLine>,
+    spans: &[Span<'static>],
+    max_width: usize,
+    indent: &str,
+) {
     let full_text: String = spans.iter().map(|s| s.content.as_ref()).collect();
     let chars: Vec<char> = full_text.chars().collect();
     let indent_w = UnicodeWidthStr::width(indent);
@@ -1101,7 +1191,10 @@ fn wrap_spans_no_indent(out: &mut Vec<MdLine>, spans: &[Span<'static>], max_widt
     }
 
     let code_ranges = find_code_span_ranges(spans);
-    let char_to_display: Vec<usize> = chars.iter().map(|c| UnicodeWidthChar::width(*c).unwrap_or(0)).collect();
+    let char_to_display: Vec<usize> = chars
+        .iter()
+        .map(|c| UnicodeWidthChar::width(*c).unwrap_or(0))
+        .collect();
 
     let mut start = 0usize;
     let len = chars.len();
@@ -1128,7 +1221,8 @@ fn wrap_spans_no_indent(out: &mut Vec<MdLine>, spans: &[Span<'static>], max_widt
             break;
         }
 
-        let break_point = if let Some(space_pos) = chars[start..end].iter().rposition(|&c| c == ' ') {
+        let break_point = if let Some(space_pos) = chars[start..end].iter().rposition(|&c| c == ' ')
+        {
             let real_pos = start + space_pos;
             if !is_inside_code_span(real_pos, &code_ranges) {
                 Some(real_pos)
@@ -1171,7 +1265,8 @@ fn find_code_span_ranges(spans: &[Span<'static>]) -> Vec<(usize, usize)> {
     let mut pos = 0;
     for s in spans {
         let len = s.content.chars().count();
-        let is_code = s.style.fg == Some(style::GREEN) && s.style.add_modifier.contains(Modifier::ITALIC);
+        let is_code =
+            s.style.fg == Some(style::GREEN) && s.style.add_modifier.contains(Modifier::ITALIC);
         if is_code {
             ranges.push((pos, pos + len));
         }
@@ -1202,9 +1297,18 @@ fn make_spans_for_range(all: &[Span<'static>], start: usize, end: usize) -> Vec<
             break;
         }
         let char_start = start.saturating_sub(span_start);
-        let char_end = if end < span_end { end - span_start } else { span_len };
+        let char_end = if end < span_end {
+            end - span_start
+        } else {
+            span_len
+        };
         if char_start < char_end {
-            let sub: String = s.content.chars().skip(char_start).take(char_end - char_start).collect();
+            let sub: String = s
+                .content
+                .chars()
+                .skip(char_start)
+                .take(char_end - char_start)
+                .collect();
             if !sub.is_empty() {
                 result.push(Span::styled(sub, s.style));
             }
@@ -1486,7 +1590,8 @@ mod tests {
         let mut state = CoreState::default();
         state.messages = vec![ChatMessage {
             role: MessageRole::User,
-            content: "Show me data\n\n| Name | Value |\n| --- | --- |\n| A | 1 |\n| B | 2 |\n".to_string(),
+            content: "Show me data\n\n| Name | Value |\n| --- | --- |\n| A | 1 |\n| B | 2 |\n"
+                .to_string(),
             timestamp: "00:00".to_string(),
             status: MessageStatus::Completed,
         }];
@@ -1494,5 +1599,14 @@ mod tests {
         assert!(!output.tables.is_empty(), "should have at least one table");
         let table_line_count = output.rendered.iter().filter(|r| r.table.is_some()).count();
         assert!(table_line_count > 0, "should have table placeholder lines");
+    }
+    #[test]
+    fn test_codeblock() {
+        let mut events = "123\n123\n123\n".chars().map(|c| Event::Text(c.into()));
+        let lines = collect_code_lines(&mut events);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "123");
+        assert_eq!(lines[1], "123");
+        assert_eq!(lines[2], "123");
     }
 }
