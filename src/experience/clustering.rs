@@ -46,7 +46,10 @@ impl Cluster {
             domain_version: entry.domain_version,
             latest_timestamp: entry.timestamp,
             max_l2_weight: entry.l2_override_weight,
-            role_template_ids: entry.role_template_id.map(|id| vec![id]).unwrap_or_default(),
+            role_template_ids: entry
+                .role_template_id
+                .map(|id| vec![id])
+                .unwrap_or_default(),
         }
     }
 
@@ -244,7 +247,11 @@ mod tests {
     #[test]
     fn test_single_cluster() {
         let consolidator = ClusterConsolidator::new(0.5);
-        let entries = vec![make_entry(1.0, 1.0), make_entry(0.9, 1.0), make_entry(0.95, 1.0)];
+        let entries = vec![
+            make_entry(1.0, 1.0),
+            make_entry(0.9, 1.0),
+            make_entry(0.95, 1.0),
+        ];
 
         let clusters = consolidator.cluster(&entries);
         assert_eq!(clusters.len(), 1);
@@ -281,7 +288,11 @@ mod tests {
     #[test]
     fn test_consolidate_filters_small_clusters() {
         let consolidator = ClusterConsolidator::new(0.5);
-        let entries = vec![make_entry(1.0, 1.0), make_entry(1.1, 1.0), make_entry(-1.0, 1.0)];
+        let entries = vec![
+            make_entry(1.0, 1.0),
+            make_entry(1.1, 1.0),
+            make_entry(-1.0, 1.0),
+        ];
 
         let reps = consolidator.consolidate(&entries, 2, 0.5);
         // Only the cluster with 2 entries (threshold 0.5) should survive.

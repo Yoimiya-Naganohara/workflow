@@ -299,7 +299,13 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
             abort_registration,
         } => {
             let mut stream = match provider
-                .chat_with_tools_stream_mcp(&model_id, &system_prompt, &input, &history, &tool_server)
+                .chat_with_tools_stream_mcp(
+                    &model_id,
+                    &system_prompt,
+                    &input,
+                    &history,
+                    &tool_server,
+                )
                 .await
             {
                 Ok(s) => s,
@@ -321,7 +327,10 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                         match event {
                             ToolEvent::Text(text) => {
                                 full_response.push_str(&text);
-                                let _ = tx.send(AppEvent::ChatToken { response_index, text });
+                                let _ = tx.send(AppEvent::ChatToken {
+                                    response_index,
+                                    text,
+                                });
                             }
                             ToolEvent::ToolCall { name, args, .. } => {
                                 let args_str = format_tool_args(&args);
@@ -441,7 +450,14 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                 (role, experiences, provider, rt.model_id.clone())
             };
 
-            match crate::runtime::optimizer::optimize_role(&role, &experiences, &provider, &model_id).await {
+            match crate::runtime::optimizer::optimize_role(
+                &role,
+                &experiences,
+                &provider,
+                &model_id,
+            )
+            .await
+            {
                 Ok(result) => {
                     let _ = tx.send(AppEvent::OptimizationResult {
                         role_name: result.role_name.clone(),
@@ -522,7 +538,9 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
             // Rules passed → do self-check via LLM
             let self_check_prompt = build_self_check_prompt(&input, &full_response);
 
-            let result = provider.chat(&model_id, &system_prompt, &self_check_prompt).await;
+            let result = provider
+                .chat(&model_id, &system_prompt, &self_check_prompt)
+                .await;
 
             match result {
                 Ok(text) => {

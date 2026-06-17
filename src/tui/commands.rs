@@ -27,8 +27,9 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
 
         "/models" | "/model" => {
             if core.configured_providers.is_empty() {
-                core.messages
-                    .push(ChatMessage::system("No providers configured. Use `/connect` first."));
+                core.messages.push(ChatMessage::system(
+                    "No providers configured. Use `/connect` first.",
+                ));
                 ui.input.clear();
                 ui.input_cursor = 0;
                 return true;
@@ -46,7 +47,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             let bindings = state.keymap.all_bindings();
             let mut lines = vec!["Keyboard Shortcuts:".to_string(), String::new()];
             for (key, action) in &bindings {
-                lines.push(format!("  {:20} {}", key, crate::tui::keymap::format_action(action)));
+                lines.push(format!(
+                    "  {:20} {}",
+                    key,
+                    crate::tui::keymap::format_action(action)
+                ));
             }
             core.messages.push(ChatMessage::system(lines.join("\n")));
             ui.input.clear();
@@ -105,7 +110,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             if let Some(items) = get_subcommand_items("/pool") {
                 state.popup_mode = PopupMode::SubCommand {
                     parent: "/pool".to_string(),
-                    items: items.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
+                    items: items
+                        .iter()
+                        .map(|(n, d)| (n.to_string(), d.to_string()))
+                        .collect(),
                 };
             }
             state.popup_selected = 0;
@@ -152,7 +160,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             } else {
                 "Runtime not available".to_string()
             };
-            let is_err = msg.contains("failed") || msg.contains("locked") || msg.contains("not available");
+            let is_err =
+                msg.contains("failed") || msg.contains("locked") || msg.contains("not available");
             let status = if is_err {
                 crate::tui::state::MessageStatus::Error
             } else {
@@ -182,7 +191,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             } else {
                 "Runtime not available".to_string()
             };
-            let is_err = msg.contains("failed") || msg.contains("locked") || msg.contains("not available");
+            let is_err =
+                msg.contains("failed") || msg.contains("locked") || msg.contains("not available");
             let status = if is_err {
                 crate::tui::state::MessageStatus::Error
             } else {
@@ -209,7 +219,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         "/pool import" => {
-            core.messages.push(ChatMessage::system("Import not yet implemented"));
+            core.messages
+                .push(ChatMessage::system("Import not yet implemented"));
             ui.input.clear();
             ui.input_cursor = 0;
             true
@@ -223,7 +234,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 unreachable!()
             };
             if !arg.is_empty() {
-                core.messages.push(ChatMessage::system(format!("$ {}", arg)));
+                core.messages
+                    .push(ChatMessage::system(format!("$ {}", arg)));
                 state.effects.push(Effect::ExecuteShell {
                     command: arg.to_string(),
                 });
@@ -235,7 +247,12 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/pool query ") || trimmed.starts_with("/pool q ") => {
-            let query_text = trimmed.split_once(' ').map(|x| x.1).unwrap_or("").trim().to_string();
+            let query_text = trimmed
+                .split_once(' ')
+                .map(|x| x.1)
+                .unwrap_or("")
+                .trim()
+                .to_string();
             if query_text.is_empty() {
                 state.popup_mode = PopupMode::ShellInput {
                     cmd: "/pool query".to_string(),
@@ -276,90 +293,12 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         // ── Session management commands ──
-        "/sessions" | "/sessions help" => {
-            if let Some(items) = get_subcommand_items("/sessions") {
-                state.popup_mode = PopupMode::SubCommand {
-                    parent: "/sessions".to_string(),
-                    items: items.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
-                };
-            }
-            state.popup_selected = 0;
-            ui.input.clear();
-            ui.input_cursor = 0;
-            true
-        }
-
-        "/sessions list" => {
-            let sessions = crate::persistence::list_sessions();
-            if sessions.is_empty() {
-                core.messages.push(ChatMessage::system(
-                    "No saved sessions. Use \"/sessions save <name>\" to save the current conversation.",
-                ));
-            } else {
-                let mut lines = vec!["Saved Sessions:".to_string()];
-                for name in &sessions {
-                    // Load the session briefly to count messages
-                    let count = crate::persistence::load_session_as(name)
-                        .map(|m| m.len())
-                        .unwrap_or(0);
-                    lines.push(format!("  {}  ({} messages)", name, count));
-                }
-                core.messages.push(ChatMessage::system(lines.join("\n")));
-            }
-            ui.input.clear();
-            ui.input_cursor = 0;
-            true
-        }
-
-        "/sessions save" => {
-            state.popup_mode = PopupMode::ShellInput {
-                cmd: "/sessions save".to_string(),
-                input: String::new(),
-            };
-            state.popup_selected = 0;
-            true
-        }
-
-        _ if trimmed.starts_with("/sessions save ") => {
-            let name = if let Some(s) = trimmed.strip_prefix("/sessions save ") {
-                s.trim().to_string()
-            } else {
-                String::new()
-            };
-            if name.is_empty() || name.contains('/') {
-                core.messages.push(ChatMessage::system(
-                    "Usage: /sessions save <name> (name cannot contain '/')",
-                ));
-            } else if core.messages.is_empty() {
-                core.messages
-                    .push(ChatMessage::system("Nothing to save — conversation is empty."));
-            } else {
-                match crate::persistence::save_session_as(&name, &core.messages) {
-                    Ok(()) => {
-                        core.messages.push(ChatMessage::system(format!(
-                            "📋 Session '{}' saved ({} messages).",
-                            name,
-                            core.messages.len(),
-                        )));
-                    }
-                    Err(e) => {
-                        core.messages.push(ChatMessage::system(format!(
-                            "Failed to save session: {}",
-                            e
-                        )));
-                    }
-                }
-            }
-            ui.input.clear();
-            ui.input_cursor = 0;
-            true
-        }
-
-        "/sessions switch" => {
+        "/sessions" => {
+            // Directly show session list for switching, like /sessions switch.
             let items = resolve_dynamic_items("/sessions switch", core);
             if items.is_empty() {
                 core.messages.push(ChatMessage::system(
-                    "No saved sessions. Use \"/sessions save <name>\" first.",
+                    "No saved sessions. Save a session via the agent or wait for auto-save on exit.",
                 ));
             } else {
                 state.popup_mode = PopupMode::SubCommand {
@@ -367,7 +306,6 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                     items,
                 };
                 state.popup_selected = 0;
-                return true;
             }
             ui.input.clear();
             ui.input_cursor = 0;
@@ -398,72 +336,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                         "🔄 Switched to session '{}' ({} messages).",
                         name, count
                     )));
+                    // Reset scroll so the restored session is visible.
+                    ui.auto_scroll = true;
                 }
             }
-            ui.input.clear();
-            ui.input_cursor = 0;
-            true
-        }
-
-        "/sessions delete" => {
-            let items = resolve_dynamic_items("/sessions delete", core);
-            if items.is_empty() {
-                core.messages.push(ChatMessage::system(
-                    "No saved sessions to delete.",
-                ));
-            } else {
-                state.popup_mode = PopupMode::SubCommand {
-                    parent: "/sessions delete".to_string(),
-                    items,
-                };
-                state.popup_selected = 0;
-                return true;
-            }
-            ui.input.clear();
-            ui.input_cursor = 0;
-            true
-        }
-
-        _ if trimmed.starts_with("/sessions delete ") => {
-            let name = if let Some(s) = trimmed.strip_prefix("/sessions delete ") {
-                s.trim().to_string()
-            } else {
-                String::new()
-            };
-            if name.is_empty() {
-                core.messages
-                    .push(ChatMessage::system("Usage: /sessions delete <name>"));
-            } else {
-                match crate::persistence::delete_session(&name) {
-                    Ok(()) => {
-                        core.messages.push(ChatMessage::system(format!(
-                            "Session '{}' deleted.",
-                            name
-                        )));
-                    }
-                    Err(e) => {
-                        core.messages.push(ChatMessage::system(format!(
-                            "Failed to delete session: {}",
-                            e
-                        )));
-                    }
-                }
-            }
-            ui.input.clear();
-            ui.input_cursor = 0;
-            true
-        }
-
-        _ if trimmed.starts_with("/sessions ") => {
-            let rest = if let Some(s) = trimmed.strip_prefix("/sessions ") {
-                s.trim()
-            } else {
-                ""
-            };
-            core.messages.push(ChatMessage::system(format!(
-                "Unknown session command: {}. Use /sessions for help.",
-                rest
-            )));
             ui.input.clear();
             ui.input_cursor = 0;
             true
@@ -474,7 +350,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             if let Some(items) = get_subcommand_items("/role") {
                 state.popup_mode = PopupMode::SubCommand {
                     parent: "/role".to_string(),
-                    items: items.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
+                    items: items
+                        .iter()
+                        .map(|(n, d)| (n.to_string(), d.to_string()))
+                        .collect(),
                 };
             }
             state.popup_selected = 0;
@@ -488,7 +367,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 if let Ok(rt) = runtime.try_read() {
                     let templates = rt.all_role_templates();
                     if templates.is_empty() {
-                        core.messages.push(ChatMessage::system("No role templates found."));
+                        core.messages
+                            .push(ChatMessage::system("No role templates found."));
                     } else {
                         let mut lines = vec!["Role Templates:".to_string()];
                         for t in &templates {
@@ -504,7 +384,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                     core.messages.push(ChatMessage::system("Runtime locked"));
                 }
             } else {
-                core.messages.push(ChatMessage::system("Runtime not available"));
+                core.messages
+                    .push(ChatMessage::system("Runtime not available"));
             }
             ui.input.clear();
             ui.input_cursor = 0;
@@ -514,7 +395,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         "/role show" => {
             let items = resolve_dynamic_items("/role show", core);
             if items.is_empty() {
-                core.messages.push(ChatMessage::system("No role templates available."));
+                core.messages
+                    .push(ChatMessage::system("No role templates available."));
             } else {
                 state.popup_mode = PopupMode::SubCommand {
                     parent: "/role show".to_string(),
@@ -535,7 +417,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 unreachable!()
             };
             if role_name.is_empty() {
-                core.messages.push(ChatMessage::system("Usage: /role show <name>"));
+                core.messages
+                    .push(ChatMessage::system("Usage: /role show <name>"));
             } else if let Some(runtime) = &core.runtime {
                 if let Ok(rt) = runtime.try_read() {
                     match rt.get_role_template(&role_name) {
@@ -565,7 +448,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                     core.messages.push(ChatMessage::system("Runtime locked"));
                 }
             } else {
-                core.messages.push(ChatMessage::system("Runtime not available"));
+                core.messages
+                    .push(ChatMessage::system("Runtime not available"));
             }
             ui.input.clear();
             ui.input_cursor = 0;
@@ -584,7 +468,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         "/role edit" => {
             let items = resolve_dynamic_items("/role edit", core);
             if items.is_empty() {
-                core.messages.push(ChatMessage::system("No role templates available."));
+                core.messages
+                    .push(ChatMessage::system("No role templates available."));
             } else {
                 state.popup_mode = PopupMode::SubCommand {
                     parent: "/role edit".to_string(),
@@ -605,7 +490,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 unreachable!()
             };
             if role_name.is_empty() {
-                core.messages.push(ChatMessage::system("Usage: /role edit <name>"));
+                core.messages
+                    .push(ChatMessage::system("Usage: /role edit <name>"));
             } else if let Some(runtime) = &core.runtime {
                 if let Ok(rt) = runtime.try_read() {
                     match rt.get_role_template(&role_name) {
@@ -626,7 +512,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                     core.messages.push(ChatMessage::system("Runtime locked"));
                 }
             } else {
-                core.messages.push(ChatMessage::system("Runtime not available"));
+                core.messages
+                    .push(ChatMessage::system("Runtime not available"));
             }
             ui.input.clear();
             ui.input_cursor = 0;
@@ -646,7 +533,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                     core.messages.push(ChatMessage::system("Runtime locked"));
                 }
             } else {
-                core.messages.push(ChatMessage::system("Runtime not available"));
+                core.messages
+                    .push(ChatMessage::system("Runtime not available"));
             }
             ui.input.clear();
             ui.input_cursor = 0;
@@ -656,7 +544,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         "/role optimize" => {
             let items = resolve_dynamic_items("/role optimize", core);
             if items.is_empty() {
-                core.messages.push(ChatMessage::system("No role templates available."));
+                core.messages
+                    .push(ChatMessage::system("No role templates available."));
             } else {
                 state.popup_mode = PopupMode::SubCommand {
                     parent: "/role optimize".to_string(),
@@ -677,7 +566,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 unreachable!()
             };
             if role_name.is_empty() {
-                core.messages.push(ChatMessage::system("Usage: /role optimize <name>"));
+                core.messages
+                    .push(ChatMessage::system("Usage: /role optimize <name>"));
             } else if let Some(runtime) = &core.runtime {
                 if let Ok(rt) = runtime.try_read() {
                     match rt.get_role_template(&role_name) {
@@ -691,7 +581,9 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                                     experiences.len()
                                 )));
                             } else if let Ok(tracker) = rt.optimization_tracker.lock() {
-                                if let Some(reason) = tracker.can_optimize(role.template_id, experiences.len()) {
+                                if let Some(reason) =
+                                    tracker.can_optimize(role.template_id, experiences.len())
+                                {
                                     core.messages.push(ChatMessage::system(format!(
                                         "Cannot optimize '{}': {}",
                                         role_name, reason
@@ -720,15 +612,18 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                             }
                         }
                         None => {
-                            core.messages
-                                .push(ChatMessage::system(format!("Role '{}' not found.", role_name)));
+                            core.messages.push(ChatMessage::system(format!(
+                                "Role '{}' not found.",
+                                role_name
+                            )));
                         }
                     }
                 } else {
                     core.messages.push(ChatMessage::system("Runtime locked"));
                 }
             } else {
-                core.messages.push(ChatMessage::system("Runtime not available"));
+                core.messages
+                    .push(ChatMessage::system("Runtime not available"));
             }
             ui.input.clear();
             ui.input_cursor = 0;
@@ -738,7 +633,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         "/role delete" => {
             let items = resolve_dynamic_items("/role delete", core);
             if items.is_empty() {
-                core.messages.push(ChatMessage::system("No role templates available."));
+                core.messages
+                    .push(ChatMessage::system("No role templates available."));
             } else {
                 state.popup_mode = PopupMode::SubCommand {
                     parent: "/role delete".to_string(),
@@ -759,26 +655,32 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 unreachable!()
             };
             if role_name.is_empty() {
-                core.messages.push(ChatMessage::system("Usage: /role delete <name>"));
+                core.messages
+                    .push(ChatMessage::system("Usage: /role delete <name>"));
             } else if let Some(runtime) = &core.runtime {
                 if let Ok(rt) = runtime.try_read() {
                     match rt.get_role_template(&role_name) {
                         Some(t) => {
                             // Delete via the role template store
                             rt.delete_role_template(t.template_id);
-                            core.messages
-                                .push(ChatMessage::system(format!("Role '{}' deleted.", role_name)));
+                            core.messages.push(ChatMessage::system(format!(
+                                "Role '{}' deleted.",
+                                role_name
+                            )));
                         }
                         None => {
-                            core.messages
-                                .push(ChatMessage::system(format!("Role '{}' not found.", role_name)));
+                            core.messages.push(ChatMessage::system(format!(
+                                "Role '{}' not found.",
+                                role_name
+                            )));
                         }
                     }
                 } else {
                     core.messages.push(ChatMessage::system("Runtime locked"));
                 }
             } else {
-                core.messages.push(ChatMessage::system("Runtime not available"));
+                core.messages
+                    .push(ChatMessage::system("Runtime not available"));
             }
             ui.input.clear();
             ui.input_cursor = 0;
@@ -788,8 +690,9 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         "/role default" => {
             let items = resolve_dynamic_items("/role default", core);
             if items.is_empty() {
-                core.messages
-                    .push(ChatMessage::system("No role templates available or runtime not ready."));
+                core.messages.push(ChatMessage::system(
+                    "No role templates available or runtime not ready.",
+                ));
             } else {
                 state.popup_mode = crate::tui::state::PopupMode::SubCommand {
                     parent: "/role default".to_string(),
@@ -811,7 +714,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 unreachable!()
             };
             if role_name.is_empty() {
-                core.messages.push(ChatMessage::system("Usage: /role default <name>"));
+                core.messages
+                    .push(ChatMessage::system("Usage: /role default <name>"));
             } else if let Some(runtime) = &core.runtime {
                 if let Ok(rt) = runtime.try_read() {
                     if rt.get_role_template(&role_name).is_some() {
@@ -833,7 +737,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                     core.messages.push(ChatMessage::system("Runtime locked"));
                 }
             } else {
-                core.messages.push(ChatMessage::system("Runtime not available"));
+                core.messages
+                    .push(ChatMessage::system("Runtime not available"));
             }
             ui.input.clear();
             ui.input_cursor = 0;
@@ -845,7 +750,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             if let Some(items) = get_subcommand_items("/agent") {
                 state.popup_mode = PopupMode::SubCommand {
                     parent: "/agent".to_string(),
-                    items: items.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
+                    items: items
+                        .iter()
+                        .map(|(n, d)| (n.to_string(), d.to_string()))
+                        .collect(),
                 };
             }
             state.popup_selected = 0;
@@ -885,7 +793,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             if let Some(items) = get_subcommand_items("/memo") {
                 state.popup_mode = PopupMode::SubCommand {
                     parent: "/memo".to_string(),
-                    items: items.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
+                    items: items
+                        .iter()
+                        .map(|(n, d)| (n.to_string(), d.to_string()))
+                        .collect(),
                 };
             }
             state.popup_selected = 0;
@@ -909,7 +820,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 unreachable!()
             };
             if key.is_empty() {
-                core.messages.push(ChatMessage::system("Usage: /memo show <key>"));
+                core.messages
+                    .push(ChatMessage::system("Usage: /memo show <key>"));
             } else {
                 let msg = match_show_memo(core, &key);
                 core.messages.push(ChatMessage::system(msg));
@@ -951,7 +863,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 unreachable!()
             };
             if key.is_empty() {
-                core.messages.push(ChatMessage::system("Usage: /memo delete <key>"));
+                core.messages
+                    .push(ChatMessage::system("Usage: /memo delete <key>"));
             } else {
                 let msg = match_delete_memo(core, &key);
                 core.messages.push(ChatMessage::system(msg));
@@ -1026,7 +939,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
 
         "/reflect off" => {
             state.core.reflection.auto_reflect = false;
-            state.core.messages.push(ChatMessage::system("🔴 Reflection disabled."));
+            state
+                .core
+                .messages
+                .push(ChatMessage::system("🔴 Reflection disabled."));
             ui.input.clear();
             ui.input_cursor = 0;
             true
@@ -1040,10 +956,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             };
             if let Ok(n) = val.parse::<u8>() {
                 state.core.reflection.max_attempts = n;
-                state
-                    .core
-                    .messages
-                    .push(ChatMessage::system(format!("Reflection max retries set to {}.", n)));
+                state.core.messages.push(ChatMessage::system(format!(
+                    "Reflection max retries set to {}.",
+                    n
+                )));
             } else {
                 state.core.messages.push(ChatMessage::system(format!(
                     "Invalid number: {}. Usage: /reflect max <N>",
@@ -1084,7 +1000,11 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                         state.core.messages.push(ChatMessage::system(format!(
                             "Rule '{}' {}.",
                             rule_name,
-                            if enabled { "enabled ✓" } else { "disabled ✗" }
+                            if enabled {
+                                "enabled ✓"
+                            } else {
+                                "disabled ✗"
+                            }
                         )));
                     } else {
                         state.core.messages.push(ChatMessage::system(format!(
@@ -1147,14 +1067,7 @@ pub fn get_subcommand_items(cmd: &str) -> Option<&'static [(&'static str, &'stat
             ("list", "List all agents with status"),
             ("inspect", "Show agent detail by ID"),
         ]),
-        "/sessions" => Some(&[
-            ("list", "List saved sessions"),
-            ("save", "Save current session"),
-            ("switch", "Switch to a saved session"),
-            ("delete", "Delete a session"),
-        ]),
         "/sessions switch" => Some(&[("", "")]),
-        "/sessions delete" => Some(&[("", "")]),
         "/memo" => Some(&[
             ("list", "List role memos"),
             ("show", "Show a memo by key"),
@@ -1168,7 +1081,10 @@ pub fn get_subcommand_items(cmd: &str) -> Option<&'static [(&'static str, &'stat
 
 /// Generic dynamic item resolver — returns completion items for any parent command
 /// that takes dynamic arguments (e.g. role names, memo keys, etc.).
-pub fn resolve_dynamic_items(parent: &str, core: &crate::tui::state::CoreState) -> Vec<(String, String)> {
+pub fn resolve_dynamic_items(
+    parent: &str,
+    core: &crate::tui::state::CoreState,
+) -> Vec<(String, String)> {
     match parent {
         "/role default" | "/role show" | "/role edit" | "/role delete" | "/role optimize" => core
             .runtime
@@ -1189,7 +1105,7 @@ pub fn resolve_dynamic_items(parent: &str, core: &crate::tui::state::CoreState) 
                     .collect()
             })
             .unwrap_or_default(),
-        "/sessions switch" | "/sessions delete" => {
+        "/sessions switch" => {
             let sessions = crate::persistence::list_sessions();
             if sessions.is_empty() {
                 vec![]
@@ -1197,7 +1113,10 @@ pub fn resolve_dynamic_items(parent: &str, core: &crate::tui::state::CoreState) 
                 sessions
                     .into_iter()
                     .map(|name| {
-                        let label = format!("session: {}", name);
+                        let count = crate::persistence::load_session_as(&name)
+                            .map(|m| m.len())
+                            .unwrap_or(0);
+                        let label = format!("{} messages ({})", count, name);
                         (name, label)
                     })
                     .collect()
@@ -1231,8 +1150,11 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/agent", "Agent management (list/inspect)"),
     ("/sh", "Run a shell command"),
     ("/clear", "Clear conversation"),
-    ("/sessions", "Manage sessions (list/save/delete/switch)"),
-    ("/memo", "Role memo management (list/show/write/delete/roles)"),
+    ("/sessions", "Switch to a saved session"),
+    (
+        "/memo",
+        "Role memo management (list/show/write/delete/roles)",
+    ),
     ("/help", "Show help"),
 ];
 
@@ -1285,7 +1207,12 @@ fn match_list_memos(core: &crate::tui::state::CoreState) -> String {
         let preview = if m.value.len() > 80 {
             format!(
                 "{}...",
-                &m.value[..m.value.char_indices().nth(80).map(|(i, _)| i).unwrap_or(m.value.len())]
+                &m.value[..m
+                    .value
+                    .char_indices()
+                    .nth(80)
+                    .map(|(i, _)| i)
+                    .unwrap_or(m.value.len())]
             )
         } else {
             m.value.clone()
@@ -1351,7 +1278,12 @@ fn match_write_memo(core: &mut crate::tui::state::CoreState, key: &str, value: &
         timestamp: now,
     };
     pool.write_role_memo(&role, entry);
-    format!("Memo '{}' written ({} bytes) for role '{}'", key, value.len(), role)
+    format!(
+        "Memo '{}' written ({} bytes) for role '{}'",
+        key,
+        value.len(),
+        role
+    )
 }
 
 fn match_delete_memo(core: &mut crate::tui::state::CoreState, key: &str) -> String {
@@ -1387,7 +1319,10 @@ fn match_list_role_memos(core: &crate::tui::state::CoreState) -> String {
     for (role, memos) in role_memos.iter() {
         let count = memos.len();
         let total_bytes: usize = memos.iter().map(|m| m.value.len()).sum();
-        lines.push(format!("  '{}': {} memos, {} bytes", role, count, total_bytes));
+        lines.push(format!(
+            "  '{}': {} memos, {} bytes",
+            role, count, total_bytes
+        ));
     }
     lines.join("\n")
 }
@@ -1599,7 +1534,10 @@ mod tests {
         let mut state = AppState::default();
         dispatch("/sh", &mut state, "12:00:00");
         assert!(
-            matches!(state.popup_mode, crate::tui::state::PopupMode::ShellInput { .. }),
+            matches!(
+                state.popup_mode,
+                crate::tui::state::PopupMode::ShellInput { .. }
+            ),
             "/sh without args should open ShellInput popup, got {:?}",
             state.popup_mode
         );
@@ -1619,8 +1557,14 @@ mod tests {
         let mut state = AppState::default();
         dispatch("/role", &mut state, "12:00:00");
         if let PopupMode::SubCommand { items, .. } = &state.popup_mode {
-            let names: Vec<&str> = items.iter().map(|(n, _): &(String, String)| n.as_str()).collect();
-            assert!(names.contains(&"default"), "default subcommand missing in /role help");
+            let names: Vec<&str> = items
+                .iter()
+                .map(|(n, _): &(String, String)| n.as_str())
+                .collect();
+            assert!(
+                names.contains(&"default"),
+                "default subcommand missing in /role help"
+            );
         } else {
             panic!("Expected SubCommand popup");
         }

@@ -116,32 +116,37 @@ impl ExperiencePool {
             .open(&path)
             .context("Failed to open experience pool file")?;
 
-        let (entries, mmap, mmap_mut, capacity) = if file.metadata().is_ok_and(|m| m.len() >= HEADER_SIZE as u64) {
-            Self::load_from_file(&file)?
-        } else {
-            // New file – initialise empty.
-            let cap = DEFAULT_CAPACITY;
-            let total_size = HEADER_SIZE + cap * EXPERIENCE_SIZE;
-            file.set_len(total_size as u64)?;
+        let (entries, mmap, mmap_mut, capacity) =
+            if file.metadata().is_ok_and(|m| m.len() >= HEADER_SIZE as u64) {
+                Self::load_from_file(&file)?
+            } else {
+                // New file – initialise empty.
+                let cap = DEFAULT_CAPACITY;
+                let total_size = HEADER_SIZE + cap * EXPERIENCE_SIZE;
+                file.set_len(total_size as u64)?;
 
-            let mut mm = unsafe { MmapMut::map_mut(&file)? };
-            // Write header
-            let header = PoolHeader {
-                magic: MAGIC,
-                version: VERSION,
-                entry_size: EXPERIENCE_SIZE as u32,
-                capacity: cap as u32,
-                count: 0,
-                _pad: [0u8; 44],
+                let mut mm = unsafe { MmapMut::map_mut(&file)? };
+                // Write header
+                let header = PoolHeader {
+                    magic: MAGIC,
+                    version: VERSION,
+                    entry_size: EXPERIENCE_SIZE as u32,
+                    capacity: cap as u32,
+                    count: 0,
+                    _pad: [0u8; 44],
+                };
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        &header as *const PoolHeader as *const u8,
+                        mm.as_mut_ptr(),
+                        HEADER_SIZE,
+                    );
+                }
+                mm.flush()?;
+
+                let ro = mm.make_read_only()?;
+                (Vec::new(), Some(ro), None, cap)
             };
-            unsafe {
-                std::ptr::copy_nonoverlapping(&header as *const PoolHeader as *const u8, mm.as_mut_ptr(), HEADER_SIZE);
-            }
-            mm.flush()?;
-
-            let ro = mm.make_read_only()?;
-            (Vec::new(), Some(ro), None, cap)
-        };
 
         Ok(Self {
             path,
@@ -169,7 +174,8 @@ impl ExperiencePool {
 
         // Validate count against mmap file size — prevent UB from corrupted header.
         let file_bytes = ro.len();
-        let max_entries = file_bytes.saturating_sub(HEADER_SIZE) / std::mem::size_of::<ExperienceEntry>();
+        let max_entries =
+            file_bytes.saturating_sub(HEADER_SIZE) / std::mem::size_of::<ExperienceEntry>();
         let count = if count > max_entries {
             warn!(
                 "Experience pool header claims {} entries but file only fits {} – truncating",
@@ -180,8 +186,12 @@ impl ExperiencePool {
             count
         };
 
-        let entries: &[ExperienceEntry] =
-            unsafe { std::slice::from_raw_parts(ro.as_ptr().add(HEADER_SIZE) as *const ExperienceEntry, count) };
+        let entries: &[ExperienceEntry] = unsafe {
+            std::slice::from_raw_parts(
+                ro.as_ptr().add(HEADER_SIZE) as *const ExperienceEntry,
+                count,
+            )
+        };
 
         trace!(count, capacity, "Loaded experience pool from disk");
         Ok((entries.to_vec(), Some(ro), None, capacity))
@@ -237,7 +247,10 @@ impl ExperiencePool {
         scored.sort_by(|a, b| b.1.total_cmp(&a.1));
         scored.truncate(k);
 
-        scored.into_iter().map(|(i, s)| (self.entries[i].clone(), s)).collect()
+        scored
+            .into_iter()
+            .map(|(i, s)| (self.entries[i].clone(), s))
+            .collect()
     }
 
     /// Remove all entries and reset the file, truncating to initial capacity.
@@ -271,7 +284,10 @@ impl ExperiencePool {
         }
 
         // Get the mutable mmap.
-        let mm = self.mmap_mut.as_mut().expect("mmap_mut must exist after grow");
+        let mm = self
+            .mmap_mut
+            .as_mut()
+            .expect("mmap_mut must exist after grow");
 
         // Update header count.
         {
@@ -303,7 +319,10 @@ impl ExperiencePool {
         self._mmap.take();
 
         // Reopen file and set new length.
-        let file = std::fs::OpenOptions::new().read(true).write(true).open(&self.path)?;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.path)?;
         file.set_len(total_size as u64)?;
 
         let mut mm = unsafe { MmapMut::map_mut(&file)? };
@@ -318,7 +337,11 @@ impl ExperiencePool {
             _pad: [0u8; 44],
         };
         unsafe {
-            std::ptr::copy_nonoverlapping(&header as *const PoolHeader as *const u8, mm.as_mut_ptr(), HEADER_SIZE);
+            std::ptr::copy_nonoverlapping(
+                &header as *const PoolHeader as *const u8,
+                mm.as_mut_ptr(),
+                HEADER_SIZE,
+            );
         }
 
         // Copy existing entries.
@@ -499,7 +522,11 @@ mod tests {
         }
 
         // Corrupt the header: set count to a huge number
-        let mut file = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
         let _header_size = std::mem::size_of::<PoolHeader>();
 
         // Write a bogus count (999999) at the count field offset

@@ -61,7 +61,9 @@ impl PlanRegistry {
         let q = query.to_lowercase();
         self.plans
             .values()
-            .filter(|e| e.plan_name.to_lowercase().contains(&q) || e.goal.to_lowercase().contains(&q))
+            .filter(|e| {
+                e.plan_name.to_lowercase().contains(&q) || e.goal.to_lowercase().contains(&q)
+            })
             .collect()
     }
 
@@ -278,7 +280,11 @@ impl Plan {
     /// Returns `Some((marker, text))` or `None`.
     fn parse_checkbox(s: &str) -> Option<(String, &str)> {
         let s = s.trim_start();
-        if s.len() >= 6 && s.as_bytes()[0] == b'-' && s.as_bytes()[1] == b' ' && s.as_bytes()[2] == b'[' {
+        if s.len() >= 6
+            && s.as_bytes()[0] == b'-'
+            && s.as_bytes()[1] == b' '
+            && s.as_bytes()[2] == b'['
+        {
             let checked = s.as_bytes()[3] == b'x' || s.as_bytes()[3] == b'X';
             if s.as_bytes().get(4) == Some(&b']') && s.as_bytes().get(5) == Some(&b' ') {
                 let marker = if checked { "☑" } else { "☐" };
@@ -360,7 +366,9 @@ impl Plan {
             let pattern = format!("@{}", role);
             if let Some(pos) = line.find(&pattern) {
                 let after_role = line[pos + pattern.len()..].trim();
-                let goal_start = after_role.find('"').or_else(|| after_role.find('\u{201c}'))?;
+                let goal_start = after_role
+                    .find('"')
+                    .or_else(|| after_role.find('\u{201c}'))?;
                 // Use char-based advance — the found quote may be multi-byte UTF-8.
                 let quote = after_role[goal_start..].chars().next()?;
                 let closing = match quote {
@@ -416,7 +424,8 @@ impl Plan {
     }
 
     pub fn is_executable(&self) -> bool {
-        self.status == PlanStatus::Approved && self.tasks.iter().any(|t| t.status == TaskStatus::Pending)
+        self.status == PlanStatus::Approved
+            && self.tasks.iter().any(|t| t.status == TaskStatus::Pending)
     }
 
     /// Execute a plan by creating an agent for each task and running it.
@@ -424,7 +433,11 @@ impl Plan {
     /// NOTE: This function is preserved for future use but is NOT currently
     /// called from anywhere in the codebase. When wired up, a `model_id`
     /// must be provided — `AgentConfig::default()` has an empty `model_id`.
-    pub async fn execute_plan(plan: &mut Plan, model_id: &str, agent_pool: &Arc<RwLock<AgentPool>>) -> Result<()> {
+    pub async fn execute_plan(
+        plan: &mut Plan,
+        model_id: &str,
+        agent_pool: &Arc<RwLock<AgentPool>>,
+    ) -> Result<()> {
         plan.status = PlanStatus::Executing;
 
         while let Some(task) = plan.next_task() {
@@ -454,6 +467,7 @@ impl Plan {
                     tokens_input: 0,
                     tokens_output: 0,
                     tool_trace: std::collections::VecDeque::new(),
+                    inbox: std::collections::VecDeque::new(),
                     sandbox: None,
                 };
                 let agent_id = agent.id;
@@ -514,7 +528,11 @@ impl Plan {
     }
 
     pub fn summary(&self) -> String {
-        let completed = self.tasks.iter().filter(|t| t.status == TaskStatus::Completed).count();
+        let completed = self
+            .tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Completed)
+            .count();
         let total = self.tasks.len();
         format!(
             "[{}/{}] {}",
@@ -581,7 +599,8 @@ mod tests {
 
     #[test]
     fn test_parse_plan_with_headers() {
-        let response = "## Phase 1\n- Setup environment\n- Install deps\n\n## Phase 2\n- Run tests\n- Deploy";
+        let response =
+            "## Phase 1\n- Setup environment\n- Install deps\n\n## Phase 2\n- Run tests\n- Deploy";
         let plan = Plan::parse_from_response(response).unwrap();
         assert_eq!(plan.tasks.len(), 4);
         assert!(plan.tasks[0].description.contains("Phase 1"));
@@ -601,7 +620,10 @@ mod tests {
         let response = "- Main task\n  with detail\n  and more\n- Next task";
         let plan = Plan::parse_from_response(response).unwrap();
         assert_eq!(plan.tasks.len(), 2);
-        assert_eq!(plan.tasks[0].description, "Main task\nwith detail\nand more");
+        assert_eq!(
+            plan.tasks[0].description,
+            "Main task\nwith detail\nand more"
+        );
     }
 
     #[test]

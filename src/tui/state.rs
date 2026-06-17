@@ -123,7 +123,6 @@ pub struct CoreState {
     /// Channel sender to the background [`RuntimeEventLoop`].
     /// Tools use this to dispatch async work without blocking the LLM stream.
     pub runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
-
 }
 
 /// Transient UI state — reset on restart.
@@ -282,8 +281,13 @@ impl AppState {
                     },
                 });
             }
-            AppEvent::ChatToken { response_index, text } => {
-                if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
+            AppEvent::ChatToken {
+                response_index,
+                text,
+            } => {
+                if let Some(slot) =
+                    find_streaming_slot_response(&self.core.messages, response_index)
+                {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
                         let was_thinking = msg.status == MessageStatus::Thinking;
                         msg.content.push_str(&text);
@@ -304,13 +308,18 @@ impl AppState {
                 input,
                 runtime,
             } => {
-                if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
+                if let Some(slot) =
+                    find_streaming_slot_response(&self.core.messages, response_index)
+                {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
                         // Don't overwrite content — it was already accumulated via
                         // ChatToken (text) and ChatToolCall (tool call lines) events
                         // during streaming. Overwriting would erase the tool call
                         // entries that were appended to the message content.
-                        if matches!(msg.status, MessageStatus::Thinking | MessageStatus::Streaming) {
+                        if matches!(
+                            msg.status,
+                            MessageStatus::Thinking | MessageStatus::Streaming
+                        ) {
                             msg.status = MessageStatus::Completed;
                         }
                     }
@@ -322,7 +331,13 @@ impl AppState {
 
                 // ── Trigger self-check reflection if enabled ──
                 if self.core.reflection.auto_reflect {
-                    self.trigger_self_check(response_index, request_id, full_response.clone(), &input, &runtime);
+                    self.trigger_self_check(
+                        response_index,
+                        request_id,
+                        full_response.clone(),
+                        &input,
+                        &runtime,
+                    );
                 }
 
                 // ── Save exchange to responsible agent's context ──
@@ -367,7 +382,9 @@ impl AppState {
                 request_id: _,
                 error,
             } => {
-                if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
+                if let Some(slot) =
+                    find_streaming_slot_response(&self.core.messages, response_index)
+                {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
                         msg.content = error;
                         msg.status = MessageStatus::Error;
@@ -381,7 +398,9 @@ impl AppState {
                 response_index,
                 request_id: _,
             } => {
-                if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
+                if let Some(slot) =
+                    find_streaming_slot_response(&self.core.messages, response_index)
+                {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
                         msg.content += " (cancelled)";
                         msg.status = MessageStatus::Completed;
@@ -451,7 +470,11 @@ impl AppState {
                 // Tool call: "name — args" format.
                 // Truncate long args at a safe char boundary (preserve original newlines).
                 let args_trunc = if args.len() > 200 {
-                    let end = args.char_indices().nth(197).map(|(i, _)| i).unwrap_or(args.len());
+                    let end = args
+                        .char_indices()
+                        .nth(197)
+                        .map(|(i, _)| i)
+                        .unwrap_or(args.len());
                     format!("{}…", &args[..end])
                 } else {
                     args
@@ -462,7 +485,9 @@ impl AppState {
                     format!("{} — {}", name, args_trunc)
                 };
 
-                if let Some(slot) = find_streaming_slot_response(&self.core.messages, response_index) {
+                if let Some(slot) =
+                    find_streaming_slot_response(&self.core.messages, response_index)
+                {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
                         if !msg.content.is_empty() {
                             msg.content.push('\n');
@@ -511,7 +536,10 @@ impl AppState {
 
                 let new_attempt = attempt + 1;
                 let now = chrono::Local::now().format("%H:%M:%S").to_string();
-                let feedback_msg = format!("🔄 Reflection #{} — revisiting response\n\n{}", new_attempt, feedback);
+                let feedback_msg = format!(
+                    "🔄 Reflection #{} — revisiting response\n\n{}",
+                    new_attempt, feedback
+                );
                 self.core.messages.push(ChatMessage {
                     role: MessageRole::System,
                     content: feedback_msg,
@@ -537,7 +565,8 @@ impl AppState {
                 self.ui.active_chat_requests = 1;
                 self.ui.auto_scroll = true;
 
-                let (abort_handle, new_abort_registration) = futures::future::AbortHandle::new_pair();
+                let (abort_handle, new_abort_registration) =
+                    futures::future::AbortHandle::new_pair();
                 self.ui.active_chat_abort = Some(abort_handle);
 
                 self.core.last_chat_request_id = request_id;
@@ -608,7 +637,10 @@ impl AppState {
     /// Get capabilities for the currently selected model (if any).
     pub fn model_capabilities(&self) -> Option<ModelCapabilities> {
         let sel = self.core.selected_models.first()?;
-        let model = self.core.models.get_model(&sel.provider_id, &sel.model_id)?;
+        let model = self
+            .core
+            .models
+            .get_model(&sel.provider_id, &sel.model_id)?;
         Some(model.capabilities())
     }
 
@@ -679,8 +711,13 @@ impl AppState {
         &self,
         _runtime: &Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
         _input: &str,
-    ) -> (Option<std::sync::Arc<crate::llm::LlmProvider>>, String, String) {
-        let default_tool_prompt = "Must follow user instructions and use available tools. Remember preferences";
+    ) -> (
+        Option<std::sync::Arc<crate::llm::LlmProvider>>,
+        String,
+        String,
+    ) {
+        let default_tool_prompt =
+            "Must follow user instructions and use available tools. Remember preferences";
 
         let provider = self
             .core
@@ -701,7 +738,12 @@ impl AppState {
         // Fallback: build from selected_models if runtime provider unavailable
         let provider = provider.or_else(|| {
             self.core.selected_models.first().and_then(|sel| {
-                if self.core.configured_providers.iter().any(|id| id == &sel.provider_id) {
+                if self
+                    .core
+                    .configured_providers
+                    .iter()
+                    .any(|id| id == &sel.provider_id)
+                {
                     // Try to get existing client
                     self.core
                         .provider_clients

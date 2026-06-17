@@ -66,7 +66,10 @@ impl RuntimeEventLoop {
     pub async fn run(mut self) {
         while let Some(event) = self.event_rx.recv().await {
             match event {
-                RuntimeEvent::ActivateAgent { agent_id, parent_id } => {
+                RuntimeEvent::ActivateAgent {
+                    agent_id,
+                    parent_id,
+                } => {
                     // Spawn in background — the event loop must NOT block
                     // on LLM calls; siblings must execute concurrently.
                     let rt = self.runtime.clone();
@@ -75,7 +78,8 @@ impl RuntimeEventLoop {
                     let bt = self.broker_tx.clone();
                     let st = self.state.clone();
                     tokio::spawn(async move {
-                        Self::handle_activate_inner(rt, pool, ts, bt, st, agent_id, parent_id).await;
+                        Self::handle_activate_inner(rt, pool, ts, bt, st, agent_id, parent_id)
+                            .await;
                     });
                 }
                 other => {
@@ -103,15 +107,22 @@ impl RuntimeEventLoop {
             p.get_agent(&agent_id).and_then(|a| a.sandbox.clone())
         };
         let tool_handle = match (&agent_sandbox, &state) {
-            (Some(sb), Some(st)) => crate::tools::create_sandboxed_agent_tool_server(st.clone(), Some(sb.clone())),
+            (Some(sb), Some(st)) => {
+                crate::tools::create_sandboxed_agent_tool_server(st.clone(), Some(sb.clone()))
+            }
             _ => tool_server.clone(),
         };
 
         // Execute the agent (LLM call + tools) without holding the runtime
         // read lock.  This allows other tasks (e.g. pool consolidation) to
         // acquire a write lock while the LLM request is in-flight.
-        let (result, status) =
-            AgentRuntime::execute_agent_detached(runtime.clone(), agent_id, pool.clone(), Some(tool_handle)).await;
+        let (result, status) = AgentRuntime::execute_agent_detached(
+            runtime.clone(),
+            agent_id,
+            pool.clone(),
+            Some(tool_handle),
+        )
+        .await;
 
         // Report completion.
         match status {
@@ -130,7 +141,13 @@ impl RuntimeEventLoop {
                             result: result.clone(),
                         })
                         .await;
-                    Self::maybe_advance_parent_inner(runtime.clone(), pool.clone(), broker_tx.clone(), pid).await;
+                    Self::maybe_advance_parent_inner(
+                        runtime.clone(),
+                        pool.clone(),
+                        broker_tx.clone(),
+                        pid,
+                    )
+                    .await;
                 }
             }
             AgentStatus::Failed => {
@@ -139,7 +156,9 @@ impl RuntimeEventLoop {
                 } else {
                     result
                 };
-                let _ = broker_tx.send(RuntimeEvent::AgentFailed { agent_id, error }).await;
+                let _ = broker_tx
+                    .send(RuntimeEvent::AgentFailed { agent_id, error })
+                    .await;
             }
             _ => {}
         }
@@ -221,7 +240,11 @@ impl RuntimeEventLoop {
                                 e
                             )
                         } else {
-                            let parts: Vec<String> = agent.child_results.iter().map(|(_id, r)| r.clone()).collect();
+                            let parts: Vec<String> = agent
+                                .child_results
+                                .iter()
+                                .map(|(_id, r)| r.clone())
+                                .collect();
                             format!(
                                 "⚠️ Aggregation synthesis failed ({}).  Raw sub-task results:\n\n---\n{}\n\n---\n*Degraded output*",
                                 e,
@@ -277,6 +300,7 @@ mod tests {
             tokens_input: 0,
             tokens_output: 0,
             tool_trace: std::collections::VecDeque::new(),
+            inbox: std::collections::VecDeque::new(),
             sandbox: None,
         }
     }

@@ -56,7 +56,12 @@ impl LlmProvider {
         Ok(response)
     }
 
-    pub async fn chat_stream(&self, model: &str, system: &str, message: &str) -> Result<ChatStream> {
+    pub async fn chat_stream(
+        &self,
+        model: &str,
+        system: &str,
+        message: &str,
+    ) -> Result<ChatStream> {
         self.do_chat_stream(model, system, message, &[]).await
     }
 
@@ -122,31 +127,49 @@ impl LlmProvider {
         let history = Self::build_history(history);
         match self {
             Self::OpenAi(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+                build_chat_agent!(c, model, system)
+                    .stream_chat(message, history)
+                    .await,
             )),
             Self::Anthropic(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+                build_chat_agent!(c, model, system)
+                    .stream_chat(message, history)
+                    .await,
             )),
             Self::Cohere(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+                build_chat_agent!(c, model, system)
+                    .stream_chat(message, history)
+                    .await,
             )),
             Self::Gemini(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+                build_chat_agent!(c, model, system)
+                    .stream_chat(message, history)
+                    .await,
             )),
             Self::Mistral(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+                build_chat_agent!(c, model, system)
+                    .stream_chat(message, history)
+                    .await,
             )),
             Self::Ollama(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+                build_chat_agent!(c, model, system)
+                    .stream_chat(message, history)
+                    .await,
             )),
             Self::Llamafile(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+                build_chat_agent!(c, model, system)
+                    .stream_chat(message, history)
+                    .await,
             )),
             Self::Azure(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+                build_chat_agent!(c, model, system)
+                    .stream_chat(message, history)
+                    .await,
             )),
             Self::Copilot(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system).stream_chat(message, history).await,
+                build_chat_agent!(c, model, system)
+                    .stream_chat(message, history)
+                    .await,
             )),
         }
     }
@@ -264,7 +287,10 @@ mod tests {
 
     #[test]
     fn test_tool_event_token_usage() {
-        let event = ToolEvent::TokenUsage { input: 150, output: 75 };
+        let event = ToolEvent::TokenUsage {
+            input: 150,
+            output: 75,
+        };
         match event {
             ToolEvent::TokenUsage { input, output } => {
                 assert_eq!(input, 150);

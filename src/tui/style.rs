@@ -129,7 +129,9 @@ pub fn input_bar<'a>(active: bool) -> Block<'a> {
         .border_style(Style::default().fg(border_color))
         .title(Span::styled(
             " Input ",
-            Style::default().fg(border_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(border_color)
+                .add_modifier(Modifier::BOLD),
         ))
 }
 
@@ -156,7 +158,11 @@ pub fn render_separator(f: &mut Frame, area: Rect) {
     let width = area.width as usize;
     if width > 0 {
         f.render_widget(
-            Paragraph::new(Span::styled("─".repeat(width), Style::default().fg(TEXT_MUTED))).wrap(Wrap { trim: false }),
+            Paragraph::new(Span::styled(
+                "─".repeat(width),
+                Style::default().fg(TEXT_MUTED),
+            ))
+            .wrap(Wrap { trim: false }),
             area,
         );
     }

@@ -28,7 +28,11 @@ impl L1Retriever {
         self.experiences.push(entry);
     }
 
-    pub fn retrieve(&self, query_embedding: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(&ExperienceEntry, f32)> {
+    pub fn retrieve(
+        &self,
+        query_embedding: &[f32; EMBEDDING_DIM],
+        k: usize,
+    ) -> Vec<(&ExperienceEntry, f32)> {
         let mut scored: Vec<(&ExperienceEntry, f32)> = self
             .experiences
             .iter()
@@ -162,7 +166,12 @@ pub trait ExperienceRetrieval: Send + Sync {
     }
 
     /// Search by role ID — only experiences with matching role_template_id.
-    fn search_by_role(&self, query: &[f32; EMBEDDING_DIM], _role_id: u32, k: usize) -> Vec<(ExperienceEntry, f32)> {
+    fn search_by_role(
+        &self,
+        query: &[f32; EMBEDDING_DIM],
+        _role_id: u32,
+        k: usize,
+    ) -> Vec<(ExperienceEntry, f32)> {
         // Default: fall back to regular search (no role filter).
         self.retrieve(query, k)
     }
@@ -188,7 +197,12 @@ impl ExperienceRetrieval for L1Retriever {
         role_template_id: Option<u32>,
         role_min_experiences: Option<usize>,
     ) -> Result<L1Assessment, SpawnRejection> {
-        self.check_confidence(task_embedding, role_embedding, role_template_id, role_min_experiences)
+        self.check_confidence(
+            task_embedding,
+            role_embedding,
+            role_template_id,
+            role_min_experiences,
+        )
     }
 
     fn add_experience(&mut self, entry: ExperienceEntry) {
@@ -204,7 +218,11 @@ impl ExperienceRetrieval for L1Retriever {
 mod tests {
     use super::*;
 
-    fn make_experience(embedding: [f32; EMBEDDING_DIM], weight: f32, tools: u64) -> ExperienceEntry {
+    fn make_experience(
+        embedding: [f32; EMBEDDING_DIM],
+        weight: f32,
+        tools: u64,
+    ) -> ExperienceEntry {
         ExperienceEntry {
             embedding,
             applicability_vector: [0.0f32; 128],

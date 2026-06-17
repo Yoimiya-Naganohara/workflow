@@ -50,10 +50,12 @@ impl TaskResourceState {
                 return None;
             }
             let new = current - requested as i64;
-            match self
-                .remaining_budget
-                .compare_exchange_weak(current, new, Ordering::AcqRel, Ordering::Acquire)
-            {
+            match self.remaining_budget.compare_exchange_weak(
+                current,
+                new,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
                 Ok(_) => return Some(requested),
                 Err(actual) => {
                     current = actual;
@@ -72,10 +74,12 @@ impl TaskResourceState {
                 return Err(current);
             }
             let new = current | tool_bitmap;
-            match self
-                .tool_bitmap
-                .compare_exchange_weak(current, new, Ordering::AcqRel, Ordering::Acquire)
-            {
+            match self.tool_bitmap.compare_exchange_weak(
+                current,
+                new,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
                 Ok(_) => return Ok(()),
                 Err(actual) => {
                     current = actual;
@@ -87,7 +91,8 @@ impl TaskResourceState {
     }
 
     pub fn release_budget(&self, amount: u64) {
-        self.remaining_budget.fetch_add(amount as i64, Ordering::AcqRel);
+        self.remaining_budget
+            .fetch_add(amount as i64, Ordering::AcqRel);
     }
 
     pub fn release_tools(&self, tool_bitmap: u64) {
@@ -178,7 +183,12 @@ impl BudgetGuard {
     ///
     /// Unlike [`BudgetGuard::new`], this does **not** re-acquire budget or
     /// tools — it takes ownership directly.
-    pub fn from_permit(task_id: TaskId, amount: u64, state: Arc<TaskResourceState>, tools: u64) -> Self {
+    pub fn from_permit(
+        task_id: TaskId,
+        amount: u64,
+        state: Arc<TaskResourceState>,
+        tools: u64,
+    ) -> Self {
         Self {
             root_task_id: task_id,
             amount,
@@ -230,13 +240,13 @@ impl L0CircuitBreaker {
         // that atomically enforces the limit. An early check would only provide a stale
         // error message, not prevent overshoot.
 
-        let allocated =
-            self.resource_state
-                .try_acquire_budget(requested_budget)
-                .ok_or(SpawnRejection::BudgetExhausted {
-                    requested: requested_budget,
-                    remaining: self.resource_state.remaining_budget.load(Ordering::Acquire),
-                })?;
+        let allocated = self
+            .resource_state
+            .try_acquire_budget(requested_budget)
+            .ok_or(SpawnRejection::BudgetExhausted {
+                requested: requested_budget,
+                remaining: self.resource_state.remaining_budget.load(Ordering::Acquire),
+            })?;
 
         if requested_tools != 0
             && let Err(_holder_bitmap) = self.resource_state.try_acquire_tools(requested_tools)
@@ -256,7 +266,10 @@ impl L0CircuitBreaker {
             }
             return Err(SpawnRejection::DepthExceeded {
                 current: self.resource_state.current_depth.load(Ordering::Acquire),
-                max: self.resource_state.max_dynamic_depth.load(Ordering::Acquire),
+                max: self
+                    .resource_state
+                    .max_dynamic_depth
+                    .load(Ordering::Acquire),
             });
         }
         self.resource_state.increment_spawned();
@@ -547,8 +560,12 @@ mod tests {
         let state = TaskResourceState::new(1000, 2);
         let breaker = L0CircuitBreaker::new(state);
         // First two acquisitions should succeed (depth 0→1, 1→2)
-        let p1 = breaker.try_acquire(100, 0, 0).expect("first acquire should succeed");
-        let p2 = breaker.try_acquire(100, 1, 0).expect("second acquire should succeed");
+        let p1 = breaker
+            .try_acquire(100, 0, 0)
+            .expect("first acquire should succeed");
+        let p2 = breaker
+            .try_acquire(100, 1, 0)
+            .expect("second acquire should succeed");
         // Both permits held — third attempt should fail at increment_depth
         assert!(
             matches!(

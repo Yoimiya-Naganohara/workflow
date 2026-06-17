@@ -59,7 +59,10 @@ impl RoleTemplateStore {
     /// This is safe to call multiple times — it only writes when the
     /// store is empty.
     pub fn seed_if_empty(&self, defaults: Vec<RoleTemplate>) {
-        let mut guard = self.templates.write().expect("role template store poisoned");
+        let mut guard = self
+            .templates
+            .write()
+            .expect("role template store poisoned");
         if !guard.is_empty() {
             return;
         }
@@ -78,7 +81,11 @@ impl RoleTemplateStore {
     ///
     /// Returns `Some(template)` if the best match exceeds `threshold`.
     /// Templates with `embedding = None` are skipped.
-    pub fn find_closest(&self, query: &[f32; EMBEDDING_DIM], threshold: f32) -> Option<RoleTemplate> {
+    pub fn find_closest(
+        &self,
+        query: &[f32; EMBEDDING_DIM],
+        threshold: f32,
+    ) -> Option<RoleTemplate> {
         let guard = self.templates.read().expect("role template store poisoned");
         let mut best: Option<(f32, RoleTemplate)> = None;
 
@@ -104,7 +111,10 @@ impl RoleTemplateStore {
     /// Returns `true` if an existing template was updated, `false` if a new
     /// one was inserted.
     pub fn upsert(&self, template: RoleTemplate) -> bool {
-        let mut guard = self.templates.write().expect("role template store poisoned");
+        let mut guard = self
+            .templates
+            .write()
+            .expect("role template store poisoned");
         let id = template.template_id;
         if let Some(pos) = guard.iter().position(|t| t.template_id == id) {
             guard[pos] = template;
@@ -133,7 +143,10 @@ impl RoleTemplateStore {
     /// Delete a template by its ID.
     /// Silently succeeds if the ID does not exist.
     pub fn delete_by_id(&self, template_id: u32) {
-        let mut guard = self.templates.write().expect("role template store poisoned");
+        let mut guard = self
+            .templates
+            .write()
+            .expect("role template store poisoned");
         guard.retain(|t| t.template_id != template_id);
         self.persist_impl(&guard);
     }

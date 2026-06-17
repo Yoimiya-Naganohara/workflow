@@ -143,7 +143,10 @@ mod tests {
         assert!((L1_VALUE_WEIGHT - 0.25).abs() < f32::EPSILON);
         assert!((L1_RECENCY_WEIGHT - 0.15).abs() < f32::EPSILON);
         let sum = L1_TASK_WEIGHT + L1_ROLE_WEIGHT + L1_VALUE_WEIGHT + L1_RECENCY_WEIGHT;
-        assert!((sum - 1.0).abs() < f32::EPSILON, "L1 weights should sum to 1.0");
+        assert!(
+            (sum - 1.0).abs() < f32::EPSILON,
+            "L1 weights should sum to 1.0"
+        );
     }
 
     #[test]

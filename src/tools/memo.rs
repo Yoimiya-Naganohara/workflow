@@ -56,12 +56,18 @@ impl MemoToolDeps {
 
     /// Read the current responsible agent ID from the AppState.
     fn responsible_agent_id(&self) -> Option<AgentId> {
-        self.state.try_read().ok().and_then(|s| s.core.responsible_agent_id)
+        self.state
+            .try_read()
+            .ok()
+            .and_then(|s| s.core.responsible_agent_id)
     }
 }
 
 /// Register all memo tools on a `ToolServer`.
-pub fn register_memo_tools(server: crate::tools::ToolServer, deps: MemoToolDeps) -> crate::tools::ToolServer {
+pub fn register_memo_tools(
+    server: crate::tools::ToolServer,
+    deps: MemoToolDeps,
+) -> crate::tools::ToolServer {
     let deps = Arc::new(deps);
     server
         .tool(WriteMemo { deps: deps.clone() })
@@ -126,14 +132,9 @@ impl Tool for WriteMemo {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "Write a key-value memo for the current agent's role. ",
-                "Memos are a scratchpad/notepad for storing intermediate findings, ",
-                "decisions, or context. If the key already exists, it is overwritten. ",
-                "Use list_memos to see all keys, read_memo to read a value, ",
-                "and delete_memo to remove an entry."
-            )
-            .into(),
+            description:
+                "Write a key-value memo for the current agent's role. Overwrites if key exists."
+                    .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -222,12 +223,7 @@ impl Tool for ReadMemo {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "Read a memo entry by key. ",
-                "Returns the value and timestamp if found. ",
-                "Returns error if the key does not exist."
-            )
-            .into(),
+            description: "Read a memo entry by key. Returns value and timestamp.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -246,10 +242,11 @@ impl Tool for ReadMemo {
             return Err(ToolCallError("memo key cannot be empty".to_string()));
         }
 
-        let (_, _, role) = find_agent_info(&self.deps).ok_or_else(|| ToolCallError("No active agent".to_string()))?;
+        let (_, _, role) = find_agent_info(&self.deps)
+            .ok_or_else(|| ToolCallError("No active agent".to_string()))?;
 
-        let memos =
-            get_role_memos_cloned(&self.deps, &role).ok_or_else(|| ToolCallError("Agent pool locked".to_string()))?;
+        let memos = get_role_memos_cloned(&self.deps, &role)
+            .ok_or_else(|| ToolCallError("Agent pool locked".to_string()))?;
 
         match memos.iter().find(|m| m.key == args.key) {
             Some(entry) => {
@@ -299,12 +296,7 @@ impl Tool for ListMemos {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "List all memo keys for the current agent's role. ",
-                "Optionally filter by a prefix. ",
-                "Returns key, value length, and age for each memo."
-            )
-            .into(),
+            description: "List all memos for the current role. Optionally filter by prefix.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -320,11 +312,11 @@ impl Tool for ListMemos {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let (_, _agent_name, role) =
-            find_agent_info(&self.deps).ok_or_else(|| ToolCallError("No active agent".to_string()))?;
+        let (_, _agent_name, role) = find_agent_info(&self.deps)
+            .ok_or_else(|| ToolCallError("No active agent".to_string()))?;
 
-        let memos =
-            get_role_memos_cloned(&self.deps, &role).ok_or_else(|| ToolCallError("Agent pool locked".to_string()))?;
+        let memos = get_role_memos_cloned(&self.deps, &role)
+            .ok_or_else(|| ToolCallError("Agent pool locked".to_string()))?;
 
         let now = now_secs();
         let mut entries: Vec<MemoEntry> = memos.into_iter().collect();
@@ -397,11 +389,7 @@ impl Tool for DeleteMemo {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "Delete a memo entry by key. ",
-                "Returns a confirmation or an error if the key does not exist."
-            )
-            .into(),
+            description: "Delete a memo entry by key.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -468,9 +456,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_memo_empty_key_rejected() {
-        let state = Arc::new(tokio::sync::RwLock::new(crate::tui::state::AppState::default()));
+        let state = Arc::new(tokio::sync::RwLock::new(
+            crate::tui::state::AppState::default(),
+        ));
         let deps = MemoToolDeps::from_state(&state);
-        let tool = WriteMemo { deps: Arc::new(deps) };
+        let tool = WriteMemo {
+            deps: Arc::new(deps),
+        };
         let result = tool
             .call(WriteMemoArgs {
                 key: "".to_string(),
@@ -483,9 +475,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_memo_value_too_large_rejected() {
-        let state = Arc::new(tokio::sync::RwLock::new(crate::tui::state::AppState::default()));
+        let state = Arc::new(tokio::sync::RwLock::new(
+            crate::tui::state::AppState::default(),
+        ));
         let deps = MemoToolDeps::from_state(&state);
-        let tool = WriteMemo { deps: Arc::new(deps) };
+        let tool = WriteMemo {
+            deps: Arc::new(deps),
+        };
         let result = tool
             .call(WriteMemoArgs {
                 key: "key".to_string(),
@@ -498,9 +494,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_memo_value_at_max_size_accepted() {
-        let state = Arc::new(tokio::sync::RwLock::new(crate::tui::state::AppState::default()));
+        let state = Arc::new(tokio::sync::RwLock::new(
+            crate::tui::state::AppState::default(),
+        ));
         let deps = MemoToolDeps::from_state(&state);
-        let tool = WriteMemo { deps: Arc::new(deps) };
+        let tool = WriteMemo {
+            deps: Arc::new(deps),
+        };
         let result = tool
             .call(WriteMemoArgs {
                 key: "key".to_string(),
@@ -517,19 +517,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_memo_empty_key_rejected() {
-        let state = Arc::new(tokio::sync::RwLock::new(crate::tui::state::AppState::default()));
+        let state = Arc::new(tokio::sync::RwLock::new(
+            crate::tui::state::AppState::default(),
+        ));
         let deps = MemoToolDeps::from_state(&state);
-        let tool = ReadMemo { deps: Arc::new(deps) };
-        let result = tool.call(ReadMemoArgs { key: "".to_string() }).await;
+        let tool = ReadMemo {
+            deps: Arc::new(deps),
+        };
+        let result = tool
+            .call(ReadMemoArgs {
+                key: "".to_string(),
+            })
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("empty"));
     }
 
     #[tokio::test]
     async fn test_read_memo_no_active_agent() {
-        let state = Arc::new(tokio::sync::RwLock::new(crate::tui::state::AppState::default()));
+        let state = Arc::new(tokio::sync::RwLock::new(
+            crate::tui::state::AppState::default(),
+        ));
         let deps = MemoToolDeps::from_state(&state);
-        let tool = ReadMemo { deps: Arc::new(deps) };
+        let tool = ReadMemo {
+            deps: Arc::new(deps),
+        };
         let result = tool
             .call(ReadMemoArgs {
                 key: "some-key".to_string(),
@@ -543,10 +555,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_memo_empty_key_rejected() {
-        let state = Arc::new(tokio::sync::RwLock::new(crate::tui::state::AppState::default()));
+        let state = Arc::new(tokio::sync::RwLock::new(
+            crate::tui::state::AppState::default(),
+        ));
         let deps = MemoToolDeps::from_state(&state);
-        let tool = DeleteMemo { deps: Arc::new(deps) };
-        let result = tool.call(DeleteMemoArgs { key: "".to_string() }).await;
+        let tool = DeleteMemo {
+            deps: Arc::new(deps),
+        };
+        let result = tool
+            .call(DeleteMemoArgs {
+                key: "".to_string(),
+            })
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("empty"));
     }
@@ -555,7 +575,9 @@ mod tests {
 
     #[test]
     fn test_memo_tool_deps_from_state_default() {
-        let state = Arc::new(tokio::sync::RwLock::new(crate::tui::state::AppState::default()));
+        let state = Arc::new(tokio::sync::RwLock::new(
+            crate::tui::state::AppState::default(),
+        ));
         let deps = MemoToolDeps::from_state(&state);
         assert!(deps.responsible_agent_id().is_none());
     }

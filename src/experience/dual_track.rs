@@ -119,7 +119,10 @@ impl FluidTrack {
         scored.sort_by(|a, b| b.1.total_cmp(&a.1));
         scored.truncate(k);
 
-        scored.into_iter().map(|(i, s)| (self.entries[i].clone(), s)).collect()
+        scored
+            .into_iter()
+            .map(|(i, s)| (self.entries[i].clone(), s))
+            .collect()
     }
 }
 
@@ -282,9 +285,11 @@ impl DualTrackMemory {
         }
 
         let fluid_entries = self.fluid.drain_all();
-        let representatives =
-            self.consolidator
-                .consolidate(&fluid_entries, self.min_cluster_size, self.consolidated_weight);
+        let representatives = self.consolidator.consolidate(
+            &fluid_entries,
+            self.min_cluster_size,
+            self.consolidated_weight,
+        );
 
         if !representatives.is_empty() {
             trace!(
@@ -385,7 +390,9 @@ impl DualTrackMemory {
         let task_score = Self::aggregate_top_k(&task_matches, now);
         let role_score = Self::aggregate_top_k(&role_matches, now);
 
-        let role_count = role_template_id.map(|id| self.count_by_role(id)).unwrap_or(0);
+        let role_count = role_template_id
+            .map(|id| self.count_by_role(id))
+            .unwrap_or(0);
 
         // Few experiences → unconditional pass with all tools.
         // Enough experiences → use real similarity data.
@@ -419,7 +426,12 @@ impl DualTrackMemory {
     }
 
     /// Search by role ID — only return experiences with matching role_template_id.
-    pub fn search_by_role(&self, query: &[f32; EMBEDDING_DIM], role_id: u32, k: usize) -> Vec<(ExperienceEntry, f32)> {
+    pub fn search_by_role(
+        &self,
+        query: &[f32; EMBEDDING_DIM],
+        role_id: u32,
+        k: usize,
+    ) -> Vec<(ExperienceEntry, f32)> {
         let mut results = Vec::new();
 
         // Bedrock: filter by role, then score × credibility.
@@ -542,7 +554,12 @@ impl crate::l1::ExperienceRetrieval for DualTrackMemory {
         role_template_id: Option<u32>,
         role_min_experiences: Option<usize>,
     ) -> std::result::Result<L1Assessment, SpawnRejection> {
-        self.check_confidence(task_embedding, role_embedding, role_template_id, role_min_experiences)
+        self.check_confidence(
+            task_embedding,
+            role_embedding,
+            role_template_id,
+            role_min_experiences,
+        )
     }
 
     fn add_experience(&mut self, entry: ExperienceEntry) {
@@ -570,7 +587,12 @@ impl crate::l1::ExperienceRetrieval for DualTrackMemory {
         self.fluid_len()
     }
 
-    fn search_by_role(&self, query: &[f32; EMBEDDING_DIM], role_id: u32, k: usize) -> Vec<(ExperienceEntry, f32)> {
+    fn search_by_role(
+        &self,
+        query: &[f32; EMBEDDING_DIM],
+        role_id: u32,
+        k: usize,
+    ) -> Vec<(ExperienceEntry, f32)> {
         self.search_by_role(query, role_id, k)
     }
 
@@ -687,7 +709,9 @@ mod tests {
     #[test]
     fn test_consolidation() {
         let path = tmp_path();
-        let mut mem = DualTrackMemory::open(&path, 100, 0.5).unwrap().with_min_cluster_size(2);
+        let mut mem = DualTrackMemory::open(&path, 100, 0.5)
+            .unwrap()
+            .with_min_cluster_size(2);
 
         // Add 3 similar entries to fluid.
         mem.add_experience(make_entry(1.0, 1.0));
@@ -707,7 +731,9 @@ mod tests {
     #[test]
     fn test_consolidation_respects_min_size() {
         let path = tmp_path();
-        let mut mem = DualTrackMemory::open(&path, 100, 0.5).unwrap().with_min_cluster_size(5);
+        let mut mem = DualTrackMemory::open(&path, 100, 0.5)
+            .unwrap()
+            .with_min_cluster_size(5);
 
         // Add only 3 entries — below min cluster size.
         mem.add_experience(make_entry(1.0, 1.0));
@@ -733,8 +759,15 @@ mod tests {
         mem.add_experience(make_entry(0.95, 1.0));
         mem.add_experience(make_entry(1.05, 1.0));
 
-        assert_eq!(mem.fluid_len(), 0, "fluid should be drained after consolidation");
-        assert!(mem.bedrock_len() > 0, "bedrock should have consolidated entries");
+        assert_eq!(
+            mem.fluid_len(),
+            0,
+            "fluid should be drained after consolidation"
+        );
+        assert!(
+            mem.bedrock_len() > 0,
+            "bedrock should have consolidated entries"
+        );
         std::fs::remove_file(&path).ok();
     }
 
@@ -815,7 +848,11 @@ mod tests {
         mem.consolidate();
 
         // Fixed: fluid entries are reinstated when no cluster qualifies
-        assert_eq!(mem.fluid_len(), 3, "fluid is reinstated after failed consolidation");
+        assert_eq!(
+            mem.fluid_len(),
+            3,
+            "fluid is reinstated after failed consolidation"
+        );
         assert_eq!(mem.bedrock_len(), 0, "bedrock has no new entries");
         assert_eq!(mem.total_count(), 3, "no data lost on failed consolidation");
         std::fs::remove_file(&path).ok();

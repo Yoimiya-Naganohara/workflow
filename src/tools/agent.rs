@@ -11,9 +11,230 @@ use crate::tui::state::AppState;
 
 use super::builtin::ToolCallError;
 
-/// Register agent-management tools.
-pub fn register_tools(server: crate::tools::ToolServer, state: Arc<RwLock<AppState>>) -> crate::tools::ToolServer {
-    server.tool(SpawnAgent { state })
+/// Register agent-management and inter-agent communication tools.
+pub fn register_tools(
+    server: crate::tools::ToolServer,
+    state: Arc<RwLock<AppState>>,
+) -> crate::tools::ToolServer {
+    server
+        .tool(SpawnAgent {
+            state: state.clone(),
+        })
+        .tool(SendMessage {
+            state: state.clone(),
+        })
+        .tool(ReadMessages {
+            state: state.clone(),
+        })
+        .tool(ListAgents { state })
+}
+
+// ── SendMessage ──
+
+#[derive(Clone)]
+pub struct SendMessage {
+    state: Arc<RwLock<AppState>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SendMessageArgs {
+    pub recipient: String,
+    pub message: String,
+}
+
+impl Tool for SendMessage {
+    const NAME: &'static str = "send_message";
+
+    type Error = ToolCallError;
+    type Args = SendMessageArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.into(),
+            description: "Send a message to another agent. Use this to coordinate with siblings."
+                .into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "recipient": {
+                        "type": "string",
+                        "description": "Agent name (as shown in agent tree) to send the message to"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Message content"
+                    }
+                },
+                "required": ["recipient", "message"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let s = self.state.read().await;
+        let agent_id = s
+            .core
+            .responsible_agent_id
+            .ok_or_else(|| ToolCallError("No active agent to send from".to_string()))?;
+        let pool = s.core.agent_pool.read().await;
+        let sender_name = pool
+            .get_agent(&agent_id)
+            .map(|a| a.name.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // Find recipient by name
+        let recipient = pool
+            .agents()
+            .iter()
+            .find(|a| a.name == args.recipient)
+            .map(|a| a.id)
+            .ok_or_else(|| {
+                ToolCallError(format!(
+                    "Agent '{}' not found. Use `list_agents` to see active agents.",
+                    args.recipient
+                ))
+            })?;
+        drop(pool);
+
+        // Write via try_write — spin backoff pattern
+        let mut retries = 0u32;
+        loop {
+            if let Ok(mut pool) = s.core.agent_pool.try_write() {
+                pool.send_message(recipient, agent_id, &sender_name, &args.message)
+                    .map_err(ToolCallError)?;
+                break;
+            }
+            if retries >= 5 {
+                return Err(ToolCallError(
+                    "Agent pool lock contention — message not sent".to_string(),
+                ));
+            }
+            retries += 1;
+            tokio::time::sleep(std::time::Duration::from_micros(50)).await;
+        }
+
+        Ok(format!("Message sent to '{}'.", args.recipient))
+    }
+}
+
+// ── ReadMessages ──
+
+#[derive(Clone)]
+pub struct ReadMessages {
+    state: Arc<RwLock<AppState>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReadMessagesArgs {
+    pub max: Option<usize>,
+}
+
+impl Tool for ReadMessages {
+    const NAME: &'static str = "read_messages";
+
+    type Error = ToolCallError;
+    type Args = ReadMessagesArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.into(),
+            description: "Read and drain all pending messages from your inbox (FIFO).".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "max": {
+                        "type": "integer",
+                        "description": "Maximum messages to return (default: all, max: 20)",
+                        "minimum": 1,
+                        "maximum": 20,
+                        "optional": true
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let s = self.state.read().await;
+        let agent_id = s
+            .core
+            .responsible_agent_id
+            .ok_or_else(|| ToolCallError("No active agent to read messages for".to_string()))?;
+
+        let max = args.max.unwrap_or(20).min(20);
+        let messages = {
+            let mut pool = s.core.agent_pool.write().await;
+            let all = pool.drain_inbox(&agent_id);
+            all.into_iter().take(max).collect::<Vec<_>>()
+        };
+
+        if messages.is_empty() {
+            return Ok("No messages in inbox.".to_string());
+        }
+
+        let mut output = format!("{} message(s) received:\n", messages.len());
+        for msg in &messages {
+            output.push_str(&format!("  [from {}] {}\n", msg.from_name, msg.content));
+        }
+        Ok(output)
+    }
+}
+
+// ── ListAgents ──
+
+#[derive(Clone)]
+pub struct ListAgents {
+    state: Arc<RwLock<AppState>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListAgentsArgs {}
+
+impl Tool for ListAgents {
+    const NAME: &'static str = "list_agents";
+
+    type Error = ToolCallError;
+    type Args = ListAgentsArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.into(),
+            description: "List all active agents and their status.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        }
+    }
+
+    async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let s = self.state.read().await;
+        let pool = s.core.agent_pool.read().await;
+        let agents = pool.agents();
+        if agents.is_empty() {
+            return Ok("No agents in pool.".to_string());
+        }
+        let mut output = format!("Active agents ({} total):\n", agents.len());
+        for a in agents {
+            let status = match a.status {
+                crate::agent::AgentStatus::Idle => "idle",
+                crate::agent::AgentStatus::Planning => "planning",
+                crate::agent::AgentStatus::AwaitingChildren => "awaiting",
+                crate::agent::AgentStatus::Aggregating => "aggregating",
+                crate::agent::AgentStatus::Completed => "completed",
+                crate::agent::AgentStatus::Failed => "failed",
+            };
+            let inbox_count = a.inbox.len();
+            output.push_str(&format!(
+                "  {} [{}] {} — {} message(s)\n",
+                a.name, status, a.role, inbox_count
+            ));
+        }
+        Ok(output)
+    }
 }
 
 #[derive(Clone)]
@@ -62,12 +283,8 @@ impl Tool for SpawnAgent {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "Spawn a child agent through the workflow runtime. ",
-                "Use this only when delegation is useful. The human does not approve or manage child agents; ",
-                "the calling agent remains responsible for integrating the result."
-            )
-            .into(),
+            description:
+                "Spawn a child agent. The calling agent remains responsible for the result.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -107,7 +324,12 @@ impl Tool for SpawnAgent {
             return Err(ToolCallError("goal is required".to_string()));
         }
 
-        let child_goal = match args.expected_output.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let child_goal = match args
+            .expected_output
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             Some(expected) => format!(
                 "{}\n\nDelegation reason: {}\n\nExpected output: {}",
                 goal,
@@ -129,22 +351,24 @@ impl Tool for SpawnAgent {
                 .runtime
                 .clone()
                 .ok_or_else(|| ToolCallError("Runtime not initialized".to_string()))?;
-            let parent_id = s
-                .core
-                .responsible_agent_id
-                .ok_or_else(|| ToolCallError("No responsible parent agent is active".to_string()))?;
-            let runtime_tx = s
-                .core
-                .runtime_event_tx
-                .clone()
-                .ok_or_else(|| ToolCallError("Runtime event channel not initialized".to_string()))?;
+            let parent_id = s.core.responsible_agent_id.ok_or_else(|| {
+                ToolCallError("No responsible parent agent is active".to_string())
+            })?;
+            let runtime_tx = s.core.runtime_event_tx.clone().ok_or_else(|| {
+                ToolCallError("Runtime event channel not initialized".to_string())
+            })?;
             (runtime, s.core.agent_pool.clone(), parent_id, runtime_tx)
         };
 
         let child_id = match runtime
             .read()
             .await
-            .spawn_plan_task_agent(parent_id, &role, &child_goal, &mut *agent_pool.write().await)
+            .spawn_plan_task_agent(
+                parent_id,
+                &role,
+                &child_goal,
+                &mut *agent_pool.write().await,
+            )
             .await
         {
             Ok(id) => id,

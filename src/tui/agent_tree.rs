@@ -45,7 +45,9 @@ fn build_diagnostic_tree(
     is_last: bool,
     lines: &mut Vec<TreeLine>,
 ) {
-    let Some(agent) = agents.get(root_id) else { return };
+    let Some(agent) = agents.get(root_id) else {
+        return;
+    };
 
     // Prefix construction
     let prefix = if depth == 0 {
@@ -72,7 +74,13 @@ fn build_diagnostic_tree(
     });
 
     for (idx, child_id) in agent.children.iter().enumerate() {
-        build_diagnostic_tree(agents, child_id, depth + 1, idx + 1 == agent.children.len(), lines);
+        build_diagnostic_tree(
+            agents,
+            child_id,
+            depth + 1,
+            idx + 1 == agent.children.len(),
+            lines,
+        );
     }
 }
 
@@ -82,7 +90,8 @@ fn build_diagnostic_tree(
 /// lock is contended the function returns an empty vec and the caller
 /// should retry on the next frame.
 pub fn build_agent_tree_lines(pool: &AgentPool, root_id: &AgentId) -> Vec<TreeLine> {
-    let agents_snapshot: std::collections::HashMap<AgentId, &Agent> = pool.agents().iter().map(|a| (a.id, a)).collect();
+    let agents_snapshot: std::collections::HashMap<AgentId, &Agent> =
+        pool.agents().iter().map(|a| (a.id, a)).collect();
 
     if !agents_snapshot.contains_key(root_id) {
         return Vec::new();
@@ -158,6 +167,7 @@ mod tests {
             tokens_input: 0,
             tokens_output: 0,
             tool_trace: std::collections::VecDeque::new(),
+            inbox: std::collections::VecDeque::new(),
             sandbox: None,
         }
     }
@@ -404,15 +414,24 @@ mod tests {
 
         let preview = build_tool_trace_preview(&pool, &id);
         assert_eq!(preview.len(), 3, "all 3 entries returned");
-        assert!(preview[0].contains("write_file"), "most recent first: {}", preview[0]);
-        assert!(preview[2].contains("read_file"), "oldest last: {}", preview[2]);
+        assert!(
+            preview[0].contains("write_file"),
+            "most recent first: {}",
+            preview[0]
+        );
+        assert!(
+            preview[2].contains("read_file"),
+            "oldest last: {}",
+            preview[2]
+        );
     }
 
     #[test]
     fn test_tool_trace_preview_truncates_beyond_three() {
         let mut pool = AgentPool::new();
         let id = [0u8; 16];
-        let mut trace: std::collections::VecDeque<ToolCallRecord> = std::collections::VecDeque::new();
+        let mut trace: std::collections::VecDeque<ToolCallRecord> =
+            std::collections::VecDeque::new();
         for i in 0..5 {
             trace.push_back(ToolCallRecord {
                 name: format!("tool_{}", i),
@@ -432,8 +451,16 @@ mod tests {
 
         let preview = build_tool_trace_preview(&pool, &id);
         assert_eq!(preview.len(), 3, "capped at 3");
-        assert!(preview[0].contains("tool_4"), "most recent tool_4: {}", preview[0]);
-        assert!(preview[2].contains("tool_2"), "oldest shown tool_2: {}", preview[2]);
+        assert!(
+            preview[0].contains("tool_4"),
+            "most recent tool_4: {}",
+            preview[0]
+        );
+        assert!(
+            preview[2].contains("tool_2"),
+            "oldest shown tool_2: {}",
+            preview[2]
+        );
     }
 
     #[test]

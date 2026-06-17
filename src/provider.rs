@@ -215,7 +215,11 @@ impl ClientPool {
 
     /// Remove and return a client by ID (e.g. on API key change).
     pub async fn remove(&self, provider_id: &str) -> Option<Arc<ProviderClient>> {
-        self.clients.write().await.remove(provider_id).map(|e| e.client)
+        self.clients
+            .write()
+            .await
+            .remove(provider_id)
+            .map(|e| e.client)
     }
 
     /// Evict clients whose TTL has expired and are not in use.

@@ -44,7 +44,9 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         // Model name
         spans.push(Span::styled(
             &sel.model_name,
-            Style::default().fg(style::BLUE).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(style::BLUE)
+                .add_modifier(Modifier::BOLD),
         ));
 
         // Capability badge + context window
@@ -56,14 +58,20 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
                 caps.max_context.to_string()
             };
             spans.push(Span::styled(" ", Style::default()));
-            spans.push(Span::styled(badge, Style::default().fg(style::TEXT_SECONDARY)));
+            spans.push(Span::styled(
+                badge,
+                Style::default().fg(style::TEXT_SECONDARY),
+            ));
             spans.push(Span::styled(
                 format!(" ctx:{}", ctx),
                 Style::default().fg(style::TEXT_MUTED),
             ));
         }
     } else {
-        spans.push(Span::styled("no model", Style::default().fg(style::TEXT_MUTED)));
+        spans.push(Span::styled(
+            "no model",
+            Style::default().fg(style::TEXT_MUTED),
+        ));
     }
 
     // ── 4. Separator ──
@@ -84,7 +92,9 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         spans.push(Span::styled("  ", Style::default()));
         spans.push(Span::styled(
             spinner[phase],
-            Style::default().fg(style::YELLOW).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(style::YELLOW)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -111,12 +121,18 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
     }
 
     // ── 8. Tokenizer uninitialised warning ──
-    if state.ui.active_chat_requests == 0 && !state.ui.tokenizer_initialized && (in_tokens > 0 || out_tokens > 0) {
+    if state.ui.active_chat_requests == 0
+        && !state.ui.tokenizer_initialized
+        && (in_tokens > 0 || out_tokens > 0)
+    {
         spans.push(Span::styled(" ⚠T", Style::default().fg(style::WARNING)));
     }
 
     // ── 9. Permits indicator (if constrained) ──
-    let permits_used = state.ui.permits_total.saturating_sub(state.ui.permits_available);
+    let permits_used = state
+        .ui
+        .permits_total
+        .saturating_sub(state.ui.permits_available);
     if permits_used > 0 {
         let fill_pct = if state.ui.permits_total > 0 {
             (permits_used as f64 / state.ui.permits_total as f64) * 100.0

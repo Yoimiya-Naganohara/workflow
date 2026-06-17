@@ -158,11 +158,17 @@ fn build_prompt(
 ) -> String {
     let mut successes = Vec::new();
     for e in successful.iter().take(8) {
-        successes.push(format!("  weight={:.2}  tools={:016b}", e.weight, e.tool_bitmap));
+        successes.push(format!(
+            "  weight={:.2}  tools={:016b}",
+            e.weight, e.tool_bitmap
+        ));
     }
     let mut failures = Vec::new();
     for e in low_quality.iter().take(4) {
-        failures.push(format!("  weight={:.2}  tools={:016b}", e.weight, e.tool_bitmap));
+        failures.push(format!(
+            "  weight={:.2}  tools={:016b}",
+            e.weight, e.tool_bitmap
+        ));
     }
 
     format!(
@@ -263,7 +269,11 @@ mod tests {
 
     #[test]
     fn test_compute_stats_partition() {
-        let entries = vec![make_entry(0.9, 0b101), make_entry(0.3, 0b010), make_entry(0.8, 0b111)];
+        let entries = vec![
+            make_entry(0.9, 0b101),
+            make_entry(0.3, 0b010),
+            make_entry(0.8, 0b111),
+        ];
         let stats = compute_stats(&entries);
         assert_eq!(stats.total, 3);
         assert_eq!(stats.successful, 2);
@@ -292,7 +302,10 @@ mod tests {
 
     #[test]
     fn test_min_experiences_constant() {
-        assert!(MIN_EXPERIENCES >= 3, "Need at least 3 for meaningful analysis");
+        assert!(
+            MIN_EXPERIENCES >= 3,
+            "Need at least 3 for meaningful analysis"
+        );
     }
 
     #[test]
@@ -306,7 +319,10 @@ mod tests {
         let mut tracker = OptimizationTracker::new();
         tracker.mark_optimized(1, 5);
         assert!(tracker.can_optimize(1, 5).is_some());
-        assert!(tracker.can_optimize(1, 10).is_some(), "should still block due to time");
+        assert!(
+            tracker.can_optimize(1, 10).is_some(),
+            "should still block due to time"
+        );
     }
 
     #[test]
@@ -316,6 +332,9 @@ mod tests {
         tracker.mark_optimized(1, 10);
         assert!(tracker.can_optimize(1, 11).is_some(), "need 3 new, got 1");
         assert!(tracker.can_optimize(1, 12).is_some(), "need 3 new, got 2");
-        assert!(tracker.can_optimize(1, 13).is_none(), "got 3 new, should be allowed");
+        assert!(
+            tracker.can_optimize(1, 13).is_none(),
+            "got 3 new, should be allowed"
+        );
     }
 }

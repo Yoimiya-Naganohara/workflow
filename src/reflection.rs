@@ -61,7 +61,12 @@ pub const RULE_MIN_OUTPUT: usize = 5;
 
 /// Run all enabled Level 1 rules.
 /// All inputs are string-based; no LLM calls.
-pub fn check_rules(cfg: &ReflectionConfig, input: &str, response: &str, tool_trace: &str) -> RulesReport {
+pub fn check_rules(
+    cfg: &ReflectionConfig,
+    input: &str,
+    response: &str,
+    tool_trace: &str,
+) -> RulesReport {
     let code_complete = if cfg.rules_enabled[RULE_CODE_COMPLETE] {
         rule_code_complete(input, response)
     } else {
@@ -275,7 +280,8 @@ pub fn build_self_check_prompt(user_input: &str, agent_response: &str) -> String
 
 /// Build the continuation prompt when a retry is needed.
 pub fn build_continuation_feedback(failed_rules: &[&str]) -> String {
-    let mut msg = String::from("Please review and improve your previous response.\n\nIssues found:\n");
+    let mut msg =
+        String::from("Please review and improve your previous response.\n\nIssues found:\n");
     for rule in failed_rules {
         msg.push_str(&format!("- {}\n", rule));
     }

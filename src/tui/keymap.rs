@@ -87,31 +87,55 @@ impl Default for Keymap {
         let mut km = Self::new();
 
         // Global
-        km.bind(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), Action::Quit);
+        km.bind(
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            Action::Quit,
+        );
         km.bind(
             KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
             Action::CancelResponse,
         );
-        km.bind(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), Action::TabComplete);
+        km.bind(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            Action::TabComplete,
+        );
 
         // Navigation
-        km.bind(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), Action::MoveUp);
-        km.bind(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), Action::MoveDown);
-        km.bind(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), Action::MoveLeft);
-        km.bind(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), Action::MoveRight);
+        km.bind(
+            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            Action::MoveUp,
+        );
+        km.bind(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            Action::MoveDown,
+        );
+        km.bind(
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+            Action::MoveLeft,
+        );
+        km.bind(
+            KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+            Action::MoveRight,
+        );
 
         // Dialog
         // Note: Enter is intentionally NOT bound here — dialogs handle Enter
         // in their own handle_key().  The keymap-level Confirm would shadow
         // SendMessage (bound below) because resolve() returns the first match.
-        km.bind(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), Action::Cancel);
+        km.bind(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            Action::Cancel,
+        );
         km.bind(
             KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
             Action::DeleteChar,
         );
 
         // Chat input
-        km.bind(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), Action::SendMessage);
+        km.bind(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            Action::SendMessage,
+        );
 
         // Agent tree
         km.bind(

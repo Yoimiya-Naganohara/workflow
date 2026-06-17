@@ -9,7 +9,9 @@ use tokio::sync::RwLock;
 use super::config::{AgentRuntimeConfig, RoleTemplate};
 use super::pipeline::{DecisionPipeline, DecisionPipelineBuilder};
 
-use crate::agent::plan::{PlanEntity, PlanRegistry as PlanRegistryConcrete, PlanStatus, Task, TaskStatus};
+use crate::agent::plan::{
+    PlanEntity, PlanRegistry as PlanRegistryConcrete, PlanStatus, Task, TaskStatus,
+};
 use crate::agent::{Agent, AgentPool, AgentStatus};
 use crate::core::types::*;
 use crate::experience::RoleTemplateStore;
@@ -76,7 +78,9 @@ impl AgentRuntime {
             let home = std::env::var("HOME")
                 .or_else(|_| std::env::var("USERPROFILE"))
                 .unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home).join(".workflow").join("experience_a.bin")
+            PathBuf::from(home)
+                .join(".workflow")
+                .join("experience_a.bin")
         });
 
         // Open dual-track memory with mmap persistence (creates file if needed)
@@ -111,7 +115,8 @@ impl AgentRuntime {
     pub fn from_pipeline(pipeline: DecisionPipeline) -> Self {
         let pipeline = Arc::new(pipeline);
         let store_path = Self::default_store_path();
-        let store = RoleTemplateStore::open(&store_path).expect("Failed to open role template store");
+        let store =
+            RoleTemplateStore::open(&store_path).expect("Failed to open role template store");
 
         // Seed default templates if the store is empty.
         store.seed_if_empty(vec![
@@ -279,7 +284,9 @@ impl AgentRuntime {
             provider: None,
             model_id: String::new(),
             role_template_store: Arc::new(store),
-            optimization_tracker: std::sync::Mutex::new(crate::runtime::optimizer::OptimizationTracker::new()),
+            optimization_tracker: std::sync::Mutex::new(
+                crate::runtime::optimizer::OptimizationTracker::new(),
+            ),
         };
 
         // Compute role embeddings in background (non-blocking).
@@ -375,7 +382,11 @@ impl AgentRuntime {
     }
 
     /// Search the experience pool by embedding vector.
-    pub fn search_experience(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)> {
+    pub fn search_experience(
+        &self,
+        query: &[f32; EMBEDDING_DIM],
+        k: usize,
+    ) -> Vec<(ExperienceEntry, f32)> {
         self.pipeline.search_experience(query, k)
     }
 
@@ -506,10 +517,15 @@ impl AgentRuntime {
 
     /// Chat with an LLM agent for a user goal.
     /// Spawns a root agent, executes it, and returns the result.
-    pub async fn chat_with_goal(&self, goal: &str, agent_pool: &Arc<RwLock<AgentPool>>) -> Result<String> {
+    pub async fn chat_with_goal(
+        &self,
+        goal: &str,
+        agent_pool: &Arc<RwLock<AgentPool>>,
+    ) -> Result<String> {
         let agent_id = {
             let mut pool = agent_pool.write().await;
-            self.spawn_root_agent(goal, "planner", "default", &mut pool).await?
+            self.spawn_root_agent(goal, "planner", "default", &mut pool)
+                .await?
         };
 
         // Spawned agents are leaf nodes; execute directly.
@@ -537,15 +553,23 @@ impl AgentRuntime {
     /// This is a bootstrap actor rather than a spawned child, so it is
     /// registered directly in the pool. Any agents it creates later still go
     /// through the normal L-1/L0/L1/L2 spawn pipeline.
-    pub fn bootstrap_root_agent(&self, goal: &str, role: &str, agent_pool: &mut AgentPool) -> AgentId {
-        let role_tpl = self.role_template_store.get_by_role(role).unwrap_or(RoleTemplate {
-            role: role.to_string(),
-            label: role.to_string(),
-            system_prompt: format!("You are a {}. Execute the given goal.", role),
-            template_id: 0,
-            embedding: None,
-            ..Default::default()
-        });
+    pub fn bootstrap_root_agent(
+        &self,
+        goal: &str,
+        role: &str,
+        agent_pool: &mut AgentPool,
+    ) -> AgentId {
+        let role_tpl = self
+            .role_template_store
+            .get_by_role(role)
+            .unwrap_or(RoleTemplate {
+                role: role.to_string(),
+                label: role.to_string(),
+                system_prompt: format!("You are a {}. Execute the given goal.", role),
+                template_id: 0,
+                embedding: None,
+                ..Default::default()
+            });
 
         let agent_id: AgentId = rand::random();
         // Create sandbox (best-effort — failure means no filesystem isolation).
@@ -554,7 +578,11 @@ impl AgentRuntime {
             .map(std::sync::Arc::new);
         let agent = Agent {
             id: agent_id,
-            name: format!("{}-{:04x}", role, u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
+            name: format!(
+                "{}-{:04x}",
+                role,
+                u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])
+            ),
             role: role.to_string(),
             role_template_id: Some(role_tpl.template_id),
             parent_id: None,
@@ -573,6 +601,7 @@ impl AgentRuntime {
             tokens_input: 0,
             tokens_output: 0,
             tool_trace: std::collections::VecDeque::new(),
+            inbox: std::collections::VecDeque::new(),
             sandbox,
         };
         agent_pool.add_agent(agent);
@@ -636,7 +665,11 @@ impl AgentRuntime {
                 }
                 let agent = Agent {
                     id: agent_id,
-                    name: format!("{}-{:04x}", role, u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
+                    name: format!(
+                        "{}-{:04x}",
+                        role,
+                        u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])
+                    ),
                     role: role.to_string(),
                     role_template_id: role_tpl_id,
                     parent_id: None,
@@ -656,12 +689,15 @@ impl AgentRuntime {
                     tokens_input: 0,
                     tokens_output: 0,
                     tool_trace: std::collections::VecDeque::new(),
+                    inbox: std::collections::VecDeque::new(),
                     sandbox: sandbox.clone(),
                 };
                 agent_pool.add_agent(agent);
                 Ok(agent_id)
             }
-            SpawnDecision::Rejected(rejection) => Err(anyhow::anyhow!("Spawn rejected: {:?}", rejection)),
+            SpawnDecision::Rejected(rejection) => {
+                Err(anyhow::anyhow!("Spawn rejected: {:?}", rejection))
+            }
         }
     }
 
@@ -732,7 +768,11 @@ impl AgentRuntime {
                 }
                 let agent = Agent {
                     id: agent_id,
-                    name: format!("{}-{:04x}", role, u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
+                    name: format!(
+                        "{}-{:04x}",
+                        role,
+                        u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])
+                    ),
                     role: role.to_string(),
                     role_template_id: Some(role_tpl.template_id),
                     parent_id: Some(parent_id),
@@ -752,6 +792,7 @@ impl AgentRuntime {
                     tokens_input: 0,
                     tokens_output: 0,
                     tool_trace: std::collections::VecDeque::new(),
+                    inbox: std::collections::VecDeque::new(),
                     sandbox: sandbox.clone(),
                 };
                 agent_pool.add_agent(agent);
@@ -790,7 +831,9 @@ impl AgentRuntime {
 
                 Ok(agent_id)
             }
-            SpawnDecision::Rejected(rejection) => Err(anyhow::anyhow!("Spawn rejected: {:?}", rejection)),
+            SpawnDecision::Rejected(rejection) => {
+                Err(anyhow::anyhow!("Spawn rejected: {:?}", rejection))
+            }
         }
     }
 
@@ -889,7 +932,10 @@ impl AgentRuntime {
                 .child_results
                 .iter()
                 .map(|(id, result)| {
-                    let name = pool.get_agent(id).map(|a| a.name.as_str()).unwrap_or("unknown");
+                    let name = pool
+                        .get_agent(id)
+                        .map(|a| a.name.as_str())
+                        .unwrap_or("unknown");
                     format!("[{}]\n{}", name, result)
                 })
                 .collect();
@@ -936,7 +982,8 @@ impl AgentRuntime {
         agent_pool: &Arc<RwLock<AgentPool>>,
         tool_server: crate::tools::ToolServerHandle,
     ) {
-        self.execute_agent_inner(agent_id, agent_pool, Some(tool_server)).await;
+        self.execute_agent_inner(agent_id, agent_pool, Some(tool_server))
+            .await;
     }
 
     /// Map a tool name to a bit position for the tool bitmap.
@@ -961,6 +1008,8 @@ impl AgentRuntime {
             "list_memos" => 1 << 16,
             "call_agent" => 1 << 17,
             "list_agents" => 1 << 18,
+            "send_message" => 1 << 19,
+            "read_messages" => 1 << 20,
             _ => 0,
         }
     }
@@ -1006,7 +1055,10 @@ impl AgentRuntime {
                     pool.release_budget_guard(&agent_id);
                     pool.notify_completed(&agent_id);
                 }
-                return ("No LLM provider configured".to_string(), AgentStatus::Failed);
+                return (
+                    "No LLM provider configured".to_string(),
+                    AgentStatus::Failed,
+                );
             }
         };
 
@@ -1138,20 +1190,23 @@ impl AgentRuntime {
             let goal_for_emb = goal.clone();
             if let Ok(emb) = embedding_service.embed(&goal_for_emb).await {
                 let rt = runtime.read().await;
-                rt.pipeline.add_experience(crate::core::types::ExperienceEntry {
-                    embedding: emb,
-                    applicability_vector: [0.0f32; 128],
-                    tool_bitmap,
-                    role_template_id: role_template_store.get_by_role(&role).map(|t| t.template_id),
-                    weight: 1.0,
-                    domain_version: 0,
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                    l2_override_weight: 0.0,
-                    l2_override_created_at: 0,
-                });
+                rt.pipeline
+                    .add_experience(crate::core::types::ExperienceEntry {
+                        embedding: emb,
+                        applicability_vector: [0.0f32; 128],
+                        tool_bitmap,
+                        role_template_id: role_template_store
+                            .get_by_role(&role)
+                            .map(|t| t.template_id),
+                        weight: 1.0,
+                        domain_version: 0,
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        l2_override_weight: 0.0,
+                        l2_override_created_at: 0,
+                    });
             }
         }
 
@@ -1195,7 +1250,10 @@ impl AgentRuntime {
                     pool.release_budget_guard(&agent_id);
                     pool.notify_completed(&agent_id);
                 }
-                return ("No LLM provider configured".to_string(), AgentStatus::Failed);
+                return (
+                    "No LLM provider configured".to_string(),
+                    AgentStatus::Failed,
+                );
             }
         };
 
@@ -1336,7 +1394,11 @@ impl AgentRuntime {
         (response, AgentStatus::Completed)
     }
 
-    pub async fn await_agent(&self, agent_id: AgentId, agent_pool: &Arc<RwLock<AgentPool>>) -> String {
+    pub async fn await_agent(
+        &self,
+        agent_id: AgentId,
+        agent_pool: &Arc<RwLock<AgentPool>>,
+    ) -> String {
         let notify = {
             let pool = agent_pool.read().await;
             pool.get_completion_notify(&agent_id)

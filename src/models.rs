@@ -93,7 +93,11 @@ pub struct ModelCapabilities {
 impl Model {
     /// Derive capabilities from the model's metadata.
     pub fn capabilities(&self) -> ModelCapabilities {
-        let has_vision = self.modalities.input.iter().any(|m| m == "image" || m == "vision");
+        let has_vision = self
+            .modalities
+            .input
+            .iter()
+            .any(|m| m == "image" || m == "vision");
         let has_attachment = self.attachment || has_vision;
         ModelCapabilities {
             supports_tool_call: self.tool_call,
@@ -224,7 +228,11 @@ impl ProviderSource for ModelsDevSource {
     }
 
     async fn fetch(&self) -> Result<Vec<Provider>> {
-        let resp = self.client.get("https://models.dev/api.json").send().await?;
+        let resp = self
+            .client
+            .get("https://models.dev/api.json")
+            .send()
+            .await?;
         let status = resp.status();
         if !status.is_success() {
             anyhow::bail!("models.dev HTTP {}", status);
@@ -265,7 +273,9 @@ impl LocalFileSource {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".workflow").join("local_providers.json")
+        PathBuf::from(home)
+            .join(".workflow")
+            .join("local_providers.json")
     }
 }
 
@@ -332,7 +342,8 @@ impl ProviderRegistry {
     }
 
     pub fn get_model(&self, provider_id: &str, model_id: &str) -> Option<&Model> {
-        self.get_provider(provider_id).and_then(|p| p.models.get(model_id))
+        self.get_provider(provider_id)
+            .and_then(|p| p.models.get(model_id))
     }
 
     pub fn set_providers(&mut self, providers: Vec<Provider>) {
@@ -405,7 +416,9 @@ impl ProviderRegistry {
                     || p.models.values().any(|m| {
                         matches_query(&m.name, &query_lower)
                             || matches_query(&m.id, &query_lower)
-                            || m.family.as_deref().is_some_and(|f| matches_query(f, &query_lower))
+                            || m.family
+                                .as_deref()
+                                .is_some_and(|f| matches_query(f, &query_lower))
                     })
             })
             .flat_map(|p| {
@@ -415,7 +428,9 @@ impl ProviderRegistry {
                     .filter(move |m| {
                         matches_query(&m.name, &query_lower)
                             || matches_query(&m.id, &query_lower)
-                            || m.family.as_deref().is_some_and(|f| matches_query(f, &query_lower))
+                            || m.family
+                                .as_deref()
+                                .is_some_and(|f| matches_query(f, &query_lower))
                             || matches_query(&p.name, &query_lower)
                             || matches_query(&p.id, &query_lower)
                     })
@@ -498,7 +513,8 @@ impl ModelRegistry {
     }
 
     pub fn get_model(&self, provider_id: &str, model_id: &str) -> Option<&Model> {
-        self.get_provider(provider_id).and_then(|p| p.models.get(model_id))
+        self.get_provider(provider_id)
+            .and_then(|p| p.models.get(model_id))
     }
 
     pub fn current_model(&self) -> Option<(&Provider, &Model)> {
@@ -532,7 +548,9 @@ impl ModelRegistry {
                     || p.models.values().any(|m| {
                         matches_query(&m.name, &query_lower)
                             || matches_query(&m.id, &query_lower)
-                            || m.family.as_deref().is_some_and(|f| matches_query(f, &query_lower))
+                            || m.family
+                                .as_deref()
+                                .is_some_and(|f| matches_query(f, &query_lower))
                     })
             })
             .flat_map(|p| {
@@ -542,7 +560,9 @@ impl ModelRegistry {
                     .filter(move |m| {
                         matches_query(&m.name, &query_lower)
                             || matches_query(&m.id, &query_lower)
-                            || m.family.as_deref().is_some_and(|f| matches_query(f, &query_lower))
+                            || m.family
+                                .as_deref()
+                                .is_some_and(|f| matches_query(f, &query_lower))
                             || matches_query(&p.name, &query_lower)
                             || matches_query(&p.id, &query_lower)
                     })
@@ -690,7 +710,11 @@ impl CustomProvider {
             .chars()
             .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
             .collect();
-        if slug.is_empty() { "custom".to_string() } else { slug }
+        if slug.is_empty() {
+            "custom".to_string()
+        } else {
+            slug
+        }
     }
 }
 

@@ -31,7 +31,12 @@ impl Tui {
 
         let msg_count = state.core.messages.len();
         let is_streaming = state.ui.active_chat_requests > 0;
-        let last_content_len = state.core.messages.last().map(|m| m.content.len()).unwrap_or(0);
+        let last_content_len = state
+            .core
+            .messages
+            .last()
+            .map(|m| m.content.len())
+            .unwrap_or(0);
         let max_input = (term_size.height / 3).max(3) as usize;
         let input_lines = state.ui.input.lines().count().clamp(1, max_input) as u16;
         let chat_width = term_size.width.saturating_sub(4).max(10) as usize;
@@ -43,7 +48,11 @@ impl Tui {
             chat_width,
             is_streaming.then_some(state.ui.think_frame),
             state.ui.auto_scroll,
-            if state.ui.auto_scroll { 0 } else { state.ui.chat_scroll },
+            if state.ui.auto_scroll {
+                0
+            } else {
+                state.ui.chat_scroll
+            },
         );
 
         // Rebuild cache when content has changed
@@ -101,7 +110,9 @@ impl Tui {
         drop(state);
         if let Ok(mut s) = self.state.try_write() {
             s.ui.tree_agent_ids = tree_lines.iter().map(|tl| tl.agent_id).collect();
-            s.ui.selected_agent_idx = s.ui.selected_agent_idx.min(tree_lines.len().saturating_sub(1));
+            s.ui.selected_agent_idx =
+                s.ui.selected_agent_idx
+                    .min(tree_lines.len().saturating_sub(1));
             s.ui.total_chat_lines = total;
             s.ui.chat_scroll = chat_scroll;
         }
@@ -145,14 +156,17 @@ impl Tui {
 
             // ── Diagnostic tree ──
             if show_tree {
-                let separator = Paragraph::new("── Delegations ──").style(Style::default().fg(style::TEXT_MUTED));
+                let separator = Paragraph::new("── Delegations ──")
+                    .style(Style::default().fg(style::TEXT_MUTED));
                 f.render_widget(separator, vert_chunks[tree_sep_idx]);
 
                 let tree_items: Vec<ListItem> = tree_lines
                     .iter()
                     .map(|tl| {
                         let fg = match tl.status {
-                            AgentStatus::AwaitingChildren | AgentStatus::Aggregating => style::YELLOW,
+                            AgentStatus::AwaitingChildren | AgentStatus::Aggregating => {
+                                style::YELLOW
+                            }
                             AgentStatus::Failed => style::RED,
                             AgentStatus::Completed => style::GREEN,
                             _ => style::TEXT_PRIMARY,

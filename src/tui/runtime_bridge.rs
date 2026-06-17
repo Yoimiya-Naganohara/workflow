@@ -51,7 +51,10 @@ pub async fn runtime_event_broker(
                 child_id,
                 result: _,
             } => {
-                let id_str = format!("..{:04x}", u16::from(child_id[0]) << 8 | u16::from(child_id[1]));
+                let id_str = format!(
+                    "..{:04x}",
+                    u16::from(child_id[0]) << 8 | u16::from(child_id[1])
+                );
                 let _ = app_tx.send(crate::tui::effect::AppEvent::SystemLog {
                     content: format!("Agent {} completed", id_str),
                 });
@@ -64,7 +67,10 @@ pub async fn runtime_event_broker(
                 let _ = app_tx.send(crate::tui::effect::AppEvent::AggregationStarting { agent_id });
             }
 
-            RuntimeEvent::AggregationCompleted { agent_id: _, result } => {
+            RuntimeEvent::AggregationCompleted {
+                agent_id: _,
+                result,
+            } => {
                 s.ui.input_disabled = false;
                 // Push the aggregated result directly as a chat message.
                 use crate::tui::state::{ChatMessage, MessageRole, MessageStatus};
@@ -78,7 +84,10 @@ pub async fn runtime_event_broker(
 
             RuntimeEvent::AgentFailed { agent_id, error } => {
                 s.ui.input_disabled = false;
-                let id_str = format!("..{:04x}", u16::from(agent_id[0]) << 8 | u16::from(agent_id[1]));
+                let id_str = format!(
+                    "..{:04x}",
+                    u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])
+                );
                 let _ = app_tx.send(crate::tui::effect::AppEvent::ChatError {
                     response_index: 0,
                     request_id: 0,

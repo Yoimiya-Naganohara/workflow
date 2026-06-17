@@ -57,7 +57,11 @@ impl DecisionPipelineBuilder {
     ///
     /// This creates an [`L2LlmAuditEngine`] that uses a language model
     /// judge to review conflicts and screen requests.
-    pub fn llm_audit_engine(mut self, provider: Arc<crate::llm::LlmProvider>, config: L2LlmConfig) -> Self {
+    pub fn llm_audit_engine(
+        mut self,
+        provider: Arc<crate::llm::LlmProvider>,
+        config: L2LlmConfig,
+    ) -> Self {
         self.audit_engine = Some(Box::new(L2LlmAuditEngine::new(provider, config)));
         self
     }
@@ -78,11 +82,11 @@ impl DecisionPipelineBuilder {
                 );
                 Box::new(crate::l0::L0CircuitBreaker::new(state))
             }),
-            experience: Mutex::new(
-                self.experience.unwrap_or_else(|| {
-                    Box::new(crate::l1::L1Retriever::new(crate::core::types::DEFAULT_L1_CONFIDENCE))
-                }),
-            ),
+            experience: Mutex::new(self.experience.unwrap_or_else(|| {
+                Box::new(crate::l1::L1Retriever::new(
+                    crate::core::types::DEFAULT_L1_CONFIDENCE,
+                ))
+            })),
             audit_engine: Mutex::new(self.audit_engine.unwrap_or_else(|| {
                 Box::new(crate::l2::L2RuleAuditEngine::new(
                     crate::core::types::MAX_CONSECUTIVE_FAILURES,
@@ -145,9 +149,9 @@ impl DecisionPipeline {
             .map_err(|e| anyhow::anyhow!("Admission failed: {:?}", e))?;
 
         // ── L0: Circuit breaker (budget, depth, tools) ──
-        let l0_result = self
-            .circuit_breaker
-            .try_acquire(request.requested_budget, request.current_depth, 0);
+        let l0_result =
+            self.circuit_breaker
+                .try_acquire(request.requested_budget, request.current_depth, 0);
 
         let _l0_permit: L0Permit = match l0_result {
             Ok(permit) => permit,
@@ -239,16 +243,25 @@ impl DecisionPipeline {
     }
 
     pub fn flush_experience_pool(&self) -> Result<()> {
-        self.experience.lock().expect("experience mutex poisoned").flush()
+        self.experience
+            .lock()
+            .expect("experience mutex poisoned")
+            .flush()
     }
 
     pub fn clear_experience_pool(&self) -> Result<()> {
-        self.experience.lock().expect("experience mutex poisoned").clear()
+        self.experience
+            .lock()
+            .expect("experience mutex poisoned")
+            .clear()
     }
 
     /// Consolidate fluid experiences to bedrock (cluster + promote).
     pub fn consolidate_experience_pool(&self) {
-        self.experience.lock().expect("experience mutex poisoned").consolidate();
+        self.experience
+            .lock()
+            .expect("experience mutex poisoned")
+            .consolidate();
     }
 
     pub fn bedrock_count(&self) -> usize {
@@ -259,7 +272,10 @@ impl DecisionPipeline {
     }
 
     pub fn fluid_count(&self) -> usize {
-        self.experience.lock().expect("experience mutex poisoned").fluid_count()
+        self.experience
+            .lock()
+            .expect("experience mutex poisoned")
+            .fluid_count()
     }
 
     pub fn pending_suspended(&self) -> usize {
@@ -280,11 +296,18 @@ impl DecisionPipeline {
 
     /// Take the budget guard from the last approved request.
     pub fn take_pending_guard(&self) -> Option<BudgetGuard> {
-        self.pending_guard.lock().expect("pending_guard poisoned").take()
+        self.pending_guard
+            .lock()
+            .expect("pending_guard poisoned")
+            .take()
     }
 
     /// Search the experience pool by text query.
-    pub fn search_experience(&self, query: &[f32; EMBEDDING_DIM], k: usize) -> Vec<(ExperienceEntry, f32)> {
+    pub fn search_experience(
+        &self,
+        query: &[f32; EMBEDDING_DIM],
+        k: usize,
+    ) -> Vec<(ExperienceEntry, f32)> {
         self.experience
             .lock()
             .expect("experience mutex poisoned")
@@ -327,7 +350,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_pipeline_approves_valid_request() {
-        let pipeline = DecisionPipelineBuilder::new().embedding(dummy_embedding()).build();
+        let pipeline = DecisionPipelineBuilder::new()
+            .embedding(dummy_embedding())
+            .build();
 
         // Add a matching experience so L1 does not reject (empty pool = presumed guilty).
         let mut exp_emb = [0.0f32; EMBEDDING_DIM];

@@ -64,6 +64,25 @@ impl Default for AgentConfig {
 /// After this limit, the oldest entry is dropped (ring buffer).
 pub const MAX_TOOL_TRACE: usize = 20;
 
+// ── Inter-agent messages ──
+
+/// Maximum number of inbound messages stored per agent.
+/// When full, the oldest message is dropped (ring buffer).
+pub const MAX_INBOX_SIZE: usize = 64;
+
+/// A single message sent between agents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentMessage {
+    /// Sender agent ID.
+    pub from: AgentId,
+    /// Sender's human-readable name (for display).
+    pub from_name: String,
+    /// Message body.
+    pub content: String,
+    /// Unix timestamp.
+    pub timestamp: u64,
+}
+
 /// A single tool call recorded during agent execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallRecord {
@@ -107,6 +126,9 @@ pub struct Agent {
     /// Updated by `ToolEvent::TokenUsage` during LLM streaming.
     pub tokens_input: u32,
     pub tokens_output: u32,
+    /// Inbound message inbox (ring buffer, bounded at [`MAX_INBOX_SIZE`]).
+    /// Agents can read messages from siblings via the `read_messages` tool.
+    pub inbox: VecDeque<AgentMessage>,
     /// Per-agent filesystem sandbox handle.
     /// Created on spawn, cleaned up on eviction.
     #[serde(skip)]
@@ -132,6 +154,11 @@ pub struct AgentPool {
     budget_guards: HashMap<AgentId, BudgetGuard>,
     /// Role-scoped memos — shared by all agents with the same role.
     role_memos: HashMap<String, Vec<MemoEntry>>,
+    /// Siblings that this agent depends on for coordination.
+    /// Only populated when an agent explicitly declares a dependency
+    /// via the `await_sibling` tool.  Cleared after the dependency
+    /// is satisfied.
+    pending_deps: HashMap<AgentId, Vec<AgentId>>,
     /// Max idle TTL for completed/failed agents (seconds). Default: 3600 (1h).
     pub ttl_secs: u64,
 }
@@ -150,6 +177,7 @@ impl AgentPool {
             completions: HashMap::new(),
             budget_guards: HashMap::new(),
             role_memos: HashMap::new(),
+            pending_deps: HashMap::new(),
             ttl_secs: 3600,
         }
     }
@@ -207,6 +235,89 @@ impl AgentPool {
         }
     }
 
+    // ── Inter-agent message passing ──
+
+    /// Send a message to a specific agent's inbox.
+    /// If the inbox is full, the oldest message is dropped.
+    pub fn send_message(
+        &mut self,
+        recipient: AgentId,
+        from: AgentId,
+        from_name: &str,
+        content: &str,
+    ) -> Result<(), String> {
+        let Some(agent) = self.get_agent_mut(&recipient) else {
+            return Err(format!("Agent {:02x} not found", recipient[0]));
+        };
+        let msg = AgentMessage {
+            from,
+            from_name: from_name.to_string(),
+            content: content.to_string(),
+            timestamp: now_secs(),
+        };
+        if agent.inbox.len() >= MAX_INBOX_SIZE {
+            agent.inbox.pop_front();
+        }
+        agent.inbox.push_back(msg);
+        Ok(())
+    }
+
+    /// Read and drain all pending messages for an agent.
+    pub fn drain_inbox(&mut self, agent_id: &AgentId) -> Vec<AgentMessage> {
+        self.get_agent_mut(agent_id)
+            .map(|a| a.inbox.drain(..).collect())
+            .unwrap_or_default()
+    }
+
+    /// Register a dependency: `agent_id` blocks until `dep_id` completes.
+    pub fn add_dependency(&mut self, agent_id: AgentId, dep_id: AgentId) {
+        self.pending_deps.entry(agent_id).or_default().push(dep_id);
+    }
+
+    /// Check whether all pending dependencies for `agent_id` are satisfied
+    /// (i.e. all dependent agents have completed or failed).
+    pub fn dependencies_satisfied(&self, agent_id: &AgentId) -> bool {
+        let Some(deps) = self.pending_deps.get(agent_id) else {
+            return true; // no dependencies
+        };
+        deps.iter().all(|dep_id| {
+            self.get_agent(dep_id)
+                .map(|a| matches!(a.status, AgentStatus::Completed | AgentStatus::Failed))
+                .unwrap_or(true) // missing agent = satisfied (defensive)
+        })
+    }
+
+    /// Remove dependency tracking for an agent (called after satisfaction or on failure).
+    pub fn clear_dependencies(&mut self, agent_id: &AgentId) {
+        self.pending_deps.remove(agent_id);
+    }
+
+    /// Get all agents that have pending dependencies (not yet satisfied).
+    pub fn blocked_agents(&self) -> Vec<AgentId> {
+        self.pending_deps
+            .iter()
+            .filter(|(_, deps)| {
+                !deps.iter().all(|dep_id| {
+                    self.get_agent(dep_id)
+                        .map(|a| matches!(a.status, AgentStatus::Completed | AgentStatus::Failed))
+                        .unwrap_or(true)
+                })
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    /// Get all agents that are runnable (no unsatisfied dependencies).
+    pub fn runnable_agents(&self) -> Vec<&Agent> {
+        self.agents
+            .iter()
+            .filter(|a| {
+                matches!(a.status, AgentStatus::Planning | AgentStatus::Idle)
+                    && self.dependencies_satisfied(&a.id)
+            })
+            .collect()
+    }
+
     pub fn summary(&self) -> String {
         let total = self.agents.len();
         let running = self
@@ -215,7 +326,9 @@ impl AgentPool {
             .filter(|a| {
                 matches!(
                     a.status,
-                    AgentStatus::Planning | AgentStatus::AwaitingChildren | AgentStatus::Aggregating
+                    AgentStatus::Planning
+                        | AgentStatus::AwaitingChildren
+                        | AgentStatus::Aggregating
                 )
             })
             .count();
@@ -224,7 +337,11 @@ impl AgentPool {
             .iter()
             .filter(|a| a.status == AgentStatus::Completed)
             .count();
-        let failed = self.agents.iter().filter(|a| a.status == AgentStatus::Failed).count();
+        let failed = self
+            .agents
+            .iter()
+            .filter(|a| a.status == AgentStatus::Failed)
+            .count();
         format!(
             "Agents: {} total, {} running, {} completed, {} failed",
             total, running, completed, failed
@@ -232,7 +349,10 @@ impl AgentPool {
     }
 
     pub fn agent_id_str(id: &AgentId) -> String {
-        id.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join("")
+        id.iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join("")
     }
 
     // ── Role-scoped memo access ──
@@ -249,7 +369,10 @@ impl AgentPool {
 
     /// Get memos for a specific role, or an empty slice if none exist.
     pub fn get_role_memos(&self, role: &str) -> &[MemoEntry] {
-        self.role_memos.get(role).map(|v| v.as_slice()).unwrap_or(&[])
+        self.role_memos
+            .get(role)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Get mutable access to memos for a specific role.
@@ -304,7 +427,9 @@ impl AgentPool {
     pub fn find_idle_agent_by_role(&self, role: &str) -> Option<AgentId> {
         self.agents
             .iter()
-            .find(|a| a.role == role && matches!(a.status, AgentStatus::Completed | AgentStatus::Idle))
+            .find(|a| {
+                a.role == role && matches!(a.status, AgentStatus::Completed | AgentStatus::Idle)
+            })
             .map(|a| a.id)
     }
 
@@ -383,6 +508,7 @@ mod tests {
             tokens_input: 0,
             tokens_output: 0,
             tool_trace: VecDeque::new(),
+            inbox: VecDeque::new(),
             sandbox: None,
         };
         let id = pool.add_agent(agent);
@@ -411,6 +537,7 @@ mod tests {
             tokens_input: 0,
             tokens_output: 0,
             tool_trace: VecDeque::new(),
+            inbox: VecDeque::new(),
             sandbox: None,
         };
         pool.add_agent(agent);
@@ -424,18 +551,18 @@ mod tests {
     fn test_write_and_read_role_memo() {
         let mut pool = AgentPool::new();
         let entry = MemoEntry {
-            key: "test-key".to_string(),
-            value: "test-value".to_string(),
+            key: "test_key".to_string(),
+            value: "test_value".to_string(),
             timestamp: 1000,
         };
         pool.write_role_memo("analyst", entry.clone());
 
-        let read = pool.read_role_memo("analyst", "test-key");
+        let read = pool.read_role_memo("analyst", "test_key");
         assert!(read.is_some());
-        assert_eq!(read.unwrap().value, "test-value");
+        assert_eq!(read.unwrap().value, "test_value");
 
         // Different role should not see it
-        assert!(pool.read_role_memo("planner", "test-key").is_none());
+        assert!(pool.read_role_memo("planner", "test_key").is_none());
     }
 
     #[test]

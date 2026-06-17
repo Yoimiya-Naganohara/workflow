@@ -10,7 +10,10 @@ impl LlmProvider {
         match self {
             Self::OpenAi(client) => {
                 let model = client.embedding_model(openai::TEXT_EMBEDDING_ADA_002);
-                let embeddings = EmbeddingsBuilder::new(model).document(text)?.build().await?;
+                let embeddings = EmbeddingsBuilder::new(model)
+                    .document(text)?
+                    .build()
+                    .await?;
                 Ok(embeddings
                     .first()
                     .map(|(_, e)| e.first().vec.to_vec())
@@ -18,7 +21,10 @@ impl LlmProvider {
             }
             Self::Cohere(client) => {
                 let model = client.embedding_model(cohere::EMBED_ENGLISH_V3, "search_document");
-                let embeddings = EmbeddingsBuilder::new(model).document(text)?.build().await?;
+                let embeddings = EmbeddingsBuilder::new(model)
+                    .document(text)?
+                    .build()
+                    .await?;
                 Ok(embeddings
                     .first()
                     .map(|(_, e)| e.first().vec.to_vec())
@@ -26,7 +32,10 @@ impl LlmProvider {
             }
             Self::Gemini(client) => {
                 let model = client.embedding_model("text-embedding-004");
-                let embeddings = EmbeddingsBuilder::new(model).document(text)?.build().await?;
+                let embeddings = EmbeddingsBuilder::new(model)
+                    .document(text)?
+                    .build()
+                    .await?;
                 Ok(embeddings
                     .first()
                     .map(|(_, e)| e.first().vec.to_vec())
@@ -34,7 +43,10 @@ impl LlmProvider {
             }
             Self::Mistral(client) => {
                 let model = client.embedding_model("mistral-embed");
-                let embeddings = EmbeddingsBuilder::new(model).document(text)?.build().await?;
+                let embeddings = EmbeddingsBuilder::new(model)
+                    .document(text)?
+                    .build()
+                    .await?;
                 Ok(embeddings
                     .first()
                     .map(|(_, e)| e.first().vec.to_vec())

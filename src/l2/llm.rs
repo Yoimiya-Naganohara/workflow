@@ -55,7 +55,8 @@ impl L2LlmAuditEngine {
 
     pub async fn audit(&mut self, manifest: &ConflictManifest) -> Result<L2LlmAuditResult> {
         if self.consecutive_failures >= self.max_consecutive_failures {
-            self.consecutive_failures = (self.consecutive_failures + 1).min(self.max_consecutive_failures + 10);
+            self.consecutive_failures =
+                (self.consecutive_failures + 1).min(self.max_consecutive_failures + 10);
             return Ok(L2LlmAuditResult {
                 decision: ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
                 risk_statement: "L2 collapsed due to consecutive failures".to_string(),
@@ -119,7 +120,11 @@ impl L2LlmAuditEngine {
 
         let arbitration = match judge.decision.as_str() {
             "override" => {
-                let winner = manifest.contending_agents.get(winner_idx).copied().unwrap_or([0u8; 16]);
+                let winner = manifest
+                    .contending_agents
+                    .get(winner_idx)
+                    .copied()
+                    .unwrap_or([0u8; 16]);
                 let losers: Vec<_> = manifest
                     .contending_agents
                     .iter()
@@ -251,17 +256,19 @@ impl super::AuditEngine for L2LlmAuditEngine {
                 decision: result.decision,
                 risk_statement: result.risk_statement,
                 lesson_learned: result.lesson_learned,
-                override_patch: result
-                    .l1_override_vector_patch
-                    .map(|p| crate::core::conflict::OverridePatch {
+                override_patch: result.l1_override_vector_patch.map(|p| {
+                    crate::core::conflict::OverridePatch {
                         embedding: p.embedding,
                         weight: p.weight,
                         decay_days: p.decay_days,
-                    }),
+                    }
+                }),
                 tokens_used: result.tokens_used,
             },
             Err(e) => crate::core::conflict::L2AuditResult {
-                decision: crate::core::conflict::ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
+                decision: crate::core::conflict::ArbitrationResult::Prune(
+                    manifest.contending_agents.to_vec(),
+                ),
                 risk_statement: format!("LLM audit error: {}", e),
                 lesson_learned: "LLM audit failed, pruning for safety".to_string(),
                 override_patch: None,
@@ -295,7 +302,10 @@ mod tests {
             conflict_type: ConflictType::ActionContradiction,
             contending_agents: SmallVec::from_vec(agents),
             trace_id: [0u8; 16],
-            context_embeddings: SmallVec::from_vec(vec![[0.0f32; crate::core::types::EMBEDDING_DIM]; 2]),
+            context_embeddings: SmallVec::from_vec(vec![
+                [0.0f32; crate::core::types::EMBEDDING_DIM];
+                2
+            ]),
             dynamic_priority_scores: SmallVec::from_vec(priorities),
         }
     }
@@ -316,7 +326,9 @@ mod tests {
         let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.8, 0.3]);
 
         let prompt = engine.build_judge_prompt(&manifest);
-        assert!(prompt.contains("resource lock contention") || prompt.contains("action contradiction"));
+        assert!(
+            prompt.contains("resource lock contention") || prompt.contains("action contradiction")
+        );
         assert!(prompt.contains("override|merge|prune"));
     }
 
@@ -331,7 +343,11 @@ mod tests {
         let json = r#"{"decision": "override", "winner_index": 0, "risk_level": "low", "risk_statement": "test", "lesson_learned": "test"}"#;
         let result = engine.parse_decision(json).unwrap();
         assert_eq!(result.decision, "override");
-        assert_eq!(result.winner_index, Some(0), "winner_index should be Some(0)");
+        assert_eq!(
+            result.winner_index,
+            Some(0),
+            "winner_index should be Some(0)"
+        );
     }
 
     #[test]
@@ -349,7 +365,11 @@ mod tests {
 
         // Verify no panic: empty agents should be handled gracefully
         let winner_idx = decision.winner_index.unwrap_or(0);
-        let _winner = manifest.contending_agents.get(winner_idx).copied().unwrap_or([0u8; 16]);
+        let _winner = manifest
+            .contending_agents
+            .get(winner_idx)
+            .copied()
+            .unwrap_or([0u8; 16]);
 
         // No panic means this test passes
     }
@@ -382,7 +402,10 @@ mod tests {
             engine.consecutive_failures = 0;
         }
 
-        assert_eq!(engine.consecutive_failures, 1, "medium risk should decrement by 1");
+        assert_eq!(
+            engine.consecutive_failures, 1,
+            "medium risk should decrement by 1"
+        );
     }
 
     #[test]

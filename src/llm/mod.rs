@@ -110,7 +110,11 @@ impl LlmProvider {
             .filter(|m| m.role == "system")
             .map(|m| m.content.as_str())
             .unwrap_or("");
-        let prompt = request.messages.last().map(|m| m.content.as_str()).unwrap_or("");
+        let prompt = request
+            .messages
+            .last()
+            .map(|m| m.content.as_str())
+            .unwrap_or("");
 
         // Use extended_details().prompt() to capture token usage from the provider.
         macro_rules! complete_ext {
@@ -143,7 +147,10 @@ impl LlmProvider {
                     Self::Azure(c) => complete_ext!(c),
                     Self::Copilot(c) => complete_ext!(c),
                 };
-                Ok(LlmResponse { content, tokens_used })
+                Ok(LlmResponse {
+                    content,
+                    tokens_used,
+                })
             })
             .await;
 
@@ -197,16 +204,43 @@ mod tests {
 
     #[test]
     fn test_protocol_from_id() {
-        assert_eq!(ProviderProtocol::from_id("openai"), ProviderProtocol::OpenAi);
-        assert_eq!(ProviderProtocol::from_id("anthropic"), ProviderProtocol::Anthropic);
-        assert_eq!(ProviderProtocol::from_id("cohere"), ProviderProtocol::Cohere);
-        assert_eq!(ProviderProtocol::from_id("gemini"), ProviderProtocol::Gemini);
-        assert_eq!(ProviderProtocol::from_id("google"), ProviderProtocol::Gemini);
-        assert_eq!(ProviderProtocol::from_id("mistral"), ProviderProtocol::Mistral);
-        assert_eq!(ProviderProtocol::from_id("ollama"), ProviderProtocol::Ollama);
-        assert_eq!(ProviderProtocol::from_id("llamafile"), ProviderProtocol::Llamafile);
+        assert_eq!(
+            ProviderProtocol::from_id("openai"),
+            ProviderProtocol::OpenAi
+        );
+        assert_eq!(
+            ProviderProtocol::from_id("anthropic"),
+            ProviderProtocol::Anthropic
+        );
+        assert_eq!(
+            ProviderProtocol::from_id("cohere"),
+            ProviderProtocol::Cohere
+        );
+        assert_eq!(
+            ProviderProtocol::from_id("gemini"),
+            ProviderProtocol::Gemini
+        );
+        assert_eq!(
+            ProviderProtocol::from_id("google"),
+            ProviderProtocol::Gemini
+        );
+        assert_eq!(
+            ProviderProtocol::from_id("mistral"),
+            ProviderProtocol::Mistral
+        );
+        assert_eq!(
+            ProviderProtocol::from_id("ollama"),
+            ProviderProtocol::Ollama
+        );
+        assert_eq!(
+            ProviderProtocol::from_id("llamafile"),
+            ProviderProtocol::Llamafile
+        );
         assert_eq!(ProviderProtocol::from_id("azure"), ProviderProtocol::Azure);
-        assert_eq!(ProviderProtocol::from_id("github-copilot"), ProviderProtocol::Copilot);
+        assert_eq!(
+            ProviderProtocol::from_id("github-copilot"),
+            ProviderProtocol::Copilot
+        );
         assert_eq!(
             ProviderProtocol::from_id("custom-myapi"),
             ProviderProtocol::OpenAiCompatible
@@ -243,7 +277,10 @@ mod tests {
     #[test]
     fn test_protocol_label() {
         assert_eq!(ProviderProtocol::OpenAi.label(), "OpenAI");
-        assert_eq!(ProviderProtocol::OpenAiCompatible.label(), "OpenAI Compatible");
+        assert_eq!(
+            ProviderProtocol::OpenAiCompatible.label(),
+            "OpenAI Compatible"
+        );
         assert_eq!(ProviderProtocol::Anthropic.label(), "Anthropic");
         assert_eq!(ProviderProtocol::Ollama.label(), "Ollama");
     }
@@ -252,21 +289,27 @@ mod tests {
 
     #[test]
     fn test_deepseek_routes_to_openai() {
-        let result = LlmProvider::from_key("test-key", Some("https://api.deepseek.com"), "deepseek");
+        let result =
+            LlmProvider::from_key("test-key", Some("https://api.deepseek.com"), "deepseek");
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
     }
 
     #[test]
     fn test_groq_routes_to_openai() {
-        let result = LlmProvider::from_key("test-key", Some("https://api.groq.com/openai/v1"), "groq");
+        let result =
+            LlmProvider::from_key("test-key", Some("https://api.groq.com/openai/v1"), "groq");
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
     }
 
     #[test]
     fn test_openrouter_routes_to_openai() {
-        let result = LlmProvider::from_key("test-key", Some("https://openrouter.ai/api/v1"), "openrouter");
+        let result = LlmProvider::from_key(
+            "test-key",
+            Some("https://openrouter.ai/api/v1"),
+            "openrouter",
+        );
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
     }
@@ -326,7 +369,11 @@ mod tests {
 
     #[test]
     fn test_provider_with_base_url() {
-        let result = LlmProvider::from_key("sk-test", Some("https://custom.deepseek.com/v1"), "deepseek");
+        let result = LlmProvider::from_key(
+            "sk-test",
+            Some("https://custom.deepseek.com/v1"),
+            "deepseek",
+        );
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
     }
@@ -342,7 +389,8 @@ mod tests {
 
     #[test]
     fn test_from_protocol_openai_compatible() {
-        let result = LlmProvider::from_protocol("test-key", None, ProviderProtocol::OpenAiCompatible);
+        let result =
+            LlmProvider::from_protocol("test-key", None, ProviderProtocol::OpenAiCompatible);
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), LlmProvider::OpenAi(_)));
     }

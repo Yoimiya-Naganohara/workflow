@@ -14,7 +14,9 @@ use crate::core::types::AgentId;
 use crate::llm::LlmProvider;
 use crate::models::CustomProvider;
 use crate::provider::ProviderClient;
-use crate::tui::state::{AgentEntry, AppState, ChatMessage, CoreState, MessageRole, MessageStatus, SelectedModel};
+use crate::tui::state::{
+    AgentEntry, AppState, ChatMessage, CoreState, MessageRole, MessageStatus, SelectedModel,
+};
 
 // ============================================================================
 //  Agent setup (sync, called from handler)
@@ -51,7 +53,9 @@ pub fn ensure_initial_agent_sync(core: &mut CoreState, goal_hint: &str) -> Optio
                 let existing = pool
                     .agents()
                     .iter()
-                    .find(|a| a.role == core.default_role && a.status == crate::agent::AgentStatus::Idle)
+                    .find(|a| {
+                        a.role == core.default_role && a.status == crate::agent::AgentStatus::Idle
+                    })
                     .map(|a| a.id);
 
                 if let Some(existing_id) = existing {
@@ -70,7 +74,10 @@ pub fn ensure_initial_agent_sync(core: &mut CoreState, goal_hint: &str) -> Optio
         core.responsible_agent_id = Some(agent_id);
         let entry = AgentEntry {
             id: crate::agent::AgentPool::agent_id_str(&agent_id),
-            name: format!("planner-{:04x}", u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
+            name: format!(
+                "planner-{:04x}",
+                u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])
+            ),
             status: crate::tui::state::AgentStatus::Running,
             budget: 0,
         };
@@ -139,7 +146,10 @@ pub fn is_custom_provider(provider_id: &str) -> bool {
     provider_id.starts_with("custom-")
 }
 
-pub fn get_or_create_provider_client(state: &mut CoreState, provider_id: &str) -> Result<Arc<ProviderClient>> {
+pub fn get_or_create_provider_client(
+    state: &mut CoreState,
+    provider_id: &str,
+) -> Result<Arc<ProviderClient>> {
     if let Some(client) = state.provider_clients.get(provider_id) {
         return Ok(client.clone());
     }
@@ -168,7 +178,9 @@ pub fn get_or_create_provider_client(state: &mut CoreState, provider_id: &str) -
         };
         let config = provider.to_provider_config("");
         let client = Arc::new(ProviderClient::new(config, llm_provider));
-        state.provider_clients.insert(provider_id.to_string(), client.clone());
+        state
+            .provider_clients
+            .insert(provider_id.to_string(), client.clone());
         return Ok(client);
     }
 
@@ -182,7 +194,9 @@ pub fn get_or_create_provider_client(state: &mut CoreState, provider_id: &str) -
         )?;
         let config = provider.to_provider_config("");
         let client = Arc::new(ProviderClient::new(config, llm_provider));
-        state.provider_clients.insert(provider_id.to_string(), client.clone());
+        state
+            .provider_clients
+            .insert(provider_id.to_string(), client.clone());
         return Ok(client);
     }
 
@@ -197,7 +211,9 @@ pub fn get_or_create_provider_client(state: &mut CoreState, provider_id: &str) -
     let llm_provider = LlmProvider::from_key(&api_key, provider.api.as_deref(), provider_id)?;
     let config = provider.to_provider_config(&api_key);
     let client = Arc::new(ProviderClient::new(config, llm_provider));
-    state.provider_clients.insert(provider_id.to_string(), client.clone());
+    state
+        .provider_clients
+        .insert(provider_id.to_string(), client.clone());
     Ok(client)
 }
 
@@ -233,7 +249,10 @@ pub async fn load_initial_state(state: &mut AppState) {
     }
     if !state.core.selected_models.is_empty() {
         if let Some(first) = state.core.selected_models.first() {
-            state.ui.context_limit = state.core.models.get_context_limit(&first.provider_id, &first.model_id);
+            state.ui.context_limit = state
+                .core
+                .models
+                .get_context_limit(&first.provider_id, &first.model_id);
         }
         state.core.messages.push(ChatMessage::system(format!(
             "Loaded {} selected models",
@@ -285,7 +304,13 @@ fn provider_env_key(custom_id: &str) -> String {
 }
 
 /// Save a custom provider (called from the wizard dialog).
-pub fn save_custom_provider(state: &mut CoreState, name: &str, url: &str, key: &str, models_str: &str) {
+pub fn save_custom_provider(
+    state: &mut CoreState,
+    name: &str,
+    url: &str,
+    key: &str,
+    models_str: &str,
+) {
     let custom_id = CustomProvider::slug(name);
     let env_key = provider_env_key(&custom_id);
 
@@ -358,7 +383,10 @@ pub fn merge_custom_providers(state: &mut AppState) {
     for cp in &custom_providers {
         let env_key = provider_env_key(&cp.id);
         if !cp.api_key.is_empty() {
-            state.core.api_keys.insert(env_key.clone(), cp.api_key.clone());
+            state
+                .core
+                .api_keys
+                .insert(env_key.clone(), cp.api_key.clone());
             if !state.core.configured_providers.contains(&cp.id) {
                 state.core.configured_providers.push(cp.id.clone());
             }
@@ -367,9 +395,9 @@ pub fn merge_custom_providers(state: &mut AppState) {
     }
     if !custom_providers.is_empty() {
         let count = custom_providers.len();
-        state
-            .core
-            .messages
-            .push(ChatMessage::system(format!("Loaded {} custom provider(s)", count)));
+        state.core.messages.push(ChatMessage::system(format!(
+            "Loaded {} custom provider(s)",
+            count
+        )));
     }
 }

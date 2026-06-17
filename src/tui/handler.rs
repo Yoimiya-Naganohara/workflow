@@ -16,7 +16,11 @@ use crate::tui::effect::Effect;
 
 impl Tui {
     /// Handle a key event. Returns `true` to continue, `false` to quit.
-    pub(crate) fn handle_chat_keys(&self, state: &mut AppState, key: crossterm::event::KeyEvent) -> bool {
+    pub(crate) fn handle_chat_keys(
+        &self,
+        state: &mut AppState,
+        key: crossterm::event::KeyEvent,
+    ) -> bool {
         // ── Popup navigation (highest priority) ──
         if state.popup_mode != PopupMode::None {
             return self.handle_popup_keys(state, key);
@@ -47,7 +51,8 @@ impl Tui {
             Action::CancelResponse => {
                 if let Some(abort) = ui.active_chat_abort.take() {
                     abort.abort();
-                    core.messages.push(ChatMessage::system("Stopped current response"));
+                    core.messages
+                        .push(ChatMessage::system("Stopped current response"));
                 }
             }
 
@@ -110,7 +115,9 @@ impl Tui {
             }
 
             Action::HistoryPrev
-                if ui.focus == Focus::Input && !ui.input.starts_with('/') && !ui.input_history.is_empty() =>
+                if ui.focus == Focus::Input
+                    && !ui.input.starts_with('/')
+                    && !ui.input_history.is_empty() =>
             {
                 let idx = ui.input_history_idx.unwrap_or(ui.input_history.len());
                 let new_idx = idx.saturating_sub(1);
@@ -139,8 +146,9 @@ impl Tui {
                     .filter(|(cmd, _)| cmd.starts_with(&prefix))
                     .collect();
                 if !matches.is_empty() {
-                    ui.command_popup_selection =
-                        (matches.len() + ui.command_popup_selection).saturating_sub(1) % matches.len();
+                    ui.command_popup_selection = (matches.len() + ui.command_popup_selection)
+                        .saturating_sub(1)
+                        % matches.len();
                 }
             }
 
@@ -174,7 +182,9 @@ impl Tui {
                 ui.input_cursor += 1;
                 ui.input_history_idx = None;
                 if c == '@' && state.popup_mode == PopupMode::None {
-                    state.popup_mode = PopupMode::FilePicker { query: String::new() };
+                    state.popup_mode = PopupMode::FilePicker {
+                        query: String::new(),
+                    };
                     state.popup_selected = 0;
                 } else if ui.input.starts_with('/') && state.popup_mode == PopupMode::None {
                     state.popup_mode = PopupMode::Commands;
@@ -188,7 +198,8 @@ impl Tui {
                     let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
                     ui.input.remove(byte_idx);
                     ui.input_history_idx = None;
-                    if (matches!(state.popup_mode, PopupMode::FilePicker { .. }) && !ui.input.contains('@'))
+                    if (matches!(state.popup_mode, PopupMode::FilePicker { .. })
+                        && !ui.input.contains('@'))
                         || ((ui.input.is_empty() || !ui.input.starts_with('/'))
                             && matches!(state.popup_mode, PopupMode::Commands))
                     {
@@ -250,7 +261,9 @@ impl Tui {
                             .iter()
                             .filter(|(cmd, _)| cmd.to_lowercase().contains(query))
                             .collect();
-                        if let Some((cmd, _)) = matches.get(state.popup_selected.min(matches.len().saturating_sub(1))) {
+                        if let Some((cmd, _)) =
+                            matches.get(state.popup_selected.min(matches.len().saturating_sub(1)))
+                        {
                             state.popup_mode = PopupMode::None;
                             state.popup_selected = 0;
                             ui.command_popup_selection = 0;
@@ -316,7 +329,8 @@ impl Tui {
                         // Select provider from filtered list.
                         // Clone all needed data BEFORE any mutable access.
                         let selected: Option<(String, String, bool)> = {
-                            let filtered = crate::models::filter_providers(core.models.providers(), &ui.input);
+                            let filtered =
+                                crate::models::filter_providers(core.models.providers(), &ui.input);
                             filtered.get(state.popup_selected).copied().map(|provider| {
                                 (
                                     provider.id.clone(),
@@ -331,9 +345,17 @@ impl Tui {
                                     core.configured_providers.push(provider_id.clone());
                                 }
                                 core.models.select_provider(&provider_id);
-                                let _ = crate::tui::controller::get_or_create_provider_client(core, &provider_id);
-                                let _ = crate::persistence::save_configured_provider(&provider_id, "", "");
-                                core.messages.push(ChatMessage::system(format!("{} configured", name)));
+                                let _ = crate::tui::controller::get_or_create_provider_client(
+                                    core,
+                                    &provider_id,
+                                );
+                                let _ = crate::persistence::save_configured_provider(
+                                    &provider_id,
+                                    "",
+                                    "",
+                                );
+                                core.messages
+                                    .push(ChatMessage::system(format!("{} configured", name)));
                             } else {
                                 state.popup_mode = PopupMode::KeyInput;
                                 state.popup_key_provider = Some(provider_id);
@@ -351,8 +373,12 @@ impl Tui {
                             let key_value = ui.input.clone();
                             if !key_value.is_empty() {
                                 // Clone provider info before any mutable access
-                                let provider_info: Option<(String, String)> =
-                                    core.models.providers().iter().find(|p| p.id == *provider_id).map(|p| {
+                                let provider_info: Option<(String, String)> = core
+                                    .models
+                                    .providers()
+                                    .iter()
+                                    .find(|p| p.id == *provider_id)
+                                    .map(|p| {
                                         let env_key = p.env.first().cloned().unwrap_or_default();
                                         let name = p.name.clone();
                                         (env_key, name)
@@ -366,9 +392,17 @@ impl Tui {
                                         }
                                         core.provider_clients.remove(provider_id);
                                         let _ =
-                                            crate::tui::controller::get_or_create_provider_client(core, provider_id);
-                                        core.messages.push(ChatMessage::system(format!("{} key set", name)));
-                                        let _ = crate::tui::controller::save_api_key(provider_id, &env_key, &key_value);
+                                            crate::tui::controller::get_or_create_provider_client(
+                                                core,
+                                                provider_id,
+                                            );
+                                        core.messages
+                                            .push(ChatMessage::system(format!("{} key set", name)));
+                                        let _ = crate::tui::controller::save_api_key(
+                                            provider_id,
+                                            &env_key,
+                                            &key_value,
+                                        );
                                     }
                                 }
                             }
@@ -396,8 +430,10 @@ impl Tui {
                                 .position(|sm| sm.provider_id == pid && sm.model_id == mid)
                             {
                                 core.selected_models.remove(pos);
-                                core.messages
-                                    .push(ChatMessage::system(format!("Removed: {} / {}", pname, mname)));
+                                core.messages.push(ChatMessage::system(format!(
+                                    "Removed: {} / {}",
+                                    pname, mname
+                                )));
                             } else {
                                 core.selected_models.push(crate::tui::state::SelectedModel {
                                     provider_id: pid,
@@ -405,10 +441,13 @@ impl Tui {
                                     provider_name: pname.clone(),
                                     model_name: mname.clone(),
                                 });
-                                core.messages
-                                    .push(ChatMessage::system(format!("Added: {} / {}", pname, mname)));
+                                core.messages.push(ChatMessage::system(format!(
+                                    "Added: {} / {}",
+                                    pname, mname
+                                )));
                             }
-                            crate::tui::controller::save_selected_models(&core.selected_models).ok();
+                            crate::tui::controller::save_selected_models(&core.selected_models)
+                                .ok();
                         }
                         // Don't close — allow multi-select
                         return true;
@@ -421,9 +460,14 @@ impl Tui {
                         let filtered: Vec<&String> = if q.is_empty() {
                             files.iter().collect()
                         } else {
-                            files.iter().filter(|f| f.to_lowercase().contains(&q)).collect()
+                            files
+                                .iter()
+                                .filter(|f| f.to_lowercase().contains(&q))
+                                .collect()
                         };
-                        if let Some(path) = filtered.get(state.popup_selected.min(filtered.len().saturating_sub(1))) {
+                        if let Some(path) =
+                            filtered.get(state.popup_selected.min(filtered.len().saturating_sub(1)))
+                        {
                             // Replace text from last @ to cursor/end with @path
                             if let Some(at_pos) = ui.input.rfind('@') {
                                 let new_input = format!("{}@{}", &ui.input[..at_pos], path);
@@ -477,9 +521,11 @@ impl Tui {
                             ui.input.remove(byte_idx);
                             state.popup_selected = 0;
                             // Close popup if input no longer matches
-                            if (matches!(state.popup_mode, PopupMode::FilePicker { .. }) && !ui.input.contains('@'))
+                            if (matches!(state.popup_mode, PopupMode::FilePicker { .. })
+                                && !ui.input.contains('@'))
                                 || ui.input.is_empty()
-                                || (!ui.input.starts_with('/') && matches!(state.popup_mode, PopupMode::Commands))
+                                || (!ui.input.starts_with('/')
+                                    && matches!(state.popup_mode, PopupMode::Commands))
                             {
                                 state.popup_mode = PopupMode::None;
                             }
@@ -512,7 +558,10 @@ impl Tui {
         // even when a paste marker is at the start of the input.
         let (input, paste_content) = if let Some(pc) = state.ui.pending_paste.take() {
             if let Some(start) = raw.find("[Pasted") {
-                let after = raw[start..].find(']').map(|e| start + e + 1).unwrap_or(raw.len());
+                let after = raw[start..]
+                    .find(']')
+                    .map(|e| start + e + 1)
+                    .unwrap_or(raw.len());
                 (format!("{}{}{}", &raw[..start], pc, &raw[after..]), None)
             } else {
                 (raw, Some(pc))
@@ -548,8 +597,9 @@ impl Tui {
         let ui = &mut state.ui;
 
         if core.selected_models.is_empty() {
-            core.messages
-                .push(ChatMessage::system("No model selected. Use `/models` to pick one."));
+            core.messages.push(ChatMessage::system(
+                "No model selected. Use `/models` to pick one.",
+            ));
             ui.input.clear();
             ui.input_cursor = 0;
             return true;
@@ -601,7 +651,9 @@ impl Tui {
             if let Some(ref sel) = selected_model {
                 let pid = sel.provider_id.clone();
                 if core.configured_providers.iter().any(|id| id == &pid) {
-                    if let Ok(client) = crate::tui::controller::get_or_create_provider_client(core, &pid) {
+                    if let Ok(client) =
+                        crate::tui::controller::get_or_create_provider_client(core, &pid)
+                    {
                         if let Some(rt) = &core.runtime {
                             if let Ok(mut rt_guard) = rt.try_write() {
                                 rt_guard.set_provider_from_state(Arc::new(client.inner.clone()));

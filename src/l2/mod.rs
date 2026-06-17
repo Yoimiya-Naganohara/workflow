@@ -18,7 +18,8 @@ impl L2RuleAuditEngine {
 
     pub fn audit(&mut self, manifest: &ConflictManifest) -> L2RuleAuditResult {
         if self.consecutive_failures >= self.max_consecutive_failures {
-            self.consecutive_failures = (self.consecutive_failures + 1).min(self.max_consecutive_failures + 10);
+            self.consecutive_failures =
+                (self.consecutive_failures + 1).min(self.max_consecutive_failures + 10);
             return L2RuleAuditResult {
                 decision: ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
                 risk_statement: "L2 collapsed due to consecutive failures".to_string(),
@@ -78,7 +79,10 @@ impl L2RuleAuditEngine {
         }
     }
 
-    fn generate_override_patch(&self, manifest: &ConflictManifest) -> crate::core::conflict::OverridePatch {
+    fn generate_override_patch(
+        &self,
+        manifest: &ConflictManifest,
+    ) -> crate::core::conflict::OverridePatch {
         let mut embedding = [0.0f32; crate::core::types::EMBEDDING_DIM];
         if !manifest.context_embeddings.is_empty() {
             embedding.copy_from_slice(&manifest.context_embeddings[0]);
@@ -185,7 +189,10 @@ mod tests {
             conflict_type: crate::core::conflict::ConflictType::ActionContradiction,
             contending_agents: SmallVec::from_vec(agents),
             trace_id: [0u8; 16],
-            context_embeddings: SmallVec::from_vec(vec![[0.0f32; crate::core::types::EMBEDDING_DIM]; 2]),
+            context_embeddings: SmallVec::from_vec(vec![
+                [0.0f32; crate::core::types::EMBEDDING_DIM];
+                2
+            ]),
             dynamic_priority_scores: SmallVec::from_vec(priorities),
         }
     }
@@ -196,7 +203,10 @@ mod tests {
         let manifest = make_manifest(vec![[1u8; 16], [2u8; 16]], vec![0.8, 0.3]);
 
         let result = engine.audit(&manifest);
-        assert!(matches!(result.decision, ArbitrationResult::Override { .. }));
+        assert!(matches!(
+            result.decision,
+            ArbitrationResult::Override { .. }
+        ));
     }
 
     #[test]

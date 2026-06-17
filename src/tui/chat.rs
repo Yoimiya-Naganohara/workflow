@@ -57,7 +57,11 @@ pub(crate) fn render_chat(
     let prompt = Span::styled(
         "> ",
         Style::default()
-            .fg(if is_focused { style::BLUE } else { style::TEXT_MUTED })
+            .fg(if is_focused {
+                style::BLUE
+            } else {
+                style::TEXT_MUTED
+            })
             .add_modifier(ratatui::style::Modifier::BOLD),
     );
     let input_style = if is_focused {
@@ -82,7 +86,10 @@ pub(crate) fn render_chat(
             ]))
         }
     } else if state.ui.input.is_empty() && is_focused {
-        Paragraph::new(Line::from(vec![prompt, Span::styled(placeholder, input_style)]))
+        Paragraph::new(Line::from(vec![
+            prompt,
+            Span::styled(placeholder, input_style),
+        ]))
     } else if state.ui.input.is_empty() {
         Paragraph::new(Line::from(vec![
             Span::styled("> ", Style::default().fg(style::TEXT_MUTED)),
@@ -112,18 +119,29 @@ pub(crate) fn render_chat(
     f.render_widget(input_display, input_area);
 
     // Cursor
-    let show_cursor = is_focused && (state.popup_mode == PopupMode::None || state.popup_mode == PopupMode::KeyInput);
+    let show_cursor = is_focused
+        && (state.popup_mode == PopupMode::None || state.popup_mode == PopupMode::KeyInput);
     if show_cursor {
         if !state.ui.input.is_empty() {
-            let byte_idx = super::chat_lines::char_idx_to_byte_idx(&state.ui.input, state.ui.input_cursor);
-            let line_start_byte = state.ui.input[..byte_idx].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
+            let byte_idx =
+                super::chat_lines::char_idx_to_byte_idx(&state.ui.input, state.ui.input_cursor);
+            let line_start_byte = state.ui.input[..byte_idx]
+                .rfind('\n')
+                .map(|pos| pos + 1)
+                .unwrap_or(0);
             let chars_on_this_line = state.ui.input[line_start_byte..byte_idx].chars().count();
-            let line_width =
-                super::chat_lines::display_width_up_to(&state.ui.input[line_start_byte..], chars_on_this_line);
+            let line_width = super::chat_lines::display_width_up_to(
+                &state.ui.input[line_start_byte..],
+                chars_on_this_line,
+            );
             let cursor_x = input_area.x + 2 + line_width as u16;
             let line_no = state.ui.input[..byte_idx].lines().count().saturating_sub(1);
             let wrap_width = input_area.width.saturating_sub(2) as usize;
-            let wrap_offset = if wrap_width > 0 { line_width / wrap_width } else { 0 };
+            let wrap_offset = if wrap_width > 0 {
+                line_width / wrap_width
+            } else {
+                0
+            };
             let cursor_y = input_area.y + (line_no + wrap_offset) as u16;
             f.set_cursor_position((
                 cursor_x.min(input_area.right().saturating_sub(1)),
@@ -140,7 +158,13 @@ pub(crate) fn render_chat(
 /// Text lines are rendered in batches via a single Paragraph whose Wrap handles
 /// line-breaking — the component calculates wrapping naturally.  Table regions
 /// are rendered as Table widgets overlaid on top.
-fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scroll: usize, visible_height: usize) {
+fn render_chat_content(
+    f: &mut Frame,
+    area: Rect,
+    output: &ChatRenderOutput,
+    scroll: usize,
+    visible_height: usize,
+) {
     let max_line = output.rendered.len();
     if max_line == 0 {
         return;
@@ -176,7 +200,10 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
             }
             let batch_count = i - text_start;
             if batch_count > 0 {
-                let lines: Vec<Line<'static>> = output.rendered[text_start..i].iter().map(|r| r.line.clone()).collect();
+                let lines: Vec<Line<'static>> = output.rendered[text_start..i]
+                    .iter()
+                    .map(|r| r.line.clone())
+                    .collect();
 
                 let visual_h: usize = lines
                     .iter()
@@ -193,7 +220,10 @@ fn render_chat_content(f: &mut Frame, area: Rect, output: &ChatRenderOutput, scr
                     (visual_h as u16).min(area.bottom().saturating_sub(y)),
                 );
                 if text_area.height > 0 {
-                    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }), text_area);
+                    f.render_widget(
+                        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+                        text_area,
+                    );
                 }
                 y += visual_h as u16;
             }

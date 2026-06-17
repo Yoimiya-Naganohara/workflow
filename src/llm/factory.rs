@@ -51,7 +51,8 @@ impl LlmProvider {
         if let Ok(key) = std::env::var("AZURE_API_KEY") {
             let endpoint = std::env::var("AZURE_ENDPOINT")
                 .map_err(|_| anyhow::anyhow!("AZURE_ENDPOINT must be set with AZURE_API_KEY"))?;
-            let api_version = std::env::var("AZURE_API_VERSION").unwrap_or_else(|_| "2024-10-21".to_string());
+            let api_version =
+                std::env::var("AZURE_API_VERSION").unwrap_or_else(|_| "2024-10-21".to_string());
             return Ok(Self::Azure(
                 azure::Client::builder()
                     .api_key(&key)
@@ -60,7 +61,8 @@ impl LlmProvider {
                     .build()?,
             ));
         }
-        if std::env::var("GITHUB_TOKEN").is_ok() || std::env::var("GITHUB_COPILOT_API_KEY").is_ok() {
+        if std::env::var("GITHUB_TOKEN").is_ok() || std::env::var("GITHUB_COPILOT_API_KEY").is_ok()
+        {
             return Ok(Self::Copilot(copilot::Client::from_env()?));
         }
         anyhow::bail!(
@@ -84,7 +86,11 @@ impl LlmProvider {
     }
 
     /// Build a provider from an API key + optional base URL + protocol.
-    pub fn from_protocol(api_key: &str, base_url: Option<&str>, protocol: ProviderProtocol) -> Result<Self> {
+    pub fn from_protocol(
+        api_key: &str,
+        base_url: Option<&str>,
+        protocol: ProviderProtocol,
+    ) -> Result<Self> {
         match protocol {
             ProviderProtocol::Anthropic => {
                 let mut builder = anthropic::Client::builder().api_key(api_key);
@@ -109,7 +115,8 @@ impl LlmProvider {
             }
             ProviderProtocol::Azure => {
                 let endpoint = base_url.unwrap_or("").to_string();
-                let api_version = std::env::var("AZURE_API_VERSION").unwrap_or_else(|_| "2024-10-21".to_string());
+                let api_version =
+                    std::env::var("AZURE_API_VERSION").unwrap_or_else(|_| "2024-10-21".to_string());
                 Ok(Self::Azure(
                     azure::Client::builder()
                         .api_key(api_key)
@@ -118,7 +125,9 @@ impl LlmProvider {
                         .build()?,
                 ))
             }
-            ProviderProtocol::Copilot => Ok(Self::Copilot(copilot::Client::builder().api_key(api_key).build()?)),
+            ProviderProtocol::Copilot => Ok(Self::Copilot(
+                copilot::Client::builder().api_key(api_key).build()?,
+            )),
             ProviderProtocol::OpenAi | ProviderProtocol::OpenAiCompatible => {
                 let mut builder = openai::CompletionsClient::builder().api_key(api_key);
                 if let Some(url) = base_url {

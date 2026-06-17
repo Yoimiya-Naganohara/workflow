@@ -10,7 +10,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use dashmap::DashMap;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
-use ort::execution_providers::{CPUExecutionProvider, CUDAExecutionProvider, CoreMLExecutionProvider};
+use ort::execution_providers::{
+    CPUExecutionProvider, CUDAExecutionProvider, CoreMLExecutionProvider,
+};
 use tokio::sync::Mutex;
 
 use crate::core::simd::cosine_similarity_384;

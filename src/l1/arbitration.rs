@@ -35,7 +35,11 @@ impl L1Arbitrator {
         // Use agent_id bytes as deterministic tiebreaker when embeddings are
         // near-identical (sim > 0.99) to avoid artificially favoring one agent.
         let (priority_a, priority_b) = if sim > 0.99 {
-            if agent_a <= agent_b { (1.0, 0.0) } else { (0.0, 1.0) }
+            if agent_a <= agent_b {
+                (1.0, 0.0)
+            } else {
+                (0.0, 1.0)
+            }
         } else {
             (1.0 - sim, sim)
         };
@@ -117,7 +121,10 @@ mod tests {
             conflict_type: ConflictType::ActionContradiction,
             contending_agents: SmallVec::from_slice(&[[1u8; 16], [2u8; 16]]),
             trace_id: [0u8; 16],
-            context_embeddings: SmallVec::from_slice(&[[0.0f32; EMBEDDING_DIM], [0.0f32; EMBEDDING_DIM]]),
+            context_embeddings: SmallVec::from_slice(&[
+                [0.0f32; EMBEDDING_DIM],
+                [0.0f32; EMBEDDING_DIM],
+            ]),
             dynamic_priority_scores: SmallVec::from_slice(&[0.8, 0.3]),
         };
 
@@ -145,7 +152,10 @@ mod tests {
         // agent_a = [1; 16] < agent_b = [2; 16], so agent_a should win
         match arbitrator.arbitrate_by_priority(&manifest) {
             L1ArbitrationResult::Override { winner, .. } => {
-                assert_eq!(winner, [1u8; 16], "lower agent_id bytes should win tiebreaker");
+                assert_eq!(
+                    winner, [1u8; 16],
+                    "lower agent_id bytes should win tiebreaker"
+                );
             }
             _ => panic!("Expected Override"),
         }
@@ -168,7 +178,10 @@ mod tests {
         // Agent B wins from the complement formula
         match arbitrator.arbitrate_by_priority(&manifest) {
             L1ArbitrationResult::Override { winner, .. } => {
-                assert_eq!(winner, [2u8; 16], "agent B has higher priority from complement formula");
+                assert_eq!(
+                    winner, [2u8; 16],
+                    "agent B has higher priority from complement formula"
+                );
             }
             _ => panic!("Expected Override"),
         }

@@ -68,7 +68,10 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
                 files.len()
             } else {
                 let q = query.to_lowercase();
-                files.iter().filter(|f| f.to_lowercase().contains(&q)).count()
+                files
+                    .iter()
+                    .filter(|f| f.to_lowercase().contains(&q))
+                    .count()
             };
             (count.min(8) as u16 + 2).min(10)
         }
@@ -85,7 +88,9 @@ pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
             render_shell_input_popup(f, area, cmd, &state.ui.input)
         }
         PopupMode::Commands => render_command_popup(f, area, state),
-        PopupMode::SubCommand { parent, items } => render_subcommand_popup(f, area, state, parent, items),
+        PopupMode::SubCommand { parent, items } => {
+            render_subcommand_popup(f, area, state, parent, items)
+        }
         PopupMode::Providers => render_provider_popup(f, area, state),
         PopupMode::KeyInput => render_key_popup(f, area, state),
         PopupMode::ModelPicker => render_model_popup(f, area, state),
@@ -95,7 +100,11 @@ pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 /// Resolve owned items for popup_height / filtering when items are empty.
-fn resolve_subcommand_items_owned(parent: &str, items: &[(String, String)], state: &AppState) -> Vec<(String, String)> {
+fn resolve_subcommand_items_owned(
+    parent: &str,
+    items: &[(String, String)],
+    state: &AppState,
+) -> Vec<(String, String)> {
     if !items.is_empty() {
         return items.to_vec();
     }
@@ -174,7 +183,11 @@ fn render_command_popup(f: &mut Frame, area: Rect, state: &AppState) {
             ],
         )
         .block(style::panel("Commands"))
-        .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
+        .row_highlight_style(
+            Style::default()
+                .fg(style::HIGHLIGHT_FG)
+                .bg(style::HIGHLIGHT_BG),
+        ),
         area,
         &mut table_state,
     );
@@ -199,10 +212,16 @@ fn highlight_matches(cmd: &str, query: &str) -> Vec<Span<'static>> {
                 ));
                 query_chars.next();
             } else {
-                spans.push(Span::styled(ch.to_string(), Style::default().fg(style::TEXT_SECONDARY)));
+                spans.push(Span::styled(
+                    ch.to_string(),
+                    Style::default().fg(style::TEXT_SECONDARY),
+                ));
             }
         } else {
-            spans.push(Span::styled(ch.to_string(), Style::default().fg(style::TEXT_SECONDARY)));
+            spans.push(Span::styled(
+                ch.to_string(),
+                Style::default().fg(style::TEXT_SECONDARY),
+            ));
         }
         let mut iter = remaining.chars();
         iter.next();
@@ -233,7 +252,13 @@ fn render_shell_input_popup(f: &mut Frame, area: Rect, cmd: &str, current_input:
     );
 }
 
-fn render_subcommand_popup(f: &mut Frame, area: Rect, state: &AppState, parent: &str, items: &[(String, String)]) {
+fn render_subcommand_popup(
+    f: &mut Frame,
+    area: Rect,
+    state: &AppState,
+    parent: &str,
+    items: &[(String, String)],
+) {
     // Resolve items: use stored items, or fetch dynamic items
     let resolved = if items.is_empty() {
         resolve_dynamic_items(parent, &state.core)
@@ -260,7 +285,11 @@ fn render_subcommand_popup(f: &mut Frame, area: Rect, state: &AppState, parent: 
         return;
     }
 
-    let max_name_len = filtered.iter().map(|(name, _)| name.len()).max().unwrap_or(10);
+    let max_name_len = filtered
+        .iter()
+        .map(|(name, _)| name.len())
+        .max()
+        .unwrap_or(10);
     let rows: Vec<Row> = filtered
         .iter()
         .map(|(name, desc)| {
@@ -293,7 +322,11 @@ fn render_subcommand_popup(f: &mut Frame, area: Rect, state: &AppState, parent: 
             ],
         )
         .block(style::panel(&title))
-        .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
+        .row_highlight_style(
+            Style::default()
+                .fg(style::HIGHLIGHT_FG)
+                .bg(style::HIGHLIGHT_BG),
+        ),
         area,
         &mut table_state,
     );
@@ -330,7 +363,11 @@ fn render_provider_popup(f: &mut Frame, area: Rect, state: &AppState) {
             let is_configured = state.core.configured_providers.iter().any(|id| id == &p.id);
             let needs_key = !p.env.is_empty();
             let (icon, status_label, status_style) = if is_configured {
-                ("\u{2713}", "configured", Style::default().fg(style::SUCCESS))
+                (
+                    "\u{2713}",
+                    "configured",
+                    Style::default().fg(style::SUCCESS),
+                )
             } else if needs_key {
                 ("", "needs key", style::hint_style())
             } else {
@@ -353,7 +390,9 @@ fn render_provider_popup(f: &mut Frame, area: Rect, state: &AppState) {
     ]));
 
     let mut table_state = TableState::default();
-    table_state.select(Some(state.popup_selected.min(total_items.saturating_sub(1))));
+    table_state.select(Some(
+        state.popup_selected.min(total_items.saturating_sub(1)),
+    ));
 
     let block = style::panel("Providers");
     let inner = block.inner(area);
@@ -369,7 +408,11 @@ fn render_provider_popup(f: &mut Frame, area: Rect, state: &AppState) {
                 ratatui::layout::Constraint::Length(12),
             ],
         )
-        .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
+        .row_highlight_style(
+            Style::default()
+                .fg(style::HIGHLIGHT_FG)
+                .bg(style::HIGHLIGHT_BG),
+        ),
         inner,
         &mut table_state,
     );
@@ -465,7 +508,9 @@ fn render_model_popup(f: &mut Frame, area: Rect, state: &AppState) {
         .collect();
 
     let mut table_state = TableState::default();
-    table_state.select(Some(state.popup_selected.min(results.len().saturating_sub(1))));
+    table_state.select(Some(
+        state.popup_selected.min(results.len().saturating_sub(1)),
+    ));
 
     let block = style::panel("Models");
     let inner = block.inner(area);
@@ -480,7 +525,11 @@ fn render_model_popup(f: &mut Frame, area: Rect, state: &AppState) {
                 ratatui::layout::Constraint::Min(0),
             ],
         )
-        .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
+        .row_highlight_style(
+            Style::default()
+                .fg(style::HIGHLIGHT_FG)
+                .bg(style::HIGHLIGHT_BG),
+        ),
         inner,
         &mut table_state,
     );
@@ -495,14 +544,20 @@ fn render_file_popup(f: &mut Frame, area: Rect, state: &AppState) {
     let filtered: Vec<&String> = if q.is_empty() {
         files.iter().collect()
     } else {
-        files.iter().filter(|f| f.to_lowercase().contains(&q)).collect()
+        files
+            .iter()
+            .filter(|f| f.to_lowercase().contains(&q))
+            .collect()
     };
 
     if filtered.is_empty() {
         let block = style::panel("Files");
         let inner = block.inner(area);
         f.render_widget(block, area);
-        f.render_widget(Paragraph::new("No matching files.").style(style::hint_style()), inner);
+        f.render_widget(
+            Paragraph::new("No matching files.").style(style::hint_style()),
+            inner,
+        );
         return;
     }
 
@@ -535,7 +590,11 @@ fn render_file_popup(f: &mut Frame, area: Rect, state: &AppState) {
                 ratatui::layout::Constraint::Length(max_path_len as u16 + 2),
             ],
         )
-        .row_highlight_style(Style::default().fg(style::HIGHLIGHT_FG).bg(style::HIGHLIGHT_BG)),
+        .row_highlight_style(
+            Style::default()
+                .fg(style::HIGHLIGHT_FG)
+                .bg(style::HIGHLIGHT_BG),
+        ),
         inner,
         &mut table_state,
     );
@@ -608,7 +667,10 @@ fn render_agent_detail_popup(f: &mut Frame, area: Rect, state: &AppState, agent_
     lines.push("  [Esc] close".to_string());
 
     let text = ratatui::text::Text::from(ratatui::text::Line::from(
-        lines.iter().map(|l| Span::raw(l.as_str())).collect::<Vec<_>>(),
+        lines
+            .iter()
+            .map(|l| Span::raw(l.as_str()))
+            .collect::<Vec<_>>(),
     ));
 
     let popup = Paragraph::new(text)
@@ -624,9 +686,17 @@ fn file_icon(path: &str) -> &'static str {
         "\u{1f99b}" // 🦀 rust
     } else if path.ends_with(".md") || path.ends_with(".txt") {
         "\u{1f4c4}" // 📄 document
-    } else if path.ends_with(".toml") || path.ends_with(".json") || path.ends_with(".yaml") || path.ends_with(".yml") {
+    } else if path.ends_with(".toml")
+        || path.ends_with(".json")
+        || path.ends_with(".yaml")
+        || path.ends_with(".yml")
+    {
         "\u{2699}" // ⚙ config
-    } else if path.ends_with(".html") || path.ends_with(".css") || path.ends_with(".js") || path.ends_with(".ts") {
+    } else if path.ends_with(".html")
+        || path.ends_with(".css")
+        || path.ends_with(".js")
+        || path.ends_with(".ts")
+    {
         "\u{1f310}" // 🌐 web
     } else if path.ends_with(".py") {
         "\u{1f40d}" // 🐍 python
@@ -768,6 +838,7 @@ mod tests {
                         status: ToolStatus::Success,
                     },
                 ]),
+                inbox: VecDeque::new(),
                 sandbox: None,
             });
         }
@@ -819,6 +890,7 @@ mod tests {
                 tokens_input: 0,
                 tokens_output: 0,
                 tool_trace: std::collections::VecDeque::new(),
+                inbox: std::collections::VecDeque::new(),
                 sandbox: None,
             });
         }

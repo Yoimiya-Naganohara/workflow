@@ -93,7 +93,10 @@ mod opt_big_array_384 {
     use crate::core::types::EMBEDDING_DIM;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn serialize<S>(val: &Option<[f32; EMBEDDING_DIM]>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(
+        val: &Option<[f32; EMBEDDING_DIM]>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -137,17 +140,32 @@ mod tests {
     #[test]
     fn test_default_config() {
         let cfg = AgentRuntimeConfig::default();
-        assert_eq!(cfg.max_concurrent_agents, crate::core::types::DEFAULT_MAX_AGENTS);
+        assert_eq!(
+            cfg.max_concurrent_agents,
+            crate::core::types::DEFAULT_MAX_AGENTS
+        );
         assert_eq!(
             cfg.admission_timeout_ms,
             crate::core::types::DEFAULT_ADMISSION_TIMEOUT_MS
         );
         assert_eq!(cfg.max_depth, crate::core::types::DEFAULT_MAX_DEPTH);
-        assert_eq!(cfg.initial_budget, crate::core::types::DEFAULT_RUNTIME_BUDGET);
+        assert_eq!(
+            cfg.initial_budget,
+            crate::core::types::DEFAULT_RUNTIME_BUDGET
+        );
         let eps = f32::EPSILON;
-        assert!((cfg.l1_confidence_threshold - crate::core::types::DEFAULT_L1_CONFIDENCE).abs() < eps);
-        assert!((cfg.semantic_conflict_threshold - crate::core::types::DEFAULT_SEMANTIC_THRESHOLD).abs() < eps);
-        assert_eq!(cfg.suspend_timeout_ms, crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS);
+        assert!(
+            (cfg.l1_confidence_threshold - crate::core::types::DEFAULT_L1_CONFIDENCE).abs() < eps
+        );
+        assert!(
+            (cfg.semantic_conflict_threshold - crate::core::types::DEFAULT_SEMANTIC_THRESHOLD)
+                .abs()
+                < eps
+        );
+        assert_eq!(
+            cfg.suspend_timeout_ms,
+            crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS
+        );
         assert!(cfg.bedrock_path.is_none());
     }
 
@@ -170,7 +188,10 @@ mod tests {
         assert!((cfg.l1_confidence_threshold - 0.8).abs() < f32::EPSILON);
         assert!((cfg.semantic_conflict_threshold - (-0.3)).abs() < f32::EPSILON);
         assert_eq!(cfg.suspend_timeout_ms, 100);
-        assert_eq!(cfg.bedrock_path.as_deref(), Some(std::path::Path::new("/tmp/test.bin")));
+        assert_eq!(
+            cfg.bedrock_path.as_deref(),
+            Some(std::path::Path::new("/tmp/test.bin"))
+        );
     }
 
     // ── RoleTemplate ──
@@ -288,7 +309,8 @@ mod tests {
 
     #[test]
     fn test_opt_big_array_serialize_some() {
-        let arr: Option<[f32; crate::core::types::EMBEDDING_DIM]> = Some([0.5; crate::core::types::EMBEDDING_DIM]);
+        let arr: Option<[f32; crate::core::types::EMBEDDING_DIM]> =
+            Some([0.5; crate::core::types::EMBEDDING_DIM]);
         let mut buf = Vec::new();
         let mut ser = serde_json::Serializer::new(&mut buf);
         super::opt_big_array_384::serialize(&arr, &mut ser).unwrap();
@@ -308,7 +330,10 @@ mod tests {
 
     #[test]
     fn test_opt_big_array_deserialize_some() {
-        let json = format!("[{}]", "0.5,".repeat(crate::core::types::EMBEDDING_DIM - 1) + "0.5");
+        let json = format!(
+            "[{}]",
+            "0.5,".repeat(crate::core::types::EMBEDDING_DIM - 1) + "0.5"
+        );
         let mut de = serde_json::Deserializer::from_str(&json);
         let arr: Option<[f32; crate::core::types::EMBEDDING_DIM]> =
             super::opt_big_array_384::deserialize(&mut de).unwrap();

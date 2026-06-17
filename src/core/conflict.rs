@@ -62,7 +62,10 @@ mod tests {
             format!("{:?}", ConflictType::ActionContradiction),
             "ActionContradiction"
         );
-        assert_eq!(format!("{:?}", ConflictType::ValueDivergence), "ValueDivergence");
+        assert_eq!(
+            format!("{:?}", ConflictType::ValueDivergence),
+            "ValueDivergence"
+        );
     }
 
     // ── ConflictManifest ──
@@ -70,7 +73,8 @@ mod tests {
     #[test]
     fn test_conflict_manifest_construction() {
         let agents: SmallVec<[AgentId; 2]> = smallvec::smallvec![[1; 16], [2; 16]];
-        let ctx: SmallVec<[[f32; EMBEDDING_DIM]; 2]> = smallvec::smallvec![[0.1; EMBEDDING_DIM], [0.2; EMBEDDING_DIM]];
+        let ctx: SmallVec<[[f32; EMBEDDING_DIM]; 2]> =
+            smallvec::smallvec![[0.1; EMBEDDING_DIM], [0.2; EMBEDDING_DIM]];
         let prio: SmallVec<[f32; 2]> = smallvec::smallvec![0.8, 0.3];
         let manifest = ConflictManifest {
             conflict_id: [0xAB; 16],

@@ -85,7 +85,9 @@ impl Tool for ReadFile {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "Read a file from the filesystem. Returns contents plus file metadata (lines, bytes). Truncated at 10KB.".into(),
+            description:
+                "Read a file from the filesystem. Returns contents + metadata. Truncated at 10KB."
+                    .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -119,7 +121,9 @@ impl Tool for ReadFile {
                 .map_err(|e| ToolCallError(format!("Sandbox: {}", e)))?,
             None => PathBuf::from(&args.path),
         };
-        let content = spawn_blocking_fs(move || std::fs::read_to_string(&path).map_err(|e| e.to_string())).await?;
+        let content =
+            spawn_blocking_fs(move || std::fs::read_to_string(&path).map_err(|e| e.to_string()))
+                .await?;
         let bytes_len = content.len();
         let total_lines = content.lines().count();
         let lines: Vec<&str> = content.lines().collect();
@@ -173,9 +177,7 @@ impl Tool for WriteFile {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description:
-                "Write content to a file (creates or overwrites). Returns write confirmation with a content preview."
-                    .into(),
+            description: "Write content to a file (creates or overwrites). Returns confirmation with preview.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -269,7 +271,7 @@ impl Tool for Shell {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "Execute a shell command and return stdout/stderr with exit code. The working directory is the project root.".into(),
+            description: "Execute a shell command. Returns stdout/stderr with exit code.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -301,7 +303,11 @@ impl Tool for Shell {
             let s = String::from_utf8_lossy(&output.stdout);
             // Cap output at 100KB to avoid context overflow (char-boundary safe).
             if s.len() > 102_400 {
-                let end = s.char_indices().nth(102_400).map(|(i, _)| i).unwrap_or(s.len());
+                let end = s
+                    .char_indices()
+                    .nth(102_400)
+                    .map(|(i, _)| i)
+                    .unwrap_or(s.len());
                 result.push_str(&s[..end]);
                 result.push_str("\n... [stdout truncated at 100KB]");
             } else {
@@ -315,7 +321,11 @@ impl Tool for Shell {
             result.push_str("stderr:\n");
             let s = String::from_utf8_lossy(&output.stderr);
             if s.len() > 51_200 {
-                let end = s.char_indices().nth(51_200).map(|(i, _)| i).unwrap_or(s.len());
+                let end = s
+                    .char_indices()
+                    .nth(51_200)
+                    .map(|(i, _)| i)
+                    .unwrap_or(s.len());
                 result.push_str(&s[..end]);
                 result.push_str("\n... [stderr truncated at 50KB]");
             } else {
@@ -346,7 +356,7 @@ impl Tool for ListDir {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "List files and directories in a path. Shows file sizes and directory counts.".into(),
+            description: "List files and directories in a path. Shows sizes and counts.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -409,12 +419,8 @@ impl Tool for Grep {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "Search files for lines matching a pattern (regex). ",
-                "Returns matching lines with line numbers. ",
-                "Truncated at max_results (default 50)."
-            )
-            .into(),
+            description: "Search files by regex pattern. Returns matching lines with line numbers."
+                .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -444,7 +450,8 @@ impl Tool for Grep {
         use std::io::{BufRead, Read};
 
         let max_results = args.max_results.unwrap_or(50).min(500);
-        let re = regex::Regex::new(&args.pattern).map_err(|e| ToolCallError(format!("Invalid regex: {}", e)))?;
+        let re = regex::Regex::new(&args.pattern)
+            .map_err(|e| ToolCallError(format!("Invalid regex: {}", e)))?;
 
         let path = std::path::Path::new(&args.path);
 
@@ -484,7 +491,10 @@ impl Tool for Grep {
                 }
             }
             let total = matches.len();
-            let mut result = format!("Grep '{}' in '{}' — {} match(es)\n", args.pattern, args.path, total);
+            let mut result = format!(
+                "Grep '{}' in '{}' — {} match(es)\n",
+                args.pattern, args.path, total
+            );
             if !matches.is_empty() {
                 result.push_str(&matches.join("\n"));
             }
@@ -502,7 +512,11 @@ impl Tool for Grep {
 }
 
 /// Recursive directory grep, offloaded to the blocking thread pool.
-async fn grep_directory(args: GrepArgs, re: &regex::Regex, max_results: usize) -> Result<String, ToolCallError> {
+async fn grep_directory(
+    args: GrepArgs,
+    re: &regex::Regex,
+    max_results: usize,
+) -> Result<String, ToolCallError> {
     use std::io::{BufRead, Read};
     let re = re.clone();
     spawn_blocking(move || {
@@ -514,7 +528,11 @@ async fn grep_directory(args: GrepArgs, re: &regex::Regex, max_results: usize) -
             if e.depth() == 0 {
                 return true;
             }
-            !name.starts_with('.') && name != "node_modules" && name != "target" && name != "dist" && name != "build"
+            !name.starts_with('.')
+                && name != "node_modules"
+                && name != "target"
+                && name != "dist"
+                && name != "build"
         }) {
             let entry = match entry {
                 Ok(e) => e,
@@ -595,11 +613,9 @@ impl Tool for FindFiles {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "Find files by glob pattern (e.g. \"**/*.rs\", \"*.toml\", \"src/**/mod.rs\"). ",
-                "Returns matching file paths with sizes. Default root is current directory."
-            )
-            .into(),
+            description:
+                "Find files by glob pattern (e.g. **/*.rs). Returns matching paths with sizes."
+                    .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -629,8 +645,9 @@ impl Tool for FindFiles {
         let root = args.root.unwrap_or_else(|| ".".to_string());
         let max_results = args.max_results.unwrap_or(100).min(1000);
 
-        let glob_pattern = glob::Pattern::new(&args.pattern)
-            .map_err(|e| ToolCallError(format!("Invalid glob pattern '{}': {}", args.pattern, e)))?;
+        let glob_pattern = glob::Pattern::new(&args.pattern).map_err(|e| {
+            ToolCallError(format!("Invalid glob pattern '{}': {}", args.pattern, e))
+        })?;
 
         let mut results: Vec<(String, u64, bool)> = Vec::new();
         for entry in walkdir::WalkDir::new(&root).into_iter().filter_entry(|e| {
@@ -653,7 +670,9 @@ impl Tool for FindFiles {
                 .unwrap_or(entry.path())
                 .to_string_lossy()
                 .to_string();
-            if glob_pattern.matches(&rel_path) || glob_pattern.matches(entry.path().to_string_lossy().as_ref()) {
+            if glob_pattern.matches(&rel_path)
+                || glob_pattern.matches(entry.path().to_string_lossy().as_ref())
+            {
                 let meta = match entry.metadata() {
                     Ok(m) => m,
                     Err(_) => continue,
@@ -715,7 +734,8 @@ impl Tool for MoveFile {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "Move or rename a file or directory. Creates parent directories if needed.".into(),
+            description: "Move or rename a file or directory. Creates parent dirs if needed."
+                .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -741,8 +761,13 @@ impl Tool for MoveFile {
         // Create parent directory of destination if needed
         if let Some(parent) = std::path::Path::new(&args.destination).parent() {
             if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| ToolCallError(format!("Failed to create parent dir '{}': {}", parent.display(), e)))?;
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    ToolCallError(format!(
+                        "Failed to create parent dir '{}': {}",
+                        parent.display(),
+                        e
+                    ))
+                })?;
             }
         }
 
@@ -757,7 +782,9 @@ impl Tool for MoveFile {
                         std::path::Path::new(&args.source),
                         std::path::Path::new(&args.destination),
                     )
-                    .map_err(|e2| ToolCallError(format!("Move failed (cross-device copy): {}", e2)))?;
+                    .map_err(|e2| {
+                        ToolCallError(format!("Move failed (cross-device copy): {}", e2))
+                    })?;
                     std::fs::remove_dir_all(&args.source).map_err(|e2| {
                         ToolCallError(format!(
                             "Moved content but failed to remove source '{}': {}",
@@ -765,8 +792,9 @@ impl Tool for MoveFile {
                         ))
                     })?;
                 } else {
-                    std::fs::copy(&args.source, &args.destination)
-                        .map_err(|e2| ToolCallError(format!("Move failed (cross-device copy): {}", e2)))?;
+                    std::fs::copy(&args.source, &args.destination).map_err(|e2| {
+                        ToolCallError(format!("Move failed (cross-device copy): {}", e2))
+                    })?;
                     std::fs::remove_file(&args.source).map_err(|e2| {
                         ToolCallError(format!(
                             "Moved content but failed to remove source '{}': {}",
@@ -783,7 +811,10 @@ impl Tool for MoveFile {
         }
 
         let kind = if meta.is_dir() { "directory" } else { "file" };
-        Ok(format!("Moved {} '{}' -> '{}'", kind, args.source, args.destination))
+        Ok(format!(
+            "Moved {} '{}' -> '{}'",
+            kind, args.source, args.destination
+        ))
     }
 }
 
@@ -824,7 +855,7 @@ impl Tool for CopyFile {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "Copy a file from source to destination. Creates parent directories if needed.".into(),
+            description: "Copy a file. Creates parent dirs if needed.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -849,8 +880,13 @@ impl Tool for CopyFile {
         // Create parent directory of destination if needed
         if let Some(parent) = std::path::Path::new(&args.destination).parent() {
             if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| ToolCallError(format!("Failed to create parent dir '{}': {}", parent.display(), e)))?;
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    ToolCallError(format!(
+                        "Failed to create parent dir '{}': {}",
+                        parent.display(),
+                        e
+                    ))
+                })?;
             }
         }
 
@@ -869,7 +905,9 @@ impl Tool for CopyFile {
         let size = if meta.is_dir() {
             dir_size(std::path::Path::new(&args.destination))
         } else {
-            std::fs::metadata(&args.destination).map(|m| m.len()).unwrap_or(0)
+            std::fs::metadata(&args.destination)
+                .map(|m| m.len())
+                .unwrap_or(0)
         };
         Ok(format!(
             "Copied {} '{}' -> '{}' ({} bytes)",
@@ -916,8 +954,7 @@ impl Tool for DeleteFile {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "Delete a file or directory. Directories require recursive=true. Safety: refuses to delete paths containing '..' or known system roots ('/', '/etc', '/home', etc.) unless force=true."
-            .into(),
+            description: "Delete a file or directory. Directories require recursive=true. Refuses system paths unless force=true.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -987,7 +1024,10 @@ impl Tool for DeleteFile {
                 }
             }
             // Block parent traversal after symlink resolution
-            if canon_str.contains("/../") || canon_str.ends_with("/..") || canon_str.starts_with("../") {
+            if canon_str.contains("/../")
+                || canon_str.ends_with("/..")
+                || canon_str.starts_with("../")
+            {
                 return Err(ToolCallError(format!(
                     "Refusing to delete path traversing above root via '{}'. Set force=true to bypass.",
                     args.path
@@ -1005,12 +1045,14 @@ impl Tool for DeleteFile {
                     args.path
                 )));
             }
-            std::fs::remove_dir_all(&args.path)
-                .map_err(|e| ToolCallError(format!("Failed to delete directory '{}': {}", args.path, e)))?;
+            std::fs::remove_dir_all(&args.path).map_err(|e| {
+                ToolCallError(format!("Failed to delete directory '{}': {}", args.path, e))
+            })?;
             Ok(format!("Deleted directory '{}' (recursive)", args.path))
         } else {
-            std::fs::remove_file(&args.path)
-                .map_err(|e| ToolCallError(format!("Failed to delete file '{}': {}", args.path, e)))?;
+            std::fs::remove_file(&args.path).map_err(|e| {
+                ToolCallError(format!("Failed to delete file '{}': {}", args.path, e))
+            })?;
             let size = meta.len();
             Ok(format!("Deleted file '{}' ({} bytes)", args.path, size))
         }
@@ -1038,12 +1080,7 @@ impl Tool for AppendFile {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "Append content to the end of an existing file. ",
-                "Creates the file if it doesn't exist. ",
-                "Use newline=true (default) to add a leading newline before the content."
-            )
-            .into(),
+            description: "Append content to the end of a file. Creates the file if missing.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -1071,23 +1108,31 @@ impl Tool for AppendFile {
 
         let add_newline = args.newline.unwrap_or(true);
 
-        let prev_size = std::fs::metadata(&args.path).ok().map(|m| m.len()).unwrap_or(0);
+        let prev_size = std::fs::metadata(&args.path)
+            .ok()
+            .map(|m| m.len())
+            .unwrap_or(0);
 
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&args.path)
-            .map_err(|e| ToolCallError(format!("Failed to open '{}' for append: {}", args.path, e)))?;
+            .map_err(|e| {
+                ToolCallError(format!("Failed to open '{}' for append: {}", args.path, e))
+            })?;
 
         if prev_size > 0 && add_newline {
-            file.write_all(b"\n").map_err(|e| ToolCallError(e.to_string()))?;
+            file.write_all(b"\n")
+                .map_err(|e| ToolCallError(e.to_string()))?;
         }
 
         let content_bytes = args.content.as_bytes();
         file.write_all(content_bytes)
             .map_err(|e| ToolCallError(e.to_string()))?;
 
-        let new_size = prev_size + if prev_size > 0 && add_newline { 1 } else { 0 } + content_bytes.len() as u64;
+        let new_size = prev_size
+            + if prev_size > 0 && add_newline { 1 } else { 0 }
+            + content_bytes.len() as u64;
 
         let preview = if content_bytes.len() > 200 {
             let end = args
@@ -1135,13 +1180,8 @@ impl Tool for PatchFile {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "Search-and-replace text in a file. ",
-                "Replaces all occurrences of old_text with new_text. ",
-                "Use count to limit replacements. ",
-                "Prefer this over sh with sed for clarity and safety."
-            )
-            .into(),
+            description: "Search-and-replace text in a file. Prefer this over sed for safety."
+                .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -1288,7 +1328,7 @@ impl Tool for Glob {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: "Resolve a glob pattern and return matching file paths. Simpler than find_files — uses standard glob semantics (no recursive walk config).".into(),
+            description: "Resolve a glob pattern and return matching file paths.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -1343,14 +1383,20 @@ impl Tool for Glob {
                 }
             }
             Err(e) => {
-                return Err(ToolCallError(format!("Invalid glob pattern '{}': {}", args.pattern, e)));
+                return Err(ToolCallError(format!(
+                    "Invalid glob pattern '{}': {}",
+                    args.pattern, e
+                )));
             }
         }
 
         results.sort();
 
         let total = results.len();
-        let mut output = format!("Glob '{}' in '{}' — {} match(es)\n", args.pattern, root, total);
+        let mut output = format!(
+            "Glob '{}' in '{}' — {} match(es)\n",
+            args.pattern, root, total
+        );
         for path in &results {
             // Show file size if it's a file
             let full_path = std::path::Path::new(&root).join(path);
@@ -1421,13 +1467,7 @@ impl Tool for LineEdit {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "Apply a sequence of line-level edits to a file. ",
-                "Operations are applied in order. All line numbers are 1-based ",
-                "and reference the current file state (after previous operations). ",
-                "Use dry_run=true to preview changes without writing."
-            )
-            .into(),
+            description: "Apply sequenced line-level edits to a file. Lines are 1-based. Use dry_run to preview.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "required": ["path", "operations"],
@@ -1646,7 +1686,11 @@ impl EditStats {
 }
 
 /// Apply a single operation to the current line buffer.
-fn apply_operation(lines: &mut Vec<String>, op: &LineEditOp, _ends_with_newline: bool) -> Result<&'static str, String> {
+fn apply_operation(
+    lines: &mut Vec<String>,
+    op: &LineEditOp,
+    _ends_with_newline: bool,
+) -> Result<&'static str, String> {
     match op {
         LineEditOp::InsertAfter { line, text } => {
             let pos = if *line == 0 {
@@ -1687,7 +1731,10 @@ fn apply_operation(lines: &mut Vec<String>, op: &LineEditOp, _ends_with_newline:
             text,
         } => {
             if start_line > end_line {
-                return Err(format!("start_line ({}) > end_line ({})", start_line, end_line));
+                return Err(format!(
+                    "start_line ({}) > end_line ({})",
+                    start_line, end_line
+                ));
             }
             if *start_line == 0 || *start_line > lines.len() {
                 return Err(format!(
@@ -1709,9 +1756,15 @@ fn apply_operation(lines: &mut Vec<String>, op: &LineEditOp, _ends_with_newline:
             lines.splice(start..end, new_lines);
             Ok("replace_range")
         }
-        LineEditOp::DeleteRange { start_line, end_line } => {
+        LineEditOp::DeleteRange {
+            start_line,
+            end_line,
+        } => {
             if start_line > end_line {
-                return Err(format!("start_line ({}) > end_line ({})", start_line, end_line));
+                return Err(format!(
+                    "start_line ({}) > end_line ({})",
+                    start_line, end_line
+                ));
             }
             if *start_line == 0 || *start_line > lines.len() {
                 return Err(format!(
@@ -1796,12 +1849,8 @@ impl Tool for Fetch {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
-            description: concat!(
-                "Fetch a URL and return its content as plain text. ",
-                "Supports HTTP(S). Max 10KB by default. ",
-                "Use for reading web pages, APIs, or documentation."
-            )
-            .into(),
+            description:
+                "Fetch a URL and return content as plain text. Supports HTTP(S), max 10KB.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "required": ["url"],
@@ -2055,7 +2104,11 @@ mod tests {
             .unwrap();
         assert!(result.contains("apple"), "'apple' should match /^a.*/");
         assert!(!result.contains("cherry"), "'cherry' should not match");
-        assert!(result.contains("1 match(es)"), "expected 1 match, got: {}", result);
+        assert!(
+            result.contains("1 match(es)"),
+            "expected 1 match, got: {}",
+            result
+        );
     }
 
     #[tokio::test]

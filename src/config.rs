@@ -124,10 +124,20 @@ impl ConfigSource for EnvConfigSource {
         // Known environment variable → provider mapping
         let known_vars: &[(&str, &str, ProviderProtocol, Option<&str>)] = &[
             ("OPENAI_API_KEY", "OpenAI", ProviderProtocol::OpenAi, None),
-            ("ANTHROPIC_API_KEY", "Anthropic", ProviderProtocol::Anthropic, None),
+            (
+                "ANTHROPIC_API_KEY",
+                "Anthropic",
+                ProviderProtocol::Anthropic,
+                None,
+            ),
             ("COHERE_API_KEY", "Cohere", ProviderProtocol::Cohere, None),
             ("GEMINI_API_KEY", "Gemini", ProviderProtocol::Gemini, None),
-            ("MISTRAL_API_KEY", "Mistral", ProviderProtocol::Mistral, None),
+            (
+                "MISTRAL_API_KEY",
+                "Mistral",
+                ProviderProtocol::Mistral,
+                None,
+            ),
             ("AZURE_API_KEY", "Azure", ProviderProtocol::Azure, None),
         ];
 
@@ -159,7 +169,8 @@ impl ConfigSource for EnvConfigSource {
         }
 
         // GitHub Copilot
-        if std::env::var("GITHUB_TOKEN").is_ok() || std::env::var("GITHUB_COPILOT_API_KEY").is_ok() {
+        if std::env::var("GITHUB_TOKEN").is_ok() || std::env::var("GITHUB_COPILOT_API_KEY").is_ok()
+        {
             configs.push(ProviderConfig {
                 id: "github-copilot".to_string(),
                 name: "GitHub Copilot".to_string(),

@@ -17,8 +17,8 @@ pub mod tokenizer;
 use anyhow::Result;
 use crossterm::{
     event::{
-        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, EventStream,
-        KeyCode, KeyEventKind, MouseEventKind,
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, EventStream, KeyCode, KeyEventKind, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -52,7 +52,12 @@ impl Tui {
             )
         })?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture, EnableBracketedPaste)?;
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste
+        )?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
         let (app_event_tx, app_event_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -77,13 +82,15 @@ impl Tui {
 
         // ── Wire runtime event channel and spawn event loop + broker ──
         // Channel 1: tools → event loop (ActivateAgent)
-        let (runtime_tx, event_loop_rx) = tokio::sync::mpsc::channel::<crate::runtime::RuntimeEvent>(256);
+        let (runtime_tx, event_loop_rx) =
+            tokio::sync::mpsc::channel::<crate::runtime::RuntimeEvent>(256);
         {
             let mut s = self.state.write().await;
             s.core.runtime_event_tx = Some(runtime_tx);
         }
         // Channel 2: event loop → broker (ChildCompleted, AggregationCompleted, etc.)
-        let (broker_tx, broker_rx) = tokio::sync::mpsc::channel::<crate::runtime::RuntimeEvent>(256);
+        let (broker_tx, broker_rx) =
+            tokio::sync::mpsc::channel::<crate::runtime::RuntimeEvent>(256);
 
         let state_clone = self.state.clone();
         let pool = state_clone.read().await.core.agent_pool.clone();
@@ -93,14 +100,22 @@ impl Tui {
         tokio::spawn(async move {
             let rt = runtime.expect("Runtime must be initialised before event loop");
             use crate::runtime::runtime_loop::RuntimeEventLoop;
-            let loop_ = RuntimeEventLoop::new(rt, pool, event_loop_rx, broker_tx, tool_server, Some(app_state));
+            let loop_ = RuntimeEventLoop::new(
+                rt,
+                pool,
+                event_loop_rx,
+                broker_tx,
+                tool_server,
+                Some(app_state),
+            );
             loop_.run().await;
         });
 
         let app_tx = self.app_event_tx.clone();
         let state_for_broker = self.state.clone();
         tokio::spawn(async move {
-            crate::tui::runtime_bridge::runtime_event_broker(broker_rx, app_tx, state_for_broker).await;
+            crate::tui::runtime_bridge::runtime_event_broker(broker_rx, app_tx, state_for_broker)
+                .await;
         });
 
         let mut event_stream = EventStream::new();
@@ -211,10 +226,14 @@ impl Tui {
     }
 
     /// Save conversation messages for the next session (opencode-style).
+    /// Also saves a timestamped copy to sessions/ for /sessions popup.
     async fn save_session(&self) {
         let state = self.state.read().await;
         if !state.core.messages.is_empty() {
             let _ = crate::persistence::save_session(&state.core.messages);
+            // Also save to sessions/ with a timestamp name so /sessions can find it.
+            let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+            let _ = crate::persistence::save_session_as(&ts, &state.core.messages);
         }
     }
 }

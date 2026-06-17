@@ -63,7 +63,9 @@ impl SuspendQueue {
                     // Non-NaN goes after NaN
                     (_, true) => std::cmp::Ordering::Greater,
                     // Both normal floats: use partial_cmp
-                    _ => priority.partial_cmp(&r.priority).unwrap_or(std::cmp::Ordering::Equal),
+                    _ => priority
+                        .partial_cmp(&r.priority)
+                        .unwrap_or(std::cmp::Ordering::Equal),
                 }
             })
             .unwrap_or_else(|p| p);

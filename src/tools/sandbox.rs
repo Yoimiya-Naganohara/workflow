@@ -45,7 +45,10 @@ impl SandboxHandle {
     /// times for the same agent_id (useful for retries).
     pub fn new(agent_id: &[u8; 16]) -> Result<Self> {
         let home = dirs_or_fallback();
-        let root = home.join(".workflow").join("sandbox").join(hex_prefix(agent_id));
+        let root = home
+            .join(".workflow")
+            .join("sandbox")
+            .join(hex_prefix(agent_id));
 
         // 1. Writable work directory.
         let workdir = root.join(WORK_DIR);
@@ -58,10 +61,16 @@ impl SandboxHandle {
         // 2. Read-only symlink to project root.
         let source_link = root.join(SOURCE_LINK);
         if !source_link.exists() {
-            let project_root = std::env::current_dir().context("Cannot determine project root for sandbox symlink")?;
+            let project_root = std::env::current_dir()
+                .context("Cannot determine project root for sandbox symlink")?;
             #[cfg(unix)]
-            std::os::unix::fs::symlink(&project_root, &source_link)
-                .with_context(|| format!("symlink {} -> {}", source_link.display(), project_root.display()))?;
+            std::os::unix::fs::symlink(&project_root, &source_link).with_context(|| {
+                format!(
+                    "symlink {} -> {}",
+                    source_link.display(),
+                    project_root.display()
+                )
+            })?;
             #[cfg(windows)]
             std::os::windows::fs::symlink_dir(&project_root, &source_link)?;
         }
@@ -115,7 +124,10 @@ impl SandboxHandle {
                 return Ok(source_variant.canonicalize().unwrap_or(source_variant));
             }
         }
-        anyhow::bail!("Read-only sandbox: path '{}' is outside the source tree", raw);
+        anyhow::bail!(
+            "Read-only sandbox: path '{}' is outside the source tree",
+            raw
+        );
     }
 
     /// Resolve a path for **write** operations.
@@ -164,7 +176,10 @@ impl SandboxHandle {
         let mut depth = 0;
         while let Some(parent) = ancestor {
             if depth >= MAX_CANON_DEPTH {
-                anyhow::bail!("Path has too many non-existing ancestors: {}", path.display());
+                anyhow::bail!(
+                    "Path has too many non-existing ancestors: {}",
+                    path.display()
+                );
             }
             if parent.exists() {
                 let canon_parent = parent.canonicalize().with_context(|| {
@@ -175,14 +190,19 @@ impl SandboxHandle {
                     )
                 })?;
                 let checked = self.check_boundary(canon_parent)?;
-                let remaining = path.strip_prefix(parent).expect("parent is a prefix by construction");
+                let remaining = path
+                    .strip_prefix(parent)
+                    .expect("parent is a prefix by construction");
                 return Ok(checked.join(remaining));
             }
             ancestor = parent.parent();
             depth += 1;
         }
 
-        anyhow::bail!("Path has no existing ancestor within sandbox: {}", path.display())
+        anyhow::bail!(
+            "Path has no existing ancestor within sandbox: {}",
+            path.display()
+        )
     }
 
     fn check_boundary(&self, canon: PathBuf) -> Result<PathBuf> {
@@ -278,7 +298,11 @@ mod tests {
     #[test]
     fn test_read_only_rejects_workdir_path() {
         let h = test_handle();
-        let err = h.resolve_path_read_only("src/main.rs").unwrap_err();
+        // Use a non-existent path — src/main.rs exists in the project
+        // root and would resolve through the read-through fallback.
+        let err = h
+            .resolve_path_read_only("nonexistent_bogus_file.bin")
+            .unwrap_err();
         let msg = format!("{:?}", err);
         assert!(
             msg.contains("outside the source tree") || msg.contains("Read-only"),
