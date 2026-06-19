@@ -7,7 +7,7 @@ pub const EMBEDDING_DIM: usize = 384;
 pub const DEFAULT_TEMPERATURE: f64 = 0.7;
 
 /// Default max tokens for chat agents.
-pub const DEFAULT_MAX_TOKENS: u64 = 40000;
+pub const DEFAULT_MAX_TOKENS: u64 = 8192;
 
 /// Priority weight for budget ratio (vs depth factor).
 pub const BUDGET_PRIORITY_WEIGHT: f32 = 0.6;
@@ -69,8 +69,8 @@ pub const BUDGET_ANOMALY_RATIO: f64 = 0.8;
 /// Maximum responsibility chain length before flagging.
 pub const MAX_CHAIN_LENGTH: usize = 20;
 
-/// Default max tool-calling turns for MCP chat (30 = safe upper bound).
-pub const DEFAULT_MAX_TOOL_TURNS: usize = 30;
+/// Default max tool-calling turns for MCP chat (10 = cost-bounded upper limit).
+pub const DEFAULT_MAX_TOOL_TURNS: usize = 10;
 
 /// Memo usage instructions appended to every role's system prompt.
 pub const MEMO_INSTRUCTIONS: &str = "Memos are persisted across sessions and shared among all agents of the same role. When the user says something important or when you discover a key insight, save it with `write_memo` so other agents (and future sessions) can benefit.";
@@ -108,7 +108,7 @@ mod tests {
     fn test_constants_values() {
         assert_eq!(EMBEDDING_DIM, 384);
         assert_eq!(DEFAULT_TEMPERATURE, 0.7);
-        assert_eq!(DEFAULT_MAX_TOKENS, 40000);
+        assert_eq!(DEFAULT_MAX_TOKENS, 8192);
         assert!((BUDGET_PRIORITY_WEIGHT - 0.6).abs() < f32::EPSILON);
         assert!((DEPTH_PRIORITY_WEIGHT - 0.4).abs() < f32::EPSILON);
     }

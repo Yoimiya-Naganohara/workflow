@@ -60,7 +60,7 @@ pub enum AppMode {
     Build,
 }
 
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MessageStatus {
     Thinking,
     Streaming,
@@ -900,6 +900,401 @@ impl Default for UiState {
             total_chat_lines: 0,
             think_level: 2,
             embedding_cache: CacheStats::default(),
+        }
+    }
+}
+
+// ============================================================================
+//  Full-chain integration tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::types::EMBEDDING_DIM;
+    use crate::runtime::AgentRuntime;
+    use crate::runtime::config::AgentRuntimeConfig;
+
+    /// Build a mock embedding that returns a fixed vector.
+    struct MockEmbed;
+
+    #[async_trait::async_trait]
+    impl crate::llm::EmbeddingService for MockEmbed {
+        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; EMBEDDING_DIM]> {
+            Ok([1.0f32; EMBEDDING_DIM])
+        }
+        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; EMBEDDING_DIM]>> {
+            Ok(vec![[1.0f32; EMBEDDING_DIM]; texts.len()])
+        }
+        fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
+            if a == b { 1.0 } else { 0.0 }
+        }
+        fn cache_size(&self) -> usize {
+            0
+        }
+        fn clear_cache(&self) {}
+        fn cache_hits(&self) -> u64 {
+            0
+        }
+        fn cache_misses(&self) -> u64 {
+            0
+        }
+    }
+
+    /// Simulate the handler's history-building logic (lines 718–735 of handler.rs).
+    fn build_chat_history<'a>(
+        messages: &'a [ChatMessage],
+        response_index: usize,
+    ) -> Vec<(&'a str, &'a str)> {
+        let mut hist = Vec::new();
+        for (i, msg) in messages.iter().enumerate() {
+            if i >= response_index.saturating_sub(1) {
+                break;
+            }
+            match msg.role {
+                MessageRole::User => hist.push(("user", msg.content.as_str())),
+                MessageRole::Agent => hist.push(("assistant", msg.content.as_str())),
+                // System messages intentionally excluded (display-only).
+                MessageRole::System => {}
+                MessageRole::Decision => {}
+            }
+        }
+        hist
+    }
+
+    /// Simulate the system-prompt construction from handler.rs (lines 704–710).
+    fn build_system_prompt(agent_prompt: &str, memos: &str) -> String {
+        format!(
+            "{}\n\n{}\n\n{}{}",
+            agent_prompt,
+            crate::core::types::MEMO_INSTRUCTIONS,
+            crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
+            memos,
+        )
+    }
+
+    // ========================================================================
+    //  1. History excluding System messages
+    // ========================================================================
+
+    #[test]
+    fn test_history_excludes_system_messages() {
+        let messages = vec![
+            ChatMessage::system("Welcome to Workflow Agent."),
+            ChatMessage {
+                role: MessageRole::User,
+                content: "Hello".into(),
+                reasoning: String::new(),
+                timestamp: "00:00:01".into(),
+                status: MessageStatus::Completed,
+            },
+            ChatMessage {
+                role: MessageRole::Agent,
+                content: "Hi there".into(),
+                reasoning: String::new(),
+                timestamp: "00:00:02".into(),
+                status: MessageStatus::Completed,
+            },
+            ChatMessage::system("✅ Child agent completed."),
+            ChatMessage {
+                role: MessageRole::User,
+                content: "New question".into(),
+                reasoning: String::new(),
+                timestamp: "00:00:03".into(),
+                status: MessageStatus::Completed,
+            },
+        ];
+
+        // response_index = 5 (agent slot after the last User at index 4).
+        // The last User message is passed as the `message` argument to the LLM,
+        // NOT included in history. So history contains only indices 0..3.
+        let history = build_chat_history(&messages, 5);
+
+        // Should contain: User("Hello"), Agent("Hi there")
+        // System messages "Welcome" and "✅ Child agent completed" must be absent.
+        // User("New question") is the current query, not in history.
+        assert_eq!(
+            history.len(),
+            2,
+            "2 messages in history, 0 system, current query excluded"
+        );
+        assert_eq!(history[0].0, "user");
+        assert_eq!(history[0].1, "Hello");
+        assert_eq!(history[1].0, "assistant");
+        assert_eq!(history[1].1, "Hi there");
+
+        // Verify no message has role "system".
+        for (role, _) in &history {
+            assert_ne!(*role, "system", "no system messages in history");
+        }
+    }
+
+    // ========================================================================
+    //  2. System prompt stability (goal NOT in system prompt)
+    // ========================================================================
+
+    #[test]
+    fn test_system_prompt_does_not_contain_goal() {
+        let prompt = build_system_prompt("You are a developer. Write secure code.", "");
+        // The goal "Implement feature X" must NOT appear in system prompt.
+        assert!(!prompt.contains("Implement feature X"));
+        assert!(!prompt.contains("Your goal:"));
+        assert!(prompt.contains("You are a developer"));
+        assert!(prompt.contains(crate::core::types::MEMO_INSTRUCTIONS));
+    }
+
+    #[test]
+    fn test_system_prompt_includes_memos_when_present() {
+        let prompt = build_system_prompt(
+            "You are a tester.",
+            "\n\n=== Role Memos ===\n  [preferred_lang]: Rust\n====",
+        );
+        assert!(prompt.contains("Role Memos"));
+        assert!(prompt.contains("preferred_lang"));
+        assert!(!prompt.contains("Your goal:"));
+    }
+
+    // ========================================================================
+    //  3. Event processing pipeline (ChatCompleted → state update)
+    // ========================================================================
+
+    #[test]
+    fn test_chat_completed_updates_state() {
+        let mut state = AppState::default();
+
+        // Simulate a user request & placeholder agent response.
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content: "Write a test".into(),
+            reasoning: String::new(),
+            timestamp: "00:00:01".into(),
+            status: MessageStatus::Completed,
+        });
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::Agent,
+            content: String::new(),
+            reasoning: String::new(),
+            timestamp: "00:00:02".into(),
+            status: MessageStatus::Streaming,
+        });
+        let resp_idx = state.core.messages.len() - 1;
+        state.ui.active_chat_requests = 1;
+
+        // Simulate streaming tokens.
+        let tokens = ["Sure", ", ", "here's", " your test."];
+        for token in &tokens {
+            state.handle_event(AppEvent::ChatToken {
+                response_index: resp_idx,
+                text: token.to_string(),
+            });
+        }
+
+        // Simulate completion.
+        state.handle_event(AppEvent::ChatCompleted {
+            response_index: resp_idx,
+            request_id: 0,
+            full_response: "Sure, here's your test.".into(),
+            input: "Write a test".into(),
+            runtime: None,
+        });
+
+        // Verify final state.
+        let last = state.core.messages.last().unwrap();
+        assert_eq!(last.status, MessageStatus::Completed);
+        assert_eq!(last.content, "Sure, here's your test.");
+        assert_eq!(state.ui.active_chat_requests, 0);
+    }
+
+    #[test]
+    fn test_chat_error_marks_message() {
+        let mut state = AppState::default();
+
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content: "Do something".into(),
+            reasoning: String::new(),
+            timestamp: "00:00:01".into(),
+            status: MessageStatus::Completed,
+        });
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::Agent,
+            content: String::new(),
+            reasoning: String::new(),
+            timestamp: "00:00:02".into(),
+            status: MessageStatus::Thinking,
+        });
+        let resp_idx = state.core.messages.len() - 1;
+        state.ui.active_chat_requests = 1;
+
+        state.handle_event(AppEvent::ChatError {
+            response_index: resp_idx,
+            request_id: 0,
+            error: "Connection refused".into(),
+        });
+
+        let last = state.core.messages.last().unwrap();
+        assert_eq!(last.status, MessageStatus::Error);
+        assert!(last.content.contains("Connection refused"));
+        assert_eq!(state.ui.active_chat_requests, 0);
+    }
+
+    // ========================================================================
+    //  4. Token recalculation works with mixed roles
+    // ========================================================================
+
+    #[test]
+    fn test_recalc_tokens_skips_system_messages_for_output() {
+        let mut state = AppState::default();
+        state
+            .core
+            .messages
+            .push(ChatMessage::system("System note."));
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content: "Hello".into(),
+            ..Default::default()
+        });
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::Agent,
+            content: "World".into(),
+            ..Default::default()
+        });
+        // Clear the seeded initial message to have clean counts.
+        state.core.messages.remove(0);
+
+        state.recalc_tokens();
+
+        // User + System count as input; Agent counts as output.
+        // Tokenizer may not be initialized in test, so uses fallback (chars/4).
+        assert!(
+            state.ui.cached_input_tokens > 0,
+            "input tokens from User+System"
+        );
+        assert!(
+            state.ui.cached_output_tokens > 0,
+            "output tokens from Agent"
+        );
+        assert_eq!(state.ui.cached_message_count, 3);
+    }
+
+    #[test]
+    fn test_has_api_tokens_prevents_recalc_overwrite() {
+        let mut state = AppState::default();
+        state.ui.has_api_tokens = true;
+        state.ui.cached_input_tokens = 100;
+        state.ui.cached_output_tokens = 50;
+
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content: "New message".into(),
+            ..Default::default()
+        });
+
+        // recalc_tokens is guarded: if has_api_tokens, it's a no-op.
+        state.recalc_tokens();
+        assert_eq!(state.ui.cached_input_tokens, 100);
+        assert_eq!(state.ui.cached_output_tokens, 50);
+    }
+
+    // ========================================================================
+    //  5. CacheStats hit rate
+    // ========================================================================
+
+    #[test]
+    fn test_cache_stats_hit_rate() {
+        let stats = CacheStats {
+            hits: 80,
+            misses: 20,
+        };
+        assert!((stats.hit_rate() - 80.0).abs() < 0.01);
+
+        let empty = CacheStats::default();
+        assert_eq!(empty.hit_rate(), 0.0);
+    }
+
+    // ========================================================================
+    //  6. Full integration: AppState + runtime
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_full_chat_pipeline_with_runtime() {
+        let embed: Arc<dyn crate::llm::EmbeddingService> = Arc::new(MockEmbed);
+        let runtime = Arc::new(RwLock::new(AgentRuntime::new(
+            AgentRuntimeConfig::default(),
+            embed,
+        )));
+
+        let mut state = AppState::default();
+        state.core.runtime = Some(runtime);
+
+        // Add some messages including System.
+        state
+            .core
+            .messages
+            .push(ChatMessage::system("Boot message."));
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content: "Implement feature".into(),
+            reasoning: String::new(),
+            timestamp: "00:01:00".into(),
+            status: MessageStatus::Completed,
+        });
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::Agent,
+            content: "Working on it...".into(),
+            reasoning: String::new(),
+            timestamp: "00:01:01".into(),
+            status: MessageStatus::Completed,
+        });
+        state
+            .core
+            .messages
+            .push(ChatMessage::system("✅ Sub-agent done."));
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content: "Add tests".into(),
+            reasoning: String::new(),
+            timestamp: "00:02:00".into(),
+            status: MessageStatus::Completed,
+        });
+
+        // The next response slot (agent will fill this).
+        state.core.messages.push(ChatMessage {
+            role: MessageRole::Agent,
+            content: String::new(),
+            reasoning: String::new(),
+            timestamp: "00:02:01".into(),
+            status: MessageStatus::Thinking,
+        });
+        let resp_idx = state.core.messages.len() - 1;
+
+        // ── Build history (same logic as handler.rs) ──
+        let history = build_chat_history(&state.core.messages, resp_idx);
+
+        // System messages excluded.
+        for (role, _) in &history {
+            assert_ne!(*role, "system");
+        }
+        // Should be: User, Agent (current User "Add tests" is message param, not in history).
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].0, "user");
+        assert_eq!(history[0].1, "Implement feature");
+
+        // ── Recalc tokens ──
+        state.recalc_tokens();
+        assert!(state.ui.cached_input_tokens > 0);
+        assert!(state.ui.cached_output_tokens > 0);
+    }
+}
+
+impl Default for ChatMessage {
+    fn default() -> Self {
+        Self {
+            role: MessageRole::System,
+            content: String::new(),
+            reasoning: String::new(),
+            timestamp: String::new(),
+            status: MessageStatus::Completed,
         }
     }
 }

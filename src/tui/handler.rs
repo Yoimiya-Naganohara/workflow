@@ -724,11 +724,7 @@ impl Tui {
                 match msg.role {
                     MessageRole::User => hist.push(("user".to_string(), msg.content.clone())),
                     MessageRole::Agent => hist.push(("assistant".to_string(), msg.content.clone())),
-                    MessageRole::System => {
-                        // System messages (child completion notifications, etc.)
-                        // are included so the agent sees async results.
-                        hist.push(("system".to_string(), msg.content.clone()))
-                    }
+                    // System messages are display-only and not sent to the LLM.
                     _ => {}
                 }
             }

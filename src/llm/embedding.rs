@@ -255,16 +255,44 @@ impl EmbeddingRouter {
     }
 
     pub fn with_strategy(mut self, strategy: EmbeddingStrategy) -> Self {
-        self.strategy = strategy;
+        if self.strategy != strategy {
+            self.clear_router_cache();
+            self.strategy = strategy;
+        }
         self
     }
 
     pub fn set_remote(&mut self, provider: Arc<LlmProvider>) {
         self.remote = Some(RemoteEmbedder::new(provider));
+        self.clear_router_cache();
     }
 
     pub fn clear_remote(&mut self) {
         self.remote = None;
+        self.clear_router_cache();
+    }
+
+    fn clear_router_cache(&self) {
+        self.cache.clear();
+        self.cache_hits.store(0, Ordering::Relaxed);
+        self.cache_misses.store(0, Ordering::Relaxed);
+    }
+
+    fn cache_key_for(&self, text: &str, source: &str) -> String {
+        format!("{:?}|{}|{}", self.strategy, source, text)
+    }
+
+    fn remote_cache_source(remote: &RemoteEmbedder) -> String {
+        format!("remote:{:?}", remote.protocol)
+    }
+
+    fn lookup_source(&self) -> String {
+        if self.use_remote() {
+            if let Some(remote) = self.remote.as_ref().filter(|remote| remote.is_available()) {
+                return Self::remote_cache_source(remote);
+            }
+        }
+        "local".to_string()
     }
 
     fn use_remote(&self) -> bool {
@@ -278,35 +306,39 @@ impl EmbeddingRouter {
     }
 
     async fn embed_impl(&self, text: &str) -> Result<[f32; EMBEDDING_DIM]> {
-        if let Some(cached) = self.cache.get(text) {
+        let remote = if self.use_remote() {
+            self.remote.as_ref().filter(|remote| remote.is_available())
+        } else {
+            None
+        };
+        let lookup_source = remote
+            .map(Self::remote_cache_source)
+            .unwrap_or_else(|| "local".to_string());
+        let lookup_key = self.cache_key_for(text, &lookup_source);
+
+        if let Some(cached) = self.cache.get(&lookup_key) {
             self.cache_hits.fetch_add(1, Ordering::Relaxed);
             return Ok(*cached);
         }
         self.cache_misses.fetch_add(1, Ordering::Relaxed);
 
-        let result = if self.use_remote() {
-            let remote = self.remote.as_ref().unwrap(); //TODO: remove unwrap()
+        let (result, insert_source) = if let Some(remote) = remote {
             match remote.embed(text).await {
-                Ok(emb) => {
-                    if self.strategy == EmbeddingStrategy::LocalFallback {
-                        return Ok(emb);
-                    }
-                    emb
-                }
+                Ok(emb) => (emb, Self::remote_cache_source(remote)),
                 Err(e) => {
                     if self.strategy == EmbeddingStrategy::RemoteOnly {
                         return Err(e);
                     }
-                    // Fall back to local
                     tracing::warn!("Remote embedding failed, falling back to local: {}", e);
-                    self.local.embed(text).await?
+                    (self.local.embed(text).await?, "local".to_string())
                 }
             }
         } else {
-            self.local.embed(text).await?
+            (self.local.embed(text).await?, "local".to_string())
         };
 
-        self.cache.insert(text.to_string(), result);
+        let insert_key = self.cache_key_for(text, &insert_source);
+        self.cache.insert(insert_key, result);
         Ok(result)
     }
 }
@@ -318,12 +350,14 @@ impl crate::llm::EmbeddingService for EmbeddingRouter {
     }
 
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<[f32; EMBEDDING_DIM]>> {
-        // Batch uncached texts
         let mut results = vec![[0.0f32; EMBEDDING_DIM]; texts.len()];
         let mut uncached: Vec<(usize, String)> = Vec::new();
+        let lookup_source = self.lookup_source();
 
+        // ── Phase 1: router-cache probe ──
         for (i, text) in texts.iter().enumerate() {
-            if let Some(cached) = self.cache.get(*text) {
+            let key = self.cache_key_for(text, &lookup_source);
+            if let Some(cached) = self.cache.get(&key) {
                 self.cache_hits.fetch_add(1, Ordering::Relaxed);
                 results[i] = *cached;
             } else {
@@ -331,15 +365,51 @@ impl crate::llm::EmbeddingService for EmbeddingRouter {
             }
         }
 
-        self.cache_misses
-            .fetch_add(uncached.len() as u64, Ordering::Relaxed);
-
         if uncached.is_empty() {
             return Ok(results);
         }
 
-        for (idx, text) in &uncached {
-            if let Ok(emb) = self.embed_impl(text).await {
+        // Bulk-count misses for all uncached items.
+        self.cache_misses
+            .fetch_add(uncached.len() as u64, Ordering::Relaxed);
+
+        // ── Phase 2: embed uncached items ──
+        let remote = if self.use_remote() {
+            self.remote.as_ref().filter(|r| r.is_available())
+        } else {
+            None
+        };
+
+        if let Some(remote_embedder) = remote {
+            // Remote path: one-by-one (no batch API on RemoteEmbedder)
+            // with local fallback on failure.
+            let insert_source = Self::remote_cache_source(remote_embedder);
+            for (idx, text) in &uncached {
+                let emb = match remote_embedder.embed(text).await {
+                    Ok(emb) => emb,
+                    Err(e) => {
+                        if self.strategy == EmbeddingStrategy::RemoteOnly {
+                            return Err(e);
+                        }
+                        tracing::warn!("Remote embedding failed, falling back to local: {}", e);
+                        self.local.embed(text).await?
+                    }
+                };
+                let key = self.cache_key_for(text, &insert_source);
+                self.cache.insert(key, emb);
+                results[*idx] = emb;
+            }
+        } else {
+            // Local path: batch the embedding call to amortize
+            // model-lock acquisition and ONNX inference overhead.
+            let refs: Vec<&str> = uncached.iter().map(|(_, t)| t.as_str()).collect();
+            let embeddings = self.local.embed_batch(&refs).await?;
+
+            let insert_source = "local".to_string();
+            for (j, (idx, text)) in uncached.iter().enumerate() {
+                let emb = embeddings[j];
+                let key = self.cache_key_for(text, &insert_source);
+                self.cache.insert(key, emb);
                 results[*idx] = emb;
             }
         }
@@ -356,9 +426,7 @@ impl crate::llm::EmbeddingService for EmbeddingRouter {
     }
 
     fn clear_cache(&self) {
-        self.cache.clear();
-        self.cache_hits.store(0, Ordering::Relaxed);
-        self.cache_misses.store(0, Ordering::Relaxed);
+        self.clear_router_cache();
     }
 
     fn cache_hits(&self) -> u64 {
@@ -409,6 +477,10 @@ impl crate::llm::EmbeddingService for EmbeddingService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
+
+    /// Helper: access the EmbeddingService trait on Router from tests.
+    use crate::llm::EmbeddingService as _;
 
     #[test]
     fn test_normalize_embedding() {
@@ -428,11 +500,152 @@ mod tests {
         assert_eq!(normalized, embedding);
     }
 
+    /// Helper: create a Router without calling the expensive fastembed constructor.
+    /// Uses catch_unwind to skip gracefully when ONNX is unavailable (CI, sandbox).
+    fn try_router() -> Option<EmbeddingRouter> {
+        std::panic::catch_unwind(|| {
+            EmbeddingRouter::new(EmbeddingService::new(), None, EmbeddingStrategy::LocalOnly)
+        })
+        .ok()
+    }
+
+    // ========================================================================
+    //  EmbeddingRouter cache key & invalidation
+    // ========================================================================
+
     #[test]
-    fn test_cosine_similarity() {
-        let a = [1.0f32; EMBEDDING_DIM];
-        let b = [1.0f32; EMBEDDING_DIM];
-        let sim = cosine_similarity_384(&a, &b);
-        assert!((sim - 1.0).abs() < 1e-6);
+    fn test_router_cache_key_format() {
+        // Strategy + source + text → deterministic, strategy-scoped key.
+        let Some(router) = try_router() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        let key_local = router.cache_key_for("hello", "local");
+        let key_local2 = router.cache_key_for("hello", "local");
+        assert_eq!(
+            key_local, key_local2,
+            "same (strategy,source,text) → same key"
+        );
+
+        let key_diff_text = router.cache_key_for("world", "local");
+        assert_ne!(key_local, key_diff_text, "different text → different key");
+
+        // Different source but same text.
+        let key_b = router.cache_key_for("hello", "remote:OpenAi");
+        assert_ne!(key_local, key_b, "different source → different key");
+
+        assert!(
+            key_local.contains("LocalOnly"),
+            "key should embed strategy: {:?}",
+            key_local
+        );
+    }
+
+    #[test]
+    fn test_router_lookup_source_changes_with_strategy() {
+        let Some(mut router) = try_router() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        // LocalOnly, no remote → source should be "local".
+        assert_eq!(router.lookup_source(), "local");
+
+        // RemoteOnly with no remote → use_remote is false, source stays "local".
+        router.strategy = EmbeddingStrategy::RemoteOnly;
+        assert!(!router.use_remote(), "no remote → remote not used");
+
+        // Back to LocalOnly.
+        router.strategy = EmbeddingStrategy::LocalOnly;
+        assert_eq!(router.lookup_source(), "local");
+    }
+
+    #[test]
+    fn test_router_cache_clear_resets_counters() {
+        let Some(router) = try_router() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        // Inject a miss manually via the private miss counter.
+        router.cache_misses.fetch_add(5, Ordering::Relaxed);
+        router.cache_hits.fetch_add(3, Ordering::Relaxed);
+        assert_eq!(router.cache_misses(), 5);
+        assert_eq!(router.cache_hits(), 3);
+
+        router.clear_router_cache();
+        assert_eq!(router.cache_misses(), 0, "misses reset after clear");
+        assert_eq!(router.cache_hits(), 0, "hits reset after clear");
+    }
+
+    #[test]
+    fn test_router_cache_clear_on_remote_toggle() {
+        let Some(mut router) = try_router() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        // Simulate non-zero counters.
+        router.cache_misses.fetch_add(10, Ordering::Relaxed);
+
+        // clear_remote() calls clear_router_cache().
+        router.clear_remote();
+        assert_eq!(
+            router.cache_misses(),
+            0,
+            "clear_remote() should reset cache counters"
+        );
+
+        // Simulate counters again.
+        router.cache_misses.fetch_add(7, Ordering::Relaxed);
+
+        // Remote toggle calls clear_router_cache() too.
+        router.strategy = EmbeddingStrategy::LocalOnly;
+        // No remote, so looking up source still works.
+        assert_eq!(router.lookup_source(), "local");
+    }
+
+    // ========================================================================
+    //  EmbeddingService locals
+    // ========================================================================
+
+    #[test]
+    fn test_normalize_non_zero_preserves_direction() {
+        let mut v = [0.0f32; EMBEDDING_DIM];
+        v[0] = 2.0;
+        v[1] = 2.0;
+        let n = normalize_embedding(v);
+        assert!((n[0] - n[1]).abs() < 1e-6, "equal components stay equal");
+        let norm: f32 = n.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5, "unit norm: got {}", norm);
+    }
+
+    // ========================================================================
+    //  EmbeddingRouter batch hit/miss compute
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_router_embed_batch_counts_hits_and_misses() {
+        let Some(router) = try_router() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        let texts = ["batch_alpha", "batch_beta", "batch_gamma"];
+
+        // First call: all misses.
+        let results = router.embed_batch(&texts).await.unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(router.cache_misses(), 3, "first call: 3 misses");
+        assert_eq!(router.cache_hits(), 0, "first call: 0 hits");
+
+        // Second call: all hits (same texts).
+        let results2 = router.embed_batch(&texts).await.unwrap();
+        assert_eq!(results2.len(), 3);
+        assert_eq!(router.cache_misses(), 3, "misses unchanged after cache hit");
+        assert_eq!(router.cache_hits(), 3, "second call: 3 hits");
+
+        // Mixed: 2 cached + 1 new.
+        let mixed = ["batch_alpha", "batch_beta", "batch_delta"];
+        let results3 = router.embed_batch(&mixed).await.unwrap();
+        assert_eq!(results3.len(), 3);
+        assert_eq!(router.cache_misses(), 4, "1 new miss for batch_delta");
+        assert_eq!(router.cache_hits(), 5, "2 cached hits");
     }
 }

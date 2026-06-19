@@ -326,6 +326,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
             };
 
             let mut full_response = String::new();
+            let mut done_received = false;
 
             let stream_result = Abortable::new(
                 async {
@@ -362,7 +363,10 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                                     output,
                                 });
                             }
-                            ToolEvent::Done => break,
+                            ToolEvent::Done => {
+                                done_received = true;
+                                break;
+                            }
                         }
                     }
                 },
@@ -371,6 +375,14 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
             .await;
 
             match stream_result {
+                Ok(()) if !done_received => {
+                    // Stream ended without Done — treat as an error.
+                    let _ = tx.send(AppEvent::ChatError {
+                        response_index,
+                        request_id,
+                        error: "Stream ended unexpectedly without Done event.".to_string(),
+                    });
+                }
                 Ok(()) => {
                     let _ = tx.send(AppEvent::ChatCompleted {
                         response_index,

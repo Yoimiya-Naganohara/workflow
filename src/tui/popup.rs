@@ -7,7 +7,8 @@ use ratatui::{
     text::Span,
     widgets::{Paragraph, Row, Table, TableState},
 };
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 use crate::agent::AgentStatus;
 use crate::core::types::AgentId;
@@ -62,7 +63,7 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
             ((count.min(8) as u16) + 1).min(10)
         }
         PopupMode::FilePicker { query: _ } => {
-            let files = get_project_files();
+            let files = get_project_files_cached();
             let query = file_picker_query(&state.ui.input);
             let count = if query.is_empty() {
                 files.len()
@@ -538,15 +539,16 @@ fn render_model_popup(f: &mut Frame, area: Rect, state: &AppState) {
 // ── File picker popup ──
 
 fn render_file_popup(f: &mut Frame, area: Rect, state: &AppState) {
-    let files = get_project_files();
+    let files = get_project_files_cached();
     let query = file_picker_query(&state.ui.input);
     let q = query.to_lowercase();
-    let filtered: Vec<&String> = if q.is_empty() {
-        files.iter().collect()
+    let filtered: Vec<&str> = if q.is_empty() {
+        files.iter().map(String::as_str).collect()
     } else {
         files
             .iter()
             .filter(|f| f.to_lowercase().contains(&q))
+            .map(String::as_str)
             .collect()
     };
 
@@ -565,11 +567,12 @@ fn render_file_popup(f: &mut Frame, area: Rect, state: &AppState) {
     let rows: Vec<Row> = filtered
         .iter()
         .map(|path| {
+            let path_text = *path;
             // Show file icon based on extension
-            let icon = file_icon(path);
+            let icon = file_icon(path_text);
             Row::new(vec![
                 Span::styled(icon, Style::default().fg(style::TEXT_MUTED)),
-                Span::styled(path.as_str(), style::value_style()),
+                Span::styled(path_text.to_string(), style::value_style()),
             ])
         })
         .collect();
@@ -715,62 +718,86 @@ pub(crate) fn file_picker_query(input: &str) -> &str {
 }
 
 /// Scan the project directory for files, with caching.
-static FILE_CACHE: OnceLock<Vec<String>> = OnceLock::new();
+static FILE_CACHE: OnceLock<RwLock<ProjectFileCache>> = OnceLock::new();
+const FILE_CACHE_TTL: Duration = Duration::from_secs(2);
 
-pub(crate) fn get_project_files_cached() -> &'static Vec<String> {
-    get_project_files()
+#[derive(Clone)]
+struct ProjectFileCache {
+    files: Vec<String>,
+    refreshed_at: Instant,
 }
 
-fn get_project_files() -> &'static Vec<String> {
-    FILE_CACHE.get_or_init(|| {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        if cwd.as_os_str().is_empty() {
-            return Vec::new();
+pub(crate) fn get_project_files_cached() -> Vec<String> {
+    let cache = FILE_CACHE.get_or_init(|| {
+        RwLock::new(ProjectFileCache {
+            files: scan_project_files(),
+            refreshed_at: Instant::now(),
+        })
+    });
+
+    if let Ok(guard) = cache.read() {
+        if guard.refreshed_at.elapsed() < FILE_CACHE_TTL {
+            return guard.files.clone();
         }
+    }
 
-        // Use `git ls-files` to respect .gitignore and avoid hardcoded skip lists.
-        // This includes both tracked and untracked (non-ignored) files.
-        let mut files: Vec<String> = match std::process::Command::new("git")
-            .args(["ls-files", "--cached", "--others", "--exclude-standard"])
-            .current_dir(&cwd)
-            .output()
-        {
-            Ok(out) if out.status.success() => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                stdout.lines().map(|s| s.to_string()).collect()
-            }
-            _ => {
-                // Fallback: walk directory when git is not available
-                // with minimal skips for performance
-                let mut f = Vec::new();
-                let skip_dirs: &[&str] = &[".git", "target", "node_modules"];
-                let walker = walkdir::WalkDir::new(&cwd).into_iter().filter_entry(|e| {
-                    if e.file_type().is_dir() {
-                        let name = e.file_name().to_string_lossy();
-                        !skip_dirs.contains(&name.as_ref())
-                    } else {
-                        true
-                    }
-                });
-                for entry in walker.flatten() {
-                    if !entry.file_type().is_file() {
-                        continue;
-                    }
-                    if let Ok(rel) = entry.path().strip_prefix(&cwd) {
-                        f.push(rel.display().to_string());
-                    }
+    let refreshed = scan_project_files();
+    if let Ok(mut guard) = cache.write() {
+        guard.files = refreshed.clone();
+        guard.refreshed_at = Instant::now();
+    }
+    refreshed
+}
+
+fn scan_project_files() -> Vec<String> {
+    let cwd = match std::env::current_dir() {
+        Ok(path) => path,
+        Err(_) => return Vec::new(),
+    };
+    if cwd.as_os_str().is_empty() {
+        return Vec::new();
+    }
+
+    // Use `git ls-files` to respect .gitignore and avoid hardcoded skip lists.
+    // This includes both tracked and untracked (non-ignored) files.
+    let mut files: Vec<String> = match std::process::Command::new("git")
+        .args(["ls-files", "--cached", "--others", "--exclude-standard"])
+        .current_dir(&cwd)
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            stdout.lines().map(|s| s.to_string()).collect()
+        }
+        _ => {
+            let mut f = Vec::new();
+            let skip_dirs: &[&str] = &[".git", "target", "node_modules"];
+            let walker = walkdir::WalkDir::new(&cwd).into_iter().filter_entry(|e| {
+                if e.file_type().is_dir() {
+                    let name = e.file_name().to_string_lossy();
+                    !skip_dirs.contains(&name.as_ref())
+                } else {
+                    true
                 }
-                f
+            });
+            for entry in walker.flatten() {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                if let Ok(rel) = entry.path().strip_prefix(&cwd) {
+                    f.push(rel.display().to_string());
+                }
             }
-        };
+            f
+        }
+    };
 
-        files.sort_by(|a: &String, b: &String| {
-            let a_is_src = a.starts_with("src") || a.starts_with("workflow/src");
-            let b_is_src = b.starts_with("src") || b.starts_with("workflow/src");
-            a_is_src.cmp(&b_is_src).reverse().then(a.cmp(b))
-        });
-        files
-    })
+    files.sort_by(|a: &String, b: &String| {
+        let a_is_src = a.starts_with("src") || a.starts_with("workflow/src");
+        let b_is_src = b.starts_with("src") || b.starts_with("workflow/src");
+        a_is_src.cmp(&b_is_src).reverse().then(a.cmp(b))
+    });
+    files
 }
 
 #[cfg(test)]

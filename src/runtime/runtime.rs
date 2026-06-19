@@ -470,8 +470,13 @@ impl AgentRuntime {
     }
 
     /// Save (create or update) a role template.
-    /// If the template has no embedding, computes one in background.
-    pub fn save_role_template(&self, template: RoleTemplate) {
+    /// If the template has no valid embedding, computes one in background.
+    pub fn save_role_template(&self, mut template: RoleTemplate) {
+        if let Some(existing) = self.role_template_store.get_by_role(&template.role) {
+            if existing.system_prompt != template.system_prompt {
+                template.embedding = None;
+            }
+        }
         let needs_embedding = template.embedding.is_none();
         self.role_template_store.upsert(template);
         let _ = self.role_template_store.persist();
@@ -1125,12 +1130,15 @@ impl AgentRuntime {
         };
         let memos = memo_block.as_deref().unwrap_or("");
         let system_prompt = format!(
-            "{}\n\nYour goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\n{}\n\n{}{}",
+            "{}\n\n{}\n\n{}{}",
             role_system_prompt,
-            goal,
             crate::core::types::MEMO_INSTRUCTIONS,
             crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
             memos,
+        );
+        let leaf_goal = format!(
+            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.",
+            goal
         );
 
         // Phase 3: Execute LLM call (no lock held on runtime)
@@ -1140,7 +1148,13 @@ impl AgentRuntime {
             let mut tokens_input: u32 = 0;
             let mut tokens_output: u32 = 0;
             let stream = match provider
-                .chat_with_tools_stream_mcp(&config.model_id, &system_prompt, &goal, &[], handle)
+                .chat_with_tools_stream_mcp(
+                    &config.model_id,
+                    &system_prompt,
+                    &leaf_goal,
+                    &[],
+                    handle,
+                )
                 .await
             {
                 Ok(s) => s,
@@ -1158,6 +1172,7 @@ impl AgentRuntime {
             use futures::StreamExt;
             futures::pin_mut!(stream);
             let mut tool_call_count = 0usize;
+            let mut done_received = false;
             while let Some(event) = stream.next().await {
                 match event {
                     crate::llm::ToolEvent::Text(t) => text.push_str(&t),
@@ -1192,8 +1207,30 @@ impl AgentRuntime {
                         tokens_input = tokens_input.max(input);
                         tokens_output = tokens_output.max(output);
                     }
-                    crate::llm::ToolEvent::Done => break,
+                    crate::llm::ToolEvent::Done => {
+                        done_received = true;
+                        break;
+                    }
                 }
+            }
+            if !done_received {
+                let mut pool = agent_pool.write().await;
+                if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                    agent.status = AgentStatus::Failed;
+                    agent.result = Some(format!(
+                        "Stream ended without Done event (text: {})…",
+                        &text[..text.len().min(80)]
+                    ));
+                    pool.release_budget_guard(&agent_id);
+                    pool.notify_completed(&agent_id);
+                }
+                return (
+                    format!(
+                        "Stream ended without Done event (text: {})…",
+                        &text[..text.len().min(80)]
+                    ),
+                    AgentStatus::Failed,
+                );
             }
             // If the LLM hit max turns without producing a final message,
             // generate a concise summary so the user sees completion feedback.
@@ -1206,7 +1243,10 @@ impl AgentRuntime {
             }
             (text, tools_used)
         } else {
-            let text = match provider.chat(&config.model_id, &system_prompt, &goal).await {
+            let text = match provider
+                .chat(&config.model_id, &system_prompt, &leaf_goal)
+                .await
+            {
                 Ok(t) => t,
                 Err(e) => {
                     let mut pool = agent_pool.write().await;
@@ -1326,12 +1366,15 @@ impl AgentRuntime {
 
         let memos = memo_block.as_deref().unwrap_or("");
         let system_prompt = format!(
-            "{}\n\nYour goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\n{}\n\n{}{}",
+            "{}\n\n{}\n\n{}{}",
             role_system_prompt,
-            goal,
             crate::core::types::MEMO_INSTRUCTIONS,
             crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
             memos,
+        );
+        let leaf_goal = format!(
+            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.",
+            goal
         );
 
         let (response, tool_bitmap) = if let Some(handle) = &tool_server {
@@ -1340,7 +1383,13 @@ impl AgentRuntime {
             let mut tokens_input: u32 = 0;
             let mut tokens_output: u32 = 0;
             let stream = match provider
-                .chat_with_tools_stream_mcp(&config.model_id, &system_prompt, &goal, &[], handle)
+                .chat_with_tools_stream_mcp(
+                    &config.model_id,
+                    &system_prompt,
+                    &leaf_goal,
+                    &[],
+                    handle,
+                )
                 .await
             {
                 Ok(s) => s,
@@ -1357,6 +1406,7 @@ impl AgentRuntime {
             };
             use futures::StreamExt;
             futures::pin_mut!(stream);
+            let mut done_received = false;
             while let Some(event) = stream.next().await {
                 match event {
                     crate::llm::ToolEvent::Text(t) => text.push_str(&t),
@@ -1389,12 +1439,37 @@ impl AgentRuntime {
                         tokens_input = tokens_input.max(input);
                         tokens_output = tokens_output.max(output);
                     }
-                    crate::llm::ToolEvent::Done => break,
+                    crate::llm::ToolEvent::Done => {
+                        done_received = true;
+                        break;
+                    }
                 }
+            }
+            if !done_received {
+                let mut pool = agent_pool.write().await;
+                if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                    agent.status = AgentStatus::Failed;
+                    agent.result = Some(format!(
+                        "Stream ended without Done event (text: {})…",
+                        &text[..text.len().min(80)]
+                    ));
+                    pool.release_budget_guard(&agent_id);
+                    pool.notify_completed(&agent_id);
+                }
+                return (
+                    format!(
+                        "Stream ended without Done event (text: {})…",
+                        &text[..text.len().min(80)]
+                    ),
+                    AgentStatus::Failed,
+                );
             }
             (text, tools_used)
         } else {
-            match provider.chat(&config.model_id, &system_prompt, &goal).await {
+            match provider
+                .chat(&config.model_id, &system_prompt, &leaf_goal)
+                .await
+            {
                 Ok(r) => (r, 0),
                 Err(e) => {
                     let mut pool = agent_pool.write().await;
@@ -1631,5 +1706,45 @@ mod tests {
 
         assert_eq!(rt.experience_count(), 6);
         assert!(rt.remaining_budget() < crate::core::types::DEFAULT_RUNTIME_BUDGET as i64);
+    }
+
+    #[tokio::test]
+    async fn test_save_role_template_clears_embedding_on_prompt_change() {
+        let rt = AgentRuntime::new(AgentRuntimeConfig::default(), dummy_embedding());
+
+        // Use a non-seeded role to avoid background embedding race.
+        // The seeded templates have background compute_role_embeddings_async running.
+        let tpl = RoleTemplate {
+            role: "cache_test_role".to_string(),
+            label: "Cache Test".to_string(),
+            system_prompt: "Original prompt.".to_string(),
+            embedding: None,
+            ..Default::default()
+        };
+        rt.save_role_template(tpl.clone());
+
+        let saved = rt.get_role_template("cache_test_role").unwrap();
+        assert!(saved.embedding.is_none(), "no embedding yet");
+
+        // 1. Set embedding → save → should persist.
+        let mut emb = [0.0f32; EMBEDDING_DIM];
+        emb[0] = 0.5;
+        let mut with_emb = saved;
+        with_emb.embedding = Some(emb);
+        rt.save_role_template(with_emb);
+
+        let tpl2 = rt.get_role_template("cache_test_role").unwrap();
+        assert!(tpl2.embedding.is_some(), "embedding should be cached");
+
+        // 2. Change system_prompt → save → embedding should be cleared.
+        let mut changed = tpl2;
+        changed.system_prompt = "Completely different prompt.".to_string();
+        rt.save_role_template(changed);
+
+        let tpl3 = rt.get_role_template("cache_test_role").unwrap();
+        assert!(
+            tpl3.embedding.is_none(),
+            "embedding cleared when system_prompt changes"
+        );
     }
 }
