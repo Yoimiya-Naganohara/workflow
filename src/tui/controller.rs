@@ -47,8 +47,9 @@ pub fn ensure_initial_agent_sync(core: &mut CoreState, goal_hint: &str) -> Optio
     let agent_id = match runtime.try_read() {
         Ok(rt) => match core.agent_pool.try_write() {
             Ok(mut pool) => {
-                // Evict stale agents before creating new ones
+                // Evict stale and LRU agents before creating new ones
                 pool.evict_stale(core.responsible_agent_id.as_ref());
+                pool.evict_lru(core.responsible_agent_id.as_ref());
 
                 // Try to reuse an idle agent (same role, Idle status)
                 let existing = pool

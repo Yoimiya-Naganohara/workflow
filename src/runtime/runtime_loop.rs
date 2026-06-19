@@ -72,9 +72,16 @@ impl RuntimeEventLoop {
             eviction_tick += 1;
             if eviction_tick % EVICTION_INTERVAL == 0 {
                 let mut pool_guard = self.pool.write().await;
-                let count = pool_guard.evict_stale(None);
-                if count > 0 {
-                    tracing::info!("Event loop evicted {} stale agent(s)", count);
+                let stale = pool_guard.evict_stale(None);
+                let lru = pool_guard.evict_lru(None);
+                let total = stale + lru;
+                if total > 0 {
+                    tracing::info!(
+                        "Event loop evicted {} agent(s) (stale: {}, lru: {})",
+                        total,
+                        stale,
+                        lru
+                    );
                 }
             }
             match event {

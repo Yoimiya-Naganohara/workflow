@@ -1139,12 +1139,34 @@ impl AgentRuntime {
             pool.format_role_memos(&role)
         };
         let memos = memo_block.as_deref().unwrap_or("");
+
+        // Check for pending messages and inject notification into prompt.
+        let inbox_hint = {
+            let pool = agent_pool.read().await;
+            pool.get_agent(&agent_id)
+                .map(|a| {
+                    let count = a.inbox.len();
+                    if count > 0 {
+                        format!(
+                            "\n\n⚠️ You have {} unread message(s) in your inbox. \
+Use the `read_messages` tool to read them before proceeding. \
+Messages may contain important context from sibling agents.",
+                            count
+                        )
+                    } else {
+                        String::new()
+                    }
+                })
+                .unwrap_or_default()
+        };
+
         let system_prompt = format!(
-            "{}\n\n{}\n\n{}{}",
+            "{}\n\n{}\n\n{}{}{}",
             role_system_prompt,
             crate::core::types::MEMO_INSTRUCTIONS,
             crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
             memos,
+            inbox_hint,
         );
         let leaf_goal = format!(
             "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.",

@@ -188,6 +188,9 @@ pub struct AgentPool {
     pending_deps: HashMap<AgentId, Vec<AgentId>>,
     /// Max idle TTL for completed/failed agents (seconds). Default: 3600 (1h).
     pub ttl_secs: u64,
+    /// Maximum number of agents in the pool. When exceeded, the least
+    /// recently used Completed/Failed/Idle agents are evicted (LRU).
+    pub max_agents: usize,
 }
 
 impl Default for AgentPool {
@@ -206,6 +209,7 @@ impl AgentPool {
             role_memos: HashMap::new(),
             pending_deps: HashMap::new(),
             ttl_secs: 3600,
+            max_agents: crate::core::constants::DEFAULT_MAX_AGENTS,
         }
     }
 
@@ -217,6 +221,8 @@ impl AgentPool {
         let id = agent.id;
         self.completions.insert(id, Arc::new(Notify::new()));
         self.agents.push(agent);
+        // Trigger LRU eviction if pool exceeds capacity.
+        self.evict_lru(None);
         id
     }
 
@@ -509,6 +515,87 @@ impl AgentPool {
         let remaining: Vec<AgentId> = self.agents.iter().map(|a| a.id).collect();
         self.budget_guards.retain(|id, _| remaining.contains(id));
         before - self.agents.len()
+    }
+
+    /// Evict the least recently used agents when pool exceeds `max_agents`.
+    /// Only evicts terminal agents (Completed/Failed/Idle) that have no active children.
+    /// Never evicts the protected (currently responsible) agent.
+    /// Returns the number of evicted agents.
+    pub fn evict_lru(&mut self, protected_id: Option<&AgentId>) -> usize {
+        if self.agents.len() <= self.max_agents {
+            return 0;
+        }
+        let before = self.agents.len();
+        let excess = before.saturating_sub(self.max_agents);
+        let protect = protected_id.copied();
+
+        // Collect evictable agents: terminal status, no active children, not protected.
+        let mut evictable: Vec<(AgentId, u64)> = self
+            .agents
+            .iter()
+            .filter(|a| {
+                if Some(&a.id) == protect.as_ref() {
+                    return false;
+                }
+                if !matches!(
+                    a.status,
+                    crate::agent::AgentStatus::Completed
+                        | crate::agent::AgentStatus::Failed
+                        | crate::agent::AgentStatus::Idle
+                ) {
+                    return false;
+                }
+                // Don't evict agents that have active (non-terminal) children.
+                let has_active_child = a.children.iter().any(|cid| {
+                    self.get_agent(cid)
+                        .map(|c| {
+                            !matches!(
+                                c.status,
+                                crate::agent::AgentStatus::Completed
+                                    | crate::agent::AgentStatus::Failed
+                            )
+                        })
+                        .unwrap_or(false)
+                });
+                !has_active_child
+            })
+            .map(|a| (a.id, a.last_active_at))
+            .collect();
+
+        // Sort by last_active_at ascending — oldest (least recently used) first.
+        evictable.sort_by_key(|(_, ts)| *ts);
+
+        // Evict the oldest excess agents.
+        let to_evict: Vec<AgentId> = evictable.iter().take(excess).map(|(id, _)| *id).collect();
+
+        if to_evict.is_empty() {
+            return 0;
+        }
+
+        let evict_set: std::collections::HashSet<AgentId> = to_evict.iter().copied().collect();
+        self.agents.retain(|a| !evict_set.contains(&a.id));
+
+        // Clean up associated state.
+        for id in &to_evict {
+            self.completions.remove(id);
+            self.budget_guards.remove(id);
+            self.pending_deps.remove(id);
+        }
+
+        // Retain budget guards only for remaining agents.
+        let remaining: Vec<AgentId> = self.agents.iter().map(|a| a.id).collect();
+        self.budget_guards.retain(|id, _| remaining.contains(id));
+
+        let evicted = before - self.agents.len();
+        if evicted > 0 {
+            tracing::info!(
+                "LRU evicted {} agent(s) (pool: {} → {})",
+                evicted,
+                before,
+                self.agents.len()
+            );
+        }
+        evicted
     }
 }
 

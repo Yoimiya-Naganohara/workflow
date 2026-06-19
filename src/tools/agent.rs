@@ -88,7 +88,7 @@ impl Tool for SendMessage {
             .agents()
             .iter()
             .find(|a| a.name == args.recipient)
-            .map(|a| a.id)
+            .map(|a| (a.id, a.status.clone()))
             .ok_or_else(|| {
                 ToolCallError(format!(
                     "Agent '{}' not found. Use `list_agents` to see active agents.",
@@ -101,7 +101,7 @@ impl Tool for SendMessage {
         let mut retries = 0u32;
         loop {
             if let Ok(mut pool) = s.core.agent_pool.try_write() {
-                pool.send_message(recipient, agent_id, &sender_name, &args.message, None)
+                pool.send_message(recipient.0, agent_id, &sender_name, &args.message, None)
                     .map_err(ToolCallError)?;
                 break;
             }
@@ -112,6 +112,36 @@ impl Tool for SendMessage {
             }
             retries += 1;
             tokio::time::sleep(std::time::Duration::from_micros(50)).await;
+        }
+
+        // If the recipient is in a terminal state (Completed/Failed/Idle),
+        // re-activate it so it can process the incoming message.
+        let needs_reactivation = matches!(
+            recipient.1,
+            crate::agent::AgentStatus::Completed
+                | crate::agent::AgentStatus::Failed
+                | crate::agent::AgentStatus::Idle
+        );
+
+        if needs_reactivation {
+            // Transition to Planning so the event loop picks it up.
+            {
+                if let Ok(mut pool) = s.core.agent_pool.try_write() {
+                    if let Some(agent) = pool.get_agent_mut(&recipient.0) {
+                        agent.status = crate::agent::AgentStatus::Planning;
+                        agent.last_active_at = crate::agent::now_secs();
+                    }
+                }
+            }
+            // Dispatch ActivateAgent to the background event loop.
+            if let Some(tx) = &s.core.runtime_event_tx {
+                let _ = tx
+                    .send(crate::runtime::RuntimeEvent::ActivateAgent {
+                        agent_id: recipient.0,
+                        parent_id: None,
+                    })
+                    .await;
+            }
         }
 
         Ok(format!("Message sent to '{}'.", args.recipient))
