@@ -227,6 +227,7 @@ impl Tui {
 
     /// Save conversation messages for the next session (opencode-style).
     /// Also saves a timestamped copy to sessions/ for /sessions popup.
+    /// Saves the system prompt cache to ensure consistent behavior on restore.
     async fn save_session(&self) {
         let state = self.state.read().await;
         if !state.core.messages.is_empty() {
@@ -234,6 +235,14 @@ impl Tui {
             // Also save to sessions/ with a timestamp name so /sessions can find it.
             let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
             let _ = crate::persistence::save_session_as(&ts, &state.core.messages);
+            // Save system prompt cache if available
+            if let Some(ref prompt) = state.ui.cached_system_prompt {
+                let _ = crate::persistence::save_session_prompt(
+                    &ts,
+                    prompt,
+                    &state.ui.cached_prompt_role,
+                );
+            }
         }
     }
 }

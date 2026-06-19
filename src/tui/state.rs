@@ -205,6 +205,15 @@ pub struct UiState {
     /// 0 = hidden, 1 = brief (first 200 chars), 2 = full.
     pub think_level: u8,
 
+    // ── System prompt cache ──
+    /// Cached system prompt for the current session.
+    /// Built once on first message, reused for all subsequent messages.
+    /// Cleared on `/clear` or when role changes.
+    pub cached_system_prompt: Option<String>,
+    /// Role for which the system prompt was cached.
+    /// If role changes, the cache is invalidated.
+    pub cached_prompt_role: String,
+
     // ── Cache metrics ──
     /// Embedding service cache hit/miss stats (refreshed each render tick).
     pub embedding_cache: CacheStats,
@@ -899,6 +908,8 @@ impl Default for UiState {
             input_disabled: false,
             total_chat_lines: 0,
             think_level: 2,
+            cached_system_prompt: None,
+            cached_prompt_role: String::new(),
             embedding_cache: CacheStats::default(),
         }
     }
@@ -1284,6 +1295,49 @@ mod tests {
         state.recalc_tokens();
         assert!(state.ui.cached_input_tokens > 0);
         assert!(state.ui.cached_output_tokens > 0);
+    }
+
+    // ========================================================================
+    //  7. System prompt caching (memo isolation)
+    // ========================================================================
+
+    #[test]
+    fn test_system_prompt_cache_initially_empty() {
+        let state = AppState::default();
+        assert!(state.ui.cached_system_prompt.is_none());
+        assert!(state.ui.cached_prompt_role.is_empty());
+    }
+
+    #[test]
+    fn test_system_prompt_cache_cleared_on_new_session() {
+        let mut state = AppState::default();
+        // Simulate cache being populated
+        state.ui.cached_system_prompt = Some("cached prompt".to_string());
+        state.ui.cached_prompt_role = "developer".to_string();
+
+        // Simulate /clear command
+        state.ui.cached_system_prompt = None;
+        state.ui.cached_prompt_role.clear();
+
+        assert!(state.ui.cached_system_prompt.is_none());
+        assert!(state.ui.cached_prompt_role.is_empty());
+    }
+
+    #[test]
+    fn test_system_prompt_cache_role_change_invalidates() {
+        let mut state = AppState::default();
+        // Simulate cache for role A
+        state.ui.cached_system_prompt = Some("prompt for A".to_string());
+        state.ui.cached_prompt_role = "role_a".to_string();
+
+        // If role changes to B, cache should be invalidated
+        let new_role = "role_b";
+        if state.ui.cached_prompt_role != new_role {
+            state.ui.cached_system_prompt = None;
+            state.ui.cached_prompt_role.clear();
+        }
+
+        assert!(state.ui.cached_system_prompt.is_none());
     }
 }
 

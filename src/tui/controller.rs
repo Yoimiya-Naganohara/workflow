@@ -16,6 +16,7 @@ use crate::models::CustomProvider;
 use crate::provider::ProviderClient;
 use crate::tui::state::{
     AgentEntry, AppState, ChatMessage, CoreState, MessageRole, MessageStatus, SelectedModel,
+    UiState,
 };
 
 // ============================================================================
@@ -93,7 +94,8 @@ pub fn ensure_initial_agent_sync(core: &mut CoreState, goal_hint: &str) -> Optio
 }
 
 /// Switch to a named session: clear current messages and restore the saved ones.
-pub fn switch_session(core: &mut CoreState, name: &str) {
+/// Also restores the system prompt that was cached when the session was saved.
+pub fn switch_session(core: &mut CoreState, ui: &mut UiState, name: &str) {
     let Some(messages) = crate::persistence::load_session_as(name) else {
         return;
     };
@@ -102,6 +104,17 @@ pub fn switch_session(core: &mut CoreState, name: &str) {
     core.messages.clear();
     core.responsible_agent_id = None;
     core.agents.clear();
+
+    // Restore system prompt cache from saved session
+    // This ensures the restored session uses the same system prompt as before
+    if let Some((prompt, role)) = crate::persistence::load_session_prompt(name) {
+        ui.cached_system_prompt = Some(prompt);
+        ui.cached_prompt_role = role;
+    } else {
+        // No saved prompt - clear cache so it rebuilds on next message
+        ui.cached_system_prompt = None;
+        ui.cached_prompt_role.clear();
+    }
 
     // Restore saved messages
     for msg in &messages {

@@ -240,7 +240,44 @@ pub fn delete_session(name: &str) -> Result<()> {
     if path.exists() {
         std::fs::remove_file(&path)?;
     }
+    // Also delete the system prompt file if it exists
+    let prompt_path = config_dir()?
+        .join("sessions")
+        .join(format!("{}_prompt.json", name));
+    if prompt_path.exists() {
+        std::fs::remove_file(&prompt_path)?;
+    }
     Ok(())
+}
+
+/// Save the system prompt for a named session.
+pub fn save_session_prompt(name: &str, prompt: &str, role: &str) -> Result<()> {
+    let dir = config_dir()?.join("sessions");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{}_prompt.json", name));
+    let data = serde_json::json!({
+        "system_prompt": prompt,
+        "role": role,
+    });
+    let json = serde_json::to_string_pretty(&data)?;
+    write_atomic(&path, &json)
+}
+
+/// Load the system prompt for a named session.
+/// Returns (system_prompt, role) if the file exists and is valid.
+pub fn load_session_prompt(name: &str) -> Option<(String, String)> {
+    let path = config_dir()
+        .ok()?
+        .join("sessions")
+        .join(format!("{}_prompt.json", name));
+    if !path.exists() {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    let data: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let prompt = data.get("system_prompt")?.as_str()?.to_string();
+    let role = data.get("role")?.as_str()?.to_string();
+    Some((prompt, role))
 }
 
 pub fn save_selected_models(models: &[SelectedModel]) -> Result<()> {
