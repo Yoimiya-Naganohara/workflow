@@ -46,16 +46,12 @@ macro_rules! msg_styled {
 /// Get a read handle to the runtime, returning an error message on failure.
 fn try_read_runtime(
     core: &crate::tui::state::CoreState,
-) -> Result<
-    tokio::sync::RwLockReadGuard<'_, crate::runtime::AgentRuntime>,
-    String,
-> {
+) -> Result<tokio::sync::RwLockReadGuard<'_, crate::runtime::AgentRuntime>, String> {
     let rt = core
         .runtime
         .as_ref()
         .ok_or_else(|| "Runtime not available".to_string())?;
-    rt.try_read()
-        .map_err(|_| "Runtime locked".to_string())
+    rt.try_read().map_err(|_| "Runtime locked".to_string())
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -71,7 +67,6 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
 
     match trimmed {
         // ── Provider / Model commands ──────────────────────────────
-
         "/connect" => {
             ui.input.clear();
             ui.input_cursor = 0;
@@ -83,10 +78,7 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
 
         "/models" | "/model" | "/m" => {
             if core.configured_providers.is_empty() {
-                return msg!(
-                    state,
-                    "No providers configured. Use `/connect` first."
-                );
+                return msg!(state, "No providers configured. Use `/connect` first.");
             }
             state.popup_mode = PopupMode::ModelPicker;
             state.popup_selected = 0;
@@ -94,7 +86,6 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         // ── Shell commands ─────────────────────────────────────────
-
         "/sh" => {
             state.popup_mode = PopupMode::ShellInput {
                 cmd: "/sh".to_string(),
@@ -109,7 +100,8 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             if arg.is_empty() {
                 return msg!(state, "Usage: /sh <command>");
             }
-            core.messages.push(ChatMessage::system(format!("$ {}", arg)));
+            core.messages
+                .push(ChatMessage::system(format!("$ {}", arg)));
             state.effects.push(Effect::ExecuteShell {
                 command: arg.to_string(),
             });
@@ -120,7 +112,6 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         // ── Pool commands ──────────────────────────────────────────
-
         "/pool" | "/pool help" => {
             state.popup_mode = PopupMode::SubCommand {
                 parent: "/pool".to_string(),
@@ -228,11 +219,13 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
 
         _ if trimmed.starts_with("/pool ") => {
             let rest = trimmed.strip_prefix("/pool ").unwrap_or("").trim();
-            msg!(state, format!("Unknown pool command: {}. Use /pool for help.", rest))
+            msg!(
+                state,
+                format!("Unknown pool command: {}. Use /pool for help.", rest)
+            )
         }
 
         // ── Session commands ───────────────────────────────────────
-
         "/sessions" => {
             let items = resolve_dynamic_items("/sessions switch", core);
             if items.is_empty() {
@@ -250,7 +243,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         _ if trimmed.starts_with("/sessions switch ") => {
-            let name = trimmed.strip_prefix("/sessions switch ").unwrap_or("").trim();
+            let name = trimmed
+                .strip_prefix("/sessions switch ")
+                .unwrap_or("")
+                .trim();
             if name.is_empty() {
                 return msg!(state, "Usage: /sessions switch <name>");
             }
@@ -262,11 +258,13 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             }
             crate::tui::controller::switch_session(core, ui, name);
             ui.auto_scroll = true;
-            msg!(state, format!("🔄 Switched to session '{}' ({} messages).", name, count))
+            msg!(
+                state,
+                format!("🔄 Switched to session '{}' ({} messages).", name, count)
+            )
         }
 
         // ── Role commands ──────────────────────────────────────────
-
         "/role" | "/role help" => {
             state.popup_mode = PopupMode::SubCommand {
                 parent: "/role".to_string(),
@@ -327,11 +325,20 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                         let embedded = if t.embedding.is_some() { "yes" } else { "no" };
                         format!(
                             "Role: {}\n  Label:        {}\n  ID:           {}\n  Embedded:     {}\n  Prompt ({}):\n{}\n{}\n{}",
-                            t.role, t.label, t.template_id, embedded, t.system_prompt.len(),
-                            "─".repeat(36), t.system_prompt, "─".repeat(36)
+                            t.role,
+                            t.label,
+                            t.template_id,
+                            embedded,
+                            t.system_prompt.len(),
+                            "─".repeat(36),
+                            t.system_prompt,
+                            "─".repeat(36)
                         )
                     }
-                    None => format!("Role '{}' not found. Use /role list to see available roles.", role_name),
+                    None => format!(
+                        "Role '{}' not found. Use /role list to see available roles.",
+                        role_name
+                    ),
                 },
                 Err(e) => e,
             };
@@ -365,8 +372,14 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             }
             let msg = match try_read_runtime(core) {
                 Ok(rt) => match rt.get_role_template(role_name) {
-                    Some(t) => format!("Role '{}' found. Edit in ~/.workflow/role_templates.json", t.role),
-                    None => format!("Role '{}' not found. Use /role list to see available roles.", role_name),
+                    Some(t) => format!(
+                        "Role '{}' found. Edit in ~/.workflow/role_templates.json",
+                        t.role
+                    ),
+                    None => format!(
+                        "Role '{}' not found. Use /role list to see available roles.",
+                        role_name
+                    ),
                 },
                 Err(e) => e,
             };
@@ -407,22 +420,30 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             // Validate first, then dispatch - avoids holding runtime guard across msg! macro
             let optimize_result: Result<usize, String> = (|| {
                 let rt_guard = try_read_runtime(core)?;
-                let role = rt_guard.get_role_template(role_name)
+                let role = rt_guard
+                    .get_role_template(role_name)
                     .ok_or_else(|| format!("Role '{}' not found.", role_name))?;
                 let experiences = rt_guard.get_experiences_by_role(role.template_id);
                 if experiences.len() < crate::runtime::optimizer::MIN_EXPERIENCES {
                     return Err(format!(
                         "Need at least {} experiences for '{}', have {}. Keep using the role to gather more data.",
-                        crate::runtime::optimizer::MIN_EXPERIENCES, role_name, experiences.len()
+                        crate::runtime::optimizer::MIN_EXPERIENCES,
+                        role_name,
+                        experiences.len()
                     ));
                 }
-                let tracker = rt_guard.optimization_tracker.lock()
+                let tracker = rt_guard
+                    .optimization_tracker
+                    .lock()
                     .map_err(|_| "Tracker lock failed".to_string())?;
                 if let Some(reason) = tracker.can_optimize(role.template_id, experiences.len()) {
                     return Err(format!("Cannot optimize '{}': {}", role_name, reason));
                 }
                 if rt_guard.provider.is_none() {
-                    return Err("No LLM provider configured. Connect a provider first via /connect.".to_string());
+                    return Err(
+                        "No LLM provider configured. Connect a provider first via /connect."
+                            .to_string(),
+                    );
                 }
                 Ok(experiences.len())
             })(); // rt_guard dropped here
@@ -435,7 +456,13 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                             runtime,
                         });
                     }
-                    msg!(state, format!("Optimizing role '{}' from {} experiences...", role_name, exp_count))
+                    msg!(
+                        state,
+                        format!(
+                            "Optimizing role '{}' from {} experiences...",
+                            role_name, exp_count
+                        )
+                    )
                 }
                 Err(e) => msg!(state, e),
             }
@@ -498,20 +525,25 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 core.default_role = role_name.to_string();
                 core.responsible_agent_id = None;
                 core.agents.clear();
-                msg!(state, format!(
-                    "Default bootstrap role set to `{}`. Next chat message will use this role.",
-                    role_name
-                ))
+                msg!(
+                    state,
+                    format!(
+                        "Default bootstrap role set to `{}`. Next chat message will use this role.",
+                        role_name
+                    )
+                )
             } else {
-                msg!(state, format!(
-                    "Role '{}' not found. Use `/role list` to see available roles.",
-                    role_name
-                ))
+                msg!(
+                    state,
+                    format!(
+                        "Role '{}' not found. Use `/role list` to see available roles.",
+                        role_name
+                    )
+                )
             }
         }
 
         // ── Agent commands ─────────────────────────────────────────
-
         "/agent" | "/agent help" => {
             state.popup_mode = PopupMode::SubCommand {
                 parent: "/agent".to_string(),
@@ -540,7 +572,6 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         // ── Memo commands ──────────────────────────────────────────
-
         "/memo" | "/memo help" => {
             state.popup_mode = PopupMode::SubCommand {
                 parent: "/memo".to_string(),
@@ -598,7 +629,6 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         // ── Reflection commands ────────────────────────────────────
-
         "/reflect" | "/reflect status" => {
             let enabled = core.reflection.auto_reflect;
             let max_attempts = core.reflection.max_attempts;
@@ -620,12 +650,15 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 format!("  {} {}", icon, name)
             })
             .collect();
-            msg!(state, format!(
-                "Reflection: {}\nMax retries: {}\nRules:\n{}",
-                if enabled { "🟢 on" } else { "🔴 off" },
-                max_attempts,
-                rules_state.join("\n")
-            ))
+            msg!(
+                state,
+                format!(
+                    "Reflection: {}\nMax retries: {}\nRules:\n{}",
+                    if enabled { "🟢 on" } else { "🔴 off" },
+                    max_attempts,
+                    rules_state.join("\n")
+                )
+            )
         }
 
         "/reflect on" => {
@@ -648,7 +681,10 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                     core.reflection.max_attempts = n;
                     msg!(state, format!("Reflection max retries set to {}.", n))
                 }
-                Err(_) => msg!(state, format!("Invalid number: {}. Usage: /reflect max <N>", val)),
+                Err(_) => msg!(
+                    state,
+                    format!("Invalid number: {}. Usage: /reflect max <N>", val)
+                ),
             }
         }
 
@@ -666,7 +702,12 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             };
             let enable = match enable {
                 Some(e) => e,
-                None => return msg!(state, format!("Invalid state: {}. Use 'on' or 'off'.", state_str)),
+                None => {
+                    return msg!(
+                        state,
+                        format!("Invalid state: {}. Use 'on' or 'off'.", state_str)
+                    );
+                }
             };
             let idx = match rule_name {
                 "code" => Some(crate::reflection::RULE_CODE_COMPLETE),
@@ -682,20 +723,29 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 None => {
                     return msg!(
                         state,
-                        format!("Unknown rule: {}. Rules: code, error, questions, promise, fileref, minlen", rule_name)
+                        format!(
+                            "Unknown rule: {}. Rules: code, error, questions, promise, fileref, minlen",
+                            rule_name
+                        )
                     );
                 }
             };
             core.reflection.rules_enabled[idx] = enable;
-            msg!(state, format!(
-                "Rule '{}' {}.",
-                rule_name,
-                if enable { "enabled ✓" } else { "disabled ✗" }
-            ))
+            msg!(
+                state,
+                format!(
+                    "Rule '{}' {}.",
+                    rule_name,
+                    if enable {
+                        "enabled ✓"
+                    } else {
+                        "disabled ✗"
+                    }
+                )
+            )
         }
 
         // ── System commands ────────────────────────────────────────
-
         "/keymap" => {
             let bindings = state.keymap.all_bindings();
             let mut lines = vec!["Keyboard Shortcuts:".to_string(), String::new()];
@@ -727,10 +777,13 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
             let lvl = level.min(2);
             ui.think_level = lvl;
             let labels = ["hidden", "brief", "full"];
-            msg!(state, format!(
-                "Reasoning display set to: {} ({})",
-                labels[lvl as usize], lvl
-            ))
+            msg!(
+                state,
+                format!(
+                    "Reasoning display set to: {} ({})",
+                    labels[lvl as usize], lvl
+                )
+            )
         }
 
         "/clear" | "/new" => {
@@ -754,7 +807,6 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
         }
 
         // ── Status / Info ──────────────────────────────────────────
-
         "/status" | "/info" => {
             let provider_count = core.configured_providers.len();
             let model_count = core.selected_models.len();
@@ -773,19 +825,24 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, now: &str) -> bool {
                 format!("Reflection:      {}", reflection),
                 format!(
                     "Messages:        {}",
-                    core.messages.iter().filter(|m| m.role == MessageRole::User).count()
+                    core.messages
+                        .iter()
+                        .filter(|m| m.role == MessageRole::User)
+                        .count()
                 ),
             ];
             msg!(state, format!("System Status:\n{}", lines.join("\n")))
         }
 
         // ── Cache management ───────────────────────────────────────
-
         "/refresh" => {
             // Clear cached system prompt so next message rebuilds with current memos
             ui.cached_system_prompt = None;
             ui.cached_prompt_role.clear();
-            msg!(state, "System prompt cache cleared. Next message will use current memos.")
+            msg!(
+                state,
+                "System prompt cache cleared. Next message will use current memos."
+            )
         }
 
         // ── Not a recognised command ───────────────────────────────
@@ -881,7 +938,10 @@ pub fn resolve_dynamic_items(
                     .iter()
                     .map(|a| {
                         let id_short = crate::agent::AgentPool::agent_id_str(&a.id);
-                        (id_short[..12].to_string(), format!("{} — {:?}", a.name, a.status))
+                        (
+                            id_short[..12].to_string(),
+                            format!("{} — {:?}", a.name, a.status),
+                        )
                     })
                     .collect()
             })
@@ -905,9 +965,15 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/agent", "Agent management (list/inspect)"),
     ("/sh", "Run a shell command"),
     ("/clear", "Clear conversation"),
-    ("/refresh", "Refresh system prompt cache (apply memo changes)"),
+    (
+        "/refresh",
+        "Refresh system prompt cache (apply memo changes)",
+    ),
     ("/sessions", "Switch to a saved session"),
-    ("/memo", "Role memo management (list/show/write/delete/roles)"),
+    (
+        "/memo",
+        "Role memo management (list/show/write/delete/roles)",
+    ),
     ("/think", "Set reasoning display level (0/1/2)"),
     ("/help", "Show help"),
 ];
@@ -959,14 +1025,22 @@ fn match_list_memos(core: &crate::tui::state::CoreState) -> String {
     sorted.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     for m in &sorted {
         let preview = if m.value.len() > 80 {
-            let end = m.value.char_indices().nth(80).map(|(i, _)| i).unwrap_or(m.value.len());
+            let end = m
+                .value
+                .char_indices()
+                .nth(80)
+                .map(|(i, _)| i)
+                .unwrap_or(m.value.len());
             format!("{}...", &m.value[..end])
         } else {
             m.value.clone()
         };
         lines.push_str(&format!(
             "  {}  ({} bytes, {})  {:?}\n",
-            m.key, m.value.len(), format_age(m.timestamp), preview
+            m.key,
+            m.value.len(),
+            format_age(m.timestamp),
+            preview
         ));
     }
     lines
@@ -988,7 +1062,10 @@ fn match_show_memo(core: &crate::tui::state::CoreState, key: &str) -> String {
     match pool.read_role_memo(&agent.role, key) {
         Some(entry) => format!(
             "Memo '{}' ({} bytes, written {}):\n---\n{}\n---",
-            entry.key, entry.value.len(), format_age(entry.timestamp), entry.value
+            entry.key,
+            entry.value.len(),
+            format_age(entry.timestamp),
+            entry.value
         ),
         None => format!("Memo '{}' not found for role '{}'", key, agent.role),
     }
@@ -1019,7 +1096,9 @@ fn match_write_memo(core: &mut crate::tui::state::CoreState, key: &str, value: &
     pool.write_role_memo(&role, entry);
     format!(
         "Memo '{}' written ({} bytes) for role '{}'",
-        key, value.len(), role
+        key,
+        value.len(),
+        role
     )
 }
 
@@ -1056,7 +1135,10 @@ fn match_list_role_memos(core: &crate::tui::state::CoreState) -> String {
     for (role, memos) in role_memos.iter() {
         let count = memos.len();
         let total_bytes: usize = memos.iter().map(|m| m.value.len()).sum();
-        lines.push(format!("  '{}': {} memos, {} bytes", role, count, total_bytes));
+        lines.push(format!(
+            "  '{}': {} memos, {} bytes",
+            role, count, total_bytes
+        ));
     }
     lines.join("\n")
 }
@@ -1110,11 +1192,17 @@ fn match_agent_inspect(core: &crate::tui::state::CoreState, id_str: &str) -> Str
             };
             format!(
                 "Agent: {}\n  ID:       {}\n  Role:     {}\n  Status:   {:?}\n  Depth:    {}\n  Goal:     {}\n  Parent:   {}\n  Children: {}{}",
-                a.name, id_full, a.role, a.status, a.depth, a.goal,
+                a.name,
+                id_full,
+                a.role,
+                a.status,
+                a.depth,
+                a.goal,
                 a.parent_id
                     .map(|id| crate::agent::AgentPool::agent_id_str(&id))
                     .unwrap_or_else(|| "root".to_string()),
-                a.children.len(), trace_block,
+                a.children.len(),
+                trace_block,
             )
         }
         None => format!("Agent '{}' not found.", id_str),
@@ -1258,10 +1346,7 @@ mod tests {
         let mut state = AppState::default();
         dispatch("/sh", &mut state, "12:00:00");
         assert!(
-            matches!(
-                state.popup_mode,
-                PopupMode::ShellInput { .. }
-            ),
+            matches!(state.popup_mode, PopupMode::ShellInput { .. }),
             "/sh without args should open ShellInput popup, got {:?}",
             state.popup_mode
         );

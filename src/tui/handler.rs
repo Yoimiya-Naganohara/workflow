@@ -695,34 +695,33 @@ impl Tui {
 
             // Use cached system prompt if available and role hasn't changed.
             // This ensures memo changes don't affect the current session.
-            let agent_prompt = if ui.cached_system_prompt.is_some()
-                && ui.cached_prompt_role == agent_role
-            {
-                // Reuse cached prompt - memo changes are ignored for this session
-                ui.cached_system_prompt.clone().unwrap_or_default()
-            } else {
-                // Build new prompt and cache it
-                let memos = core
-                    .agent_pool
-                    .try_read()
-                    .ok()
-                    .and_then(|pool| pool.format_role_memos(&agent_role))
-                    .unwrap_or_default();
+            let agent_prompt =
+                if ui.cached_system_prompt.is_some() && ui.cached_prompt_role == agent_role {
+                    // Reuse cached prompt - memo changes are ignored for this session
+                    ui.cached_system_prompt.clone().unwrap_or_default()
+                } else {
+                    // Build new prompt and cache it
+                    let memos = core
+                        .agent_pool
+                        .try_read()
+                        .ok()
+                        .and_then(|pool| pool.format_role_memos(&agent_role))
+                        .unwrap_or_default();
 
-                let new_prompt = format!(
-                    "{}\n\n{}\n\n{}{}",
-                    agent_prompt,
-                    crate::core::types::MEMO_INSTRUCTIONS,
-                    crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
-                    memos,
-                );
+                    let new_prompt = format!(
+                        "{}\n\n{}\n\n{}{}",
+                        agent_prompt,
+                        crate::core::types::MEMO_INSTRUCTIONS,
+                        crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
+                        memos,
+                    );
 
-                // Cache for subsequent messages in this session
-                ui.cached_system_prompt = Some(new_prompt.clone());
-                ui.cached_prompt_role = agent_role;
+                    // Cache for subsequent messages in this session
+                    ui.cached_system_prompt = Some(new_prompt.clone());
+                    ui.cached_prompt_role = agent_role;
 
-                new_prompt
-            };
+                    new_prompt
+                };
 
             (provider, mid, agent_prompt)
         };
@@ -760,6 +759,7 @@ impl Tui {
                 provider,
                 runtime: core.runtime.clone(),
                 abort_registration,
+                reasoning_effort: ui.reasoning_effort.clone(),
             });
         } else {
             if let Some(msg) = core.messages.get_mut(response_index) {

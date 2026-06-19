@@ -46,6 +46,7 @@ pub enum Effect {
         provider: std::sync::Arc<LlmProvider>,
         runtime: Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
         abort_registration: futures::future::AbortRegistration,
+        reasoning_effort: Option<String>,
     },
     /// Compute embeddings for all roles missing them.
     ComputeRoleEmbeddings,
@@ -303,7 +304,15 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
             provider,
             runtime,
             abort_registration,
+            reasoning_effort,
         } => {
+            let additional_params = reasoning_effort.as_ref().map(|effort| {
+                serde_json::json!({
+                    "reasoning": {
+                        "effort": effort
+                    }
+                })
+            });
             let mut stream = match provider
                 .chat_with_tools_stream_mcp(
                     &model_id,
@@ -311,6 +320,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                     &input,
                     &history,
                     &tool_server,
+                    additional_params.as_ref(),
                 )
                 .await
             {

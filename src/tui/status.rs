@@ -131,10 +131,17 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
     // ── 9. Think level badge ──
     let think_labels = ["", " T1", " T2"];
     let level = state.ui.think_level.min(2) as usize;
-    spans.push(Span::styled(
-        think_labels[level],
-        Style::default().fg(style::TEXT_MUTED),
-    ));
+    if let Some(ref effort) = state.ui.reasoning_effort {
+        spans.push(Span::styled(
+            format!(" R:{}", effort),
+            Style::default().fg(style::BLUE),
+        ));
+    } else {
+        spans.push(Span::styled(
+            think_labels[level],
+            Style::default().fg(style::TEXT_MUTED),
+        ));
+    }
 
     // ── 10. Embedding cache hit rate ──
     let cache = state.ui.embedding_cache;

@@ -44,6 +44,8 @@ pub struct Model {
     #[serde(default)]
     pub reasoning: bool,
     #[serde(default)]
+    pub reasoning_options: Vec<ReasoningOption>,
+    #[serde(default)]
     pub tool_call: bool,
     #[serde(default = "default_true")]
     pub temperature: bool,
@@ -71,6 +73,15 @@ fn default_cost() -> Cost {
         cache_write: None,
         reasoning: None,
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ReasoningOption {
+    #[serde(rename = "toggle")]
+    Toggle,
+    #[serde(rename = "effort")]
+    Effort { values: Vec<String> },
 }
 
 // ============================================================================
@@ -597,6 +608,7 @@ impl ModelRegistry {
                     family: None,
                     attachment: false,
                     reasoning: false,
+                    reasoning_options: vec![],
                     tool_call: true,
                     temperature: true,
                     knowledge: None,
@@ -628,6 +640,7 @@ impl ModelRegistry {
                         family: None,
                         attachment: false,
                         reasoning: false,
+                        reasoning_options: vec![],
                         tool_call: true,
                         temperature: true,
                         knowledge: None,
@@ -749,6 +762,7 @@ mod tests {
             family: None,
             attachment: false,
             reasoning: true,
+            reasoning_options: vec![],
             tool_call: true,
             temperature: true,
             knowledge: None,
@@ -783,6 +797,7 @@ mod tests {
             family: None,
             attachment: false,
             reasoning: true,
+            reasoning_options: vec![],
             tool_call: true,
             temperature: true,
             knowledge: None,

@@ -204,6 +204,8 @@ pub struct UiState {
     /// Controls how much reasoning/chain-of-thought is shown:
     /// 0 = hidden, 1 = brief (first 200 chars), 2 = full.
     pub think_level: u8,
+    /// Reasoning effort sent to the LLM: None = off, Some("low"/"medium"/"high"/"max").
+    pub reasoning_effort: Option<String>,
 
     // ── System prompt cache ──
     /// Cached system prompt for the current session.
@@ -633,6 +635,7 @@ impl AppState {
                     provider,
                     runtime,
                     abort_registration: new_abort_registration,
+                    reasoning_effort: self.ui.reasoning_effort.clone(),
                 });
             }
             AppEvent::SystemLog { content } => {
@@ -908,6 +911,7 @@ impl Default for UiState {
             input_disabled: false,
             total_chat_lines: 0,
             think_level: 2,
+            reasoning_effort: None,
             cached_system_prompt: None,
             cached_prompt_role: String::new(),
             embedding_cache: CacheStats::default(),

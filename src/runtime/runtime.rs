@@ -1154,6 +1154,7 @@ impl AgentRuntime {
                     &leaf_goal,
                     &[],
                     handle,
+                    None,
                 )
                 .await
             {
@@ -1389,6 +1390,7 @@ impl AgentRuntime {
                     &leaf_goal,
                     &[],
                     handle,
+                    None,
                 )
                 .await
             {

@@ -14,14 +14,17 @@ use rig::tool::server::ToolServerHandle;
 /// All rig provider clients share the same builder pattern but return
 /// different concrete types — a macro avoids 9× repetition.
 macro_rules! build_chat_agent {
-    ($client:expr, $model:expr, $system:expr) => {
-        $client
+    ($client:expr, $model:expr, $system:expr, $params:expr) => {{
+        let mut builder = $client
             .agent($model)
             .preamble($system)
             .temperature(crate::core::types::DEFAULT_TEMPERATURE)
-            .max_tokens(crate::core::types::DEFAULT_MAX_TOKENS)
-            .build()
-    };
+            .max_tokens(crate::core::types::DEFAULT_MAX_TOKENS);
+        if let Some(p) = $params {
+            builder = builder.additional_params(p.clone());
+        }
+        builder.build()
+    }};
 }
 
 /// Per-provider match arm for `chat_with_tools_stream_mcp`.
@@ -29,14 +32,17 @@ macro_rules! build_chat_agent {
 /// Uses `ToolServerHandle` so tools can be added/removed at runtime
 /// without recompiling.
 macro_rules! mcp_stream_arm {
-    ($client:expr, $model:expr, $system:expr, $handle:expr, $msg:expr, $history:expr) => {{
-        let agent = $client
+    ($client:expr, $model:expr, $system:expr, $handle:expr, $msg:expr, $history:expr, $params:expr) => {{
+        let mut builder = $client
             .agent($model)
             .preamble($system)
             .temperature(crate::core::types::DEFAULT_TEMPERATURE)
             .max_tokens(crate::core::types::DEFAULT_MAX_TOKENS)
-            .tool_server_handle($handle.clone())
-            .build();
+            .tool_server_handle($handle.clone());
+        if let Some(p) = $params {
+            builder = builder.additional_params(p.clone());
+        }
+        let agent = builder.build();
         Ok(Self::wrap_tool_stream(
             agent
                 .stream_chat($msg, $history)
@@ -62,7 +68,7 @@ impl LlmProvider {
         system: &str,
         message: &str,
     ) -> Result<ChatStream> {
-        self.do_chat_stream(model, system, message, &[]).await
+        self.do_chat_stream(model, system, message, &[], None).await
     }
 
     pub async fn chat_stream_with_history(
@@ -72,13 +78,14 @@ impl LlmProvider {
         message: &str,
         history: &[(String, String)],
     ) -> Result<ChatStream> {
-        self.do_chat_stream(model, system, message, history).await
+        self.do_chat_stream(model, system, message, history, None)
+            .await
     }
 
     /// Stream a chat response with MCP tool-calling capability.
     ///
     /// Uses a [`ToolServerHandle`] so tools can be added or removed at runtime
-    /// without recompiling the agent. Tool calls are yielded as
+    /// without recompiling. Tool calls are yielded as
     /// `ToolEvent::ToolCall` events alongside text chunks.
     pub async fn chat_with_tools_stream_mcp(
         &self,
@@ -87,18 +94,91 @@ impl LlmProvider {
         message: &str,
         history: &[(String, String)],
         tool_server: &ToolServerHandle,
+        additional_params: Option<&serde_json::Value>,
     ) -> Result<ToolChatStream> {
         let history = Self::build_history(history);
         match self {
-            Self::OpenAi(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
-            Self::Anthropic(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
-            Self::Cohere(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
-            Self::Gemini(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
-            Self::Mistral(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
-            Self::Ollama(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
-            Self::Llamafile(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
-            Self::Azure(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
-            Self::Copilot(c) => mcp_stream_arm!(c, model, system, tool_server, message, history),
+            Self::OpenAi(c) => mcp_stream_arm!(
+                c,
+                model,
+                system,
+                tool_server,
+                message,
+                history,
+                additional_params
+            ),
+            Self::Anthropic(c) => mcp_stream_arm!(
+                c,
+                model,
+                system,
+                tool_server,
+                message,
+                history,
+                additional_params
+            ),
+            Self::Cohere(c) => mcp_stream_arm!(
+                c,
+                model,
+                system,
+                tool_server,
+                message,
+                history,
+                additional_params
+            ),
+            Self::Gemini(c) => mcp_stream_arm!(
+                c,
+                model,
+                system,
+                tool_server,
+                message,
+                history,
+                additional_params
+            ),
+            Self::Mistral(c) => mcp_stream_arm!(
+                c,
+                model,
+                system,
+                tool_server,
+                message,
+                history,
+                additional_params
+            ),
+            Self::Ollama(c) => mcp_stream_arm!(
+                c,
+                model,
+                system,
+                tool_server,
+                message,
+                history,
+                additional_params
+            ),
+            Self::Llamafile(c) => mcp_stream_arm!(
+                c,
+                model,
+                system,
+                tool_server,
+                message,
+                history,
+                additional_params
+            ),
+            Self::Azure(c) => mcp_stream_arm!(
+                c,
+                model,
+                system,
+                tool_server,
+                message,
+                history,
+                additional_params
+            ),
+            Self::Copilot(c) => mcp_stream_arm!(
+                c,
+                model,
+                system,
+                tool_server,
+                message,
+                history,
+                additional_params
+            ),
         }
     }
 
@@ -126,51 +206,52 @@ impl LlmProvider {
         system: &str,
         message: &str,
         history: &[(String, String)],
+        additional_params: Option<&serde_json::Value>,
     ) -> Result<ChatStream> {
         let history = Self::build_history(history);
         match self {
             Self::OpenAi(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system)
+                build_chat_agent!(c, model, system, additional_params)
                     .stream_chat(message, history)
                     .await,
             )),
             Self::Anthropic(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system)
+                build_chat_agent!(c, model, system, additional_params)
                     .stream_chat(message, history)
                     .await,
             )),
             Self::Cohere(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system)
+                build_chat_agent!(c, model, system, additional_params)
                     .stream_chat(message, history)
                     .await,
             )),
             Self::Gemini(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system)
+                build_chat_agent!(c, model, system, additional_params)
                     .stream_chat(message, history)
                     .await,
             )),
             Self::Mistral(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system)
+                build_chat_agent!(c, model, system, additional_params)
                     .stream_chat(message, history)
                     .await,
             )),
             Self::Ollama(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system)
+                build_chat_agent!(c, model, system, additional_params)
                     .stream_chat(message, history)
                     .await,
             )),
             Self::Llamafile(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system)
+                build_chat_agent!(c, model, system, additional_params)
                     .stream_chat(message, history)
                     .await,
             )),
             Self::Azure(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system)
+                build_chat_agent!(c, model, system, additional_params)
                     .stream_chat(message, history)
                     .await,
             )),
             Self::Copilot(c) => Ok(Self::wrap_chat_stream(
-                build_chat_agent!(c, model, system)
+                build_chat_agent!(c, model, system, additional_params)
                     .stream_chat(message, history)
                     .await,
             )),
