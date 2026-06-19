@@ -82,6 +82,10 @@ pub enum ReasoningOption {
     Toggle,
     #[serde(rename = "effort")]
     Effort { values: Vec<String> },
+    #[serde(rename = "budget_tokens")]
+    BudgetTokens { values: Vec<String> },
+    #[serde(other)]
+    Unknown,
 }
 
 // ============================================================================

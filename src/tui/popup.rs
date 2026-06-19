@@ -309,7 +309,11 @@ fn render_subcommand_popup(
         // Dynamic items — derive title from parent
         let parts: Vec<&str> = parent.rsplitn(2, ' ').collect();
         let sub = parts[0];
-        let capitalized = sub[..1].to_uppercase() + &sub[1..];
+        let mut chars = sub.chars();
+        let capitalized = match chars.next() {
+            Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+            None => String::new(),
+        };
         format!("{} · {}", parts.get(1).unwrap_or(&""), capitalized)
     } else {
         format!("{} · sub-commands", parent)
@@ -635,16 +639,16 @@ fn render_agent_detail_popup(f: &mut Frame, area: Rect, state: &AppState, agent_
         AgentStatus::Failed => "Failed",
     };
 
-    // Truncate goal for display.
-    let goal_display = if goal.len() > 60 {
-        format!("{}…", &goal[..60])
+    // Truncate goal for display (char-safe).
+    let goal_display = if goal.chars().count() > 60 {
+        format!("{}…", goal.chars().take(60).collect::<String>())
     } else {
         goal
     };
 
-    // Truncate result for display.
-    let result_display = if result.len() > 80 {
-        format!("{}…", &result[..80])
+    // Truncate result for display (char-safe).
+    let result_display = if result.chars().count() > 80 {
+        format!("{}…", result.chars().take(80).collect::<String>())
     } else {
         result
     };

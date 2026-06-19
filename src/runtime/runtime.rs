@@ -1217,7 +1217,7 @@ Messages may contain important context from sibling agents.",
                         tools_used |= Self::tool_bit(&name);
                         let args_preview = serde_json::to_string(&args).unwrap_or_default();
                         let args_preview = if args_preview.len() > 80 {
-                            format!("{}…", &args_preview[..80])
+                            format!("{}…", args_preview.chars().take(80).collect::<String>())
                         } else {
                             args_preview
                         };
@@ -1452,7 +1452,7 @@ Messages may contain important context from sibling agents.",
                         // Record tool call trace (ring buffer, bounded).
                         let args_preview = serde_json::to_string(&args).unwrap_or_default();
                         let args_preview = if args_preview.len() > 80 {
-                            format!("{}…", &args_preview[..80])
+                            format!("{}…", args_preview.chars().take(80).collect::<String>())
                         } else {
                             args_preview
                         };
