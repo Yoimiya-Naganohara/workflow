@@ -527,7 +527,18 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
         } => {
             let cfg = crate::reflection::ReflectionConfig::default();
             let tool_trace = ""; // tools are not tracked in this context yet
-            let report = check_rules(&cfg, &input, &full_response, tool_trace);
+
+            // Run rules. Semantic rules need the embedding service; obtain it
+            // inside a block so the RwLockReadGuard is dropped before `runtime`
+            // is moved into the SelfCheckResult event.
+            let report = {
+                let embed_guard = runtime.as_ref().map(|rt| rt.blocking_read());
+                let embed_service = embed_guard.as_ref().map(|guard| guard.embedding_service());
+                let embed_ref: Option<&dyn crate::llm::EmbeddingService> = embed_service
+                    .as_ref()
+                    .map(|s| s.as_ref() as &dyn crate::llm::EmbeddingService);
+                check_rules(&cfg, &input, &full_response, tool_trace, embed_ref).await
+            };
 
             if !report.all_passed {
                 // Rules failed → collect which rules failed
@@ -549,6 +560,12 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                 }
                 if report.min_output == crate::reflection::RuleVerdict::Fail {
                     failed.push("回复过短");
+                }
+                if report.relevance == crate::reflection::RuleVerdict::Fail {
+                    failed.push("回复与问题语义不相关");
+                }
+                if report.semantic_promise == crate::reflection::RuleVerdict::Fail {
+                    failed.push("承诺内容与工具调用语义不匹配");
                 }
 
                 let feedback = crate::reflection::build_continuation_feedback(&failed);

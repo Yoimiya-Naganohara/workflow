@@ -4,6 +4,12 @@
 //! to detect common issues. If rules pass, it asks the agent itself
 //! a single "yes/no" self-check (1 token). Only if both indicate a
 //! problem does it trigger a continuation round.
+//!
+//! Semantic rules (relevance, semantic_promise) use the embedding service
+//! when available. Pass `None` to skip them and fall back to heuristic rules.
+
+use crate::core::simd::cosine_similarity_384;
+use crate::llm::EmbeddingService;
 
 // ═══════════════════════════════════════════════════════════════
 //  Types
@@ -26,6 +32,10 @@ pub struct RulesReport {
     pub empty_promise: RuleVerdict,
     pub file_ref_used: RuleVerdict,
     pub min_output: RuleVerdict,
+    /// Semantic: cosine similarity between question and response.
+    pub relevance: RuleVerdict,
+    /// Semantic: embedding-based check that future-tense promises are backed by tool calls.
+    pub semantic_promise: RuleVerdict,
     pub all_passed: bool,
 }
 
@@ -34,7 +44,7 @@ pub struct RulesReport {
 pub struct ReflectionConfig {
     pub auto_reflect: bool,
     pub max_attempts: u8,
-    pub rules_enabled: [bool; 6],
+    pub rules_enabled: [bool; 8],
 }
 
 impl Default for ReflectionConfig {
@@ -42,7 +52,7 @@ impl Default for ReflectionConfig {
         Self {
             auto_reflect: false, // default off, user opts in
             max_attempts: 1,     // only one retry
-            rules_enabled: [true; 6],
+            rules_enabled: [true; 8],
         }
     }
 }
@@ -54,18 +64,24 @@ pub const RULE_MULTI_QUESTION: usize = 2;
 pub const RULE_EMPTY_PROMISE: usize = 3;
 pub const RULE_FILE_REF_USED: usize = 4;
 pub const RULE_MIN_OUTPUT: usize = 5;
+pub const RULE_RELEVANCE: usize = 6;
+pub const RULE_SEMANTIC_PROMISE: usize = 7;
 
 // ═══════════════════════════════════════════════════════════════
 //  Rules engine
 // ═══════════════════════════════════════════════════════════════
 
 /// Run all enabled Level 1 rules.
-/// All inputs are string-based; no LLM calls.
-pub fn check_rules(
+///
+/// When `embedding` is `Some`, semantic rules (relevance, semantic_promise)
+/// are evaluated via cosine similarity on 384-dim embeddings.
+/// When `embedding` is `None`, those rules are `Skip`ped.
+pub async fn check_rules(
     cfg: &ReflectionConfig,
     input: &str,
     response: &str,
     tool_trace: &str,
+    embedding: Option<&dyn EmbeddingService>,
 ) -> RulesReport {
     let code_complete = if cfg.rules_enabled[RULE_CODE_COMPLETE] {
         rule_code_complete(input, response)
@@ -103,6 +119,27 @@ pub fn check_rules(
         RuleVerdict::Skip
     };
 
+    // ── Semantic rules (require embedding service) ──
+    let relevance = if cfg.rules_enabled[RULE_RELEVANCE] {
+        if let Some(emb) = embedding {
+            rule_relevance(emb, input, response).await
+        } else {
+            RuleVerdict::Skip
+        }
+    } else {
+        RuleVerdict::Skip
+    };
+
+    let semantic_promise = if cfg.rules_enabled[RULE_SEMANTIC_PROMISE] {
+        if let Some(emb) = embedding {
+            rule_semantic_promise(emb, response, tool_trace).await
+        } else {
+            RuleVerdict::Skip
+        }
+    } else {
+        RuleVerdict::Skip
+    };
+
     // A rule is "passed" if it's either Pass or Skip (not applicable)
     let results = [
         code_complete,
@@ -111,6 +148,8 @@ pub fn check_rules(
         empty_promise,
         file_ref_used,
         min_output,
+        relevance,
+        semantic_promise,
     ];
     let all_passed = results.iter().all(|r| *r != RuleVerdict::Fail);
 
@@ -121,6 +160,8 @@ pub fn check_rules(
         empty_promise,
         file_ref_used,
         min_output,
+        relevance,
+        semantic_promise,
         all_passed,
     }
 }
@@ -256,6 +297,89 @@ fn rule_min_output(response: &str) -> RuleVerdict {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  Semantic rules (embedding-based)
+// ═══════════════════════════════════════════════════════════════
+
+/// Minimum cosine similarity threshold for semantic rules.
+const SEMANTIC_THRESHOLD: f32 = 0.30;
+
+/// Rule 7: Semantic relevance — embed question + response, check cosine
+/// similarity.  A low score indicates the response is not about the question.
+async fn rule_relevance(
+    embedding: &dyn EmbeddingService,
+    input: &str,
+    response: &str,
+) -> RuleVerdict {
+    let (q_res, r_res) = tokio::join!(embedding.embed(input), embedding.embed(response));
+    match (q_res, r_res) {
+        (Ok(q), Ok(r)) => {
+            let sim = cosine_similarity_384(&q, &r);
+            if sim < SEMANTIC_THRESHOLD {
+                tracing::debug!(
+                    input_len = input.len(),
+                    response_len = response.len(),
+                    sim,
+                    SEMANTIC_THRESHOLD,
+                    "relevance rule FAIL"
+                );
+                RuleVerdict::Fail
+            } else {
+                RuleVerdict::Pass
+            }
+        }
+        _ => RuleVerdict::Skip, // embedding failure → don't penalise
+    }
+}
+
+/// Rule 8: Semantic promise check — if the response contains future-tense
+/// promises, embed the promise segment and the tool trace, and verify they
+/// are semantically related.  Falls back to the heuristic rule when the
+/// tool trace is empty.
+async fn rule_semantic_promise(
+    embedding: &dyn EmbeddingService,
+    response: &str,
+    tool_trace: &str,
+) -> RuleVerdict {
+    // Extract the first sentence containing a promise indicator.
+    let promise_sentence = response
+        .lines()
+        .find(|l| {
+            l.contains("I will")
+                || l.contains("接下来")
+                || l.contains("下一步")
+                || l.contains("接下来我会")
+        })
+        .unwrap_or("");
+
+    if promise_sentence.is_empty() {
+        return RuleVerdict::Skip;
+    }
+
+    // If there is no tool trace at all, this is the same as the heuristic
+    // empty_promise rule — no semantic check needed.
+    if tool_trace.is_empty() {
+        return RuleVerdict::Skip;
+    }
+
+    let (p_res, t_res) = tokio::join!(
+        embedding.embed(promise_sentence),
+        embedding.embed(tool_trace)
+    );
+    match (p_res, t_res) {
+        (Ok(p), Ok(t)) => {
+            let sim = cosine_similarity_384(&p, &t);
+            if sim < SEMANTIC_THRESHOLD {
+                tracing::debug!(sim, SEMANTIC_THRESHOLD, "semantic_promise rule FAIL");
+                RuleVerdict::Fail
+            } else {
+                RuleVerdict::Pass
+            }
+        }
+        _ => RuleVerdict::Skip,
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  Prompt builders
 // ═══════════════════════════════════════════════════════════════
 
@@ -383,16 +507,20 @@ mod tests {
         assert_eq!(r, RuleVerdict::Pass);
     }
 
-    #[test]
-    fn test_check_rules_all_pass() {
+    #[tokio::test]
+    async fn test_check_rules_all_pass_no_embedding() {
         let cfg = ReflectionConfig::default();
         let report = check_rules(
             &cfg,
             "hello",
             "this is a sufficiently long and complete response to the user's greeting",
             "",
-        );
+            None, // no embedding → semantic rules are Skip
+        )
+        .await;
         assert!(report.all_passed);
+        assert_eq!(report.relevance, RuleVerdict::Skip);
+        assert_eq!(report.semantic_promise, RuleVerdict::Skip);
     }
 
     #[test]
@@ -401,5 +529,107 @@ mod tests {
         assert!(p.contains("hello"));
         assert!(p.contains("hi there"));
         assert!(p.contains("yes' or 'no"));
+    }
+
+    // ── Semantic rule tests (require fastembed / ONNX) ──
+
+    fn try_embedding() -> Option<crate::llm::embedding::EmbeddingService> {
+        std::panic::catch_unwind(crate::llm::embedding::EmbeddingService::new).ok()
+    }
+
+    #[tokio::test]
+    async fn test_rule_relevance_related() {
+        let Some(emb) = try_embedding() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        let r = rule_relevance(
+            &emb,
+            "how to sort a vector in Rust?",
+            "Use sort() on Vec<T>.",
+        )
+        .await;
+        assert_eq!(r, RuleVerdict::Pass);
+    }
+
+    #[tokio::test]
+    async fn test_rule_relevance_unrelated() {
+        let Some(emb) = try_embedding() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        let r = rule_relevance(&emb, "how to bake a cake", "The quick brown fox jumps.").await;
+        assert_eq!(r, RuleVerdict::Fail);
+    }
+
+    #[tokio::test]
+    async fn test_rule_semantic_promise_skip_no_promise() {
+        let Some(emb) = try_embedding() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        let r = rule_semantic_promise(&emb, "Done!", "read_file -> ok").await;
+        assert_eq!(r, RuleVerdict::Skip);
+    }
+
+    #[tokio::test]
+    async fn test_rule_semantic_promise_skip_no_tools() {
+        let Some(emb) = try_embedding() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        let r = rule_semantic_promise(&emb, "I will fix the bug now", "").await;
+        assert_eq!(r, RuleVerdict::Skip);
+    }
+
+    #[tokio::test]
+    async fn test_rule_semantic_promise_pass() {
+        let Some(emb) = try_embedding() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        // Promise about installing dependencies, tool output confirms installation.
+        let r = rule_semantic_promise(
+            &emb,
+            "I will install the required npm packages",
+            "npm install: added 42 packages in 3.2s",
+        )
+        .await;
+        assert_eq!(r, RuleVerdict::Pass);
+    }
+
+    #[tokio::test]
+    async fn test_rule_semantic_promise_fail() {
+        let Some(emb) = try_embedding() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        // Promise about installing packages, but tools are about deploying to AWS.
+        let r = rule_semantic_promise(
+            &emb,
+            "I will install the required npm packages",
+            "aws s3 sync /dist s3://bucket",
+        )
+        .await;
+        assert_eq!(r, RuleVerdict::Fail);
+    }
+
+    #[tokio::test]
+    async fn test_check_rules_with_embedding() {
+        let Some(emb) = try_embedding() else {
+            eprintln!("SKIP: ONNX/fastembed not available");
+            return;
+        };
+        let cfg = ReflectionConfig::default();
+        let report = check_rules(
+            &cfg,
+            "hello",
+            "this is a sufficiently long and complete response to the user's greeting",
+            "",
+            Some(&emb),
+        )
+        .await;
+        assert!(report.all_passed);
+        assert_eq!(report.relevance, RuleVerdict::Pass);
     }
 }

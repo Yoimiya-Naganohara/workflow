@@ -339,11 +339,8 @@ impl Tool for SpawnAgent {
             None => format!("{}\n\nDelegation reason: {}", goal, args.reason.trim()),
         };
 
-        // Phase 2: Non‑blocking delegation.
-        // 1. Spawn the child through the L-1→L0→L1→L2 pipeline.
-        // 2. Dispatch ActivateAgent to the background event loop.
-        // 3. Return Running instantly — no LLM stream is blocked.
-
+        // Phase 1: Extract all needed data in a single read lock to avoid
+        // TOCTOU races with other tools modifying the pool concurrently.
         let (runtime, agent_pool, parent_id, runtime_tx) = {
             let s = self.state.read().await;
             let runtime = s
@@ -373,17 +370,20 @@ impl Tool for SpawnAgent {
         {
             Ok(id) => id,
             Err(e) => {
+                let reason = e.to_string();
+                let recoverable = !reason.contains("depth limit")
+                    && !reason.contains("security")
+                    && !reason.contains("denied");
                 return Ok(SpawnAgentOutput::Rejected {
                     role,
                     goal,
-                    reason: e.to_string(),
-                    recoverable: true,
+                    reason,
+                    recoverable,
                 });
             }
         };
 
-        // Dispatch to the background event loop — the event loop owns
-        // the ToolServerHandle and will execute the agent asynchronously.
+        // Phase 2: Dispatch ActivateAgent to the background event loop.
         runtime_tx
             .send(crate::runtime::event::RuntimeEvent::ActivateAgent {
                 agent_id: child_id,
@@ -391,6 +391,57 @@ impl Tool for SpawnAgent {
             })
             .await
             .map_err(|_| ToolCallError("Background runtime loop is dead".to_string()))?;
+
+        // Blocking mode: wait for the child to complete before returning.
+        if args.blocking.unwrap_or(false) {
+            let notify = {
+                let pool = agent_pool.read().await;
+                pool.get_completion_notify(&child_id)
+            };
+            if let Some(notify) = notify {
+                // Wait up to 5 minutes for the child to finish.
+                let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(300);
+                tokio::time::timeout_at(deadline, async {
+                    notify.notified().await;
+                })
+                .await
+                .map_err(|_| ToolCallError("Timeout waiting for child agent (300s)".to_string()))?;
+            }
+            // Read the child's result from the pool.
+            let pool = agent_pool.read().await;
+            let child_id_str = crate::agent::AgentPool::agent_id_str(&child_id);
+            match pool.get_agent(&child_id) {
+                Some(agent) => match (&agent.status, &agent.result) {
+                    (crate::agent::AgentStatus::Completed, Some(result)) => {
+                        return Ok(SpawnAgentOutput::Completed {
+                            agent_id: child_id_str,
+                            role,
+                            goal,
+                            result: result.clone(),
+                        });
+                    }
+                    _ => {
+                        return Ok(SpawnAgentOutput::Completed {
+                            agent_id: child_id_str,
+                            role,
+                            goal,
+                            result: agent
+                                .result
+                                .clone()
+                                .unwrap_or_else(|| format!("Agent status: {:?}", agent.status)),
+                        });
+                    }
+                },
+                None => {
+                    return Ok(SpawnAgentOutput::Completed {
+                        agent_id: child_id_str,
+                        role,
+                        goal,
+                        result: "Agent not found after completion".to_string(),
+                    });
+                }
+            }
+        }
 
         Ok(SpawnAgentOutput::Running {
             agent_id: crate::agent::AgentPool::agent_id_str(&child_id),

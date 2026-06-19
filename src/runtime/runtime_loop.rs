@@ -64,7 +64,19 @@ impl RuntimeEventLoop {
     }
 
     pub async fn run(mut self) {
+        // Periodic eviction interval: evict stale agents every 120 events.
+        let mut eviction_tick = 0u64;
+        const EVICTION_INTERVAL: u64 = 120;
+
         while let Some(event) = self.event_rx.recv().await {
+            eviction_tick += 1;
+            if eviction_tick % EVICTION_INTERVAL == 0 {
+                let mut pool_guard = self.pool.write().await;
+                let count = pool_guard.evict_stale(None);
+                if count > 0 {
+                    tracing::info!("Event loop evicted {} stale agent(s)", count);
+                }
+            }
             match event {
                 RuntimeEvent::ActivateAgent {
                     agent_id,

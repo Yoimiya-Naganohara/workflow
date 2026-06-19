@@ -717,6 +717,15 @@ impl AgentRuntime {
         responsibility_chain: &[AgentId],
         agent_pool: &mut AgentPool,
     ) -> Result<AgentId> {
+        let max_depth = crate::core::constants::DEFAULT_MAX_DEPTH;
+        if parent_depth + 1 >= max_depth {
+            return Err(anyhow::anyhow!(
+                "Agent depth limit ({}) reached — cannot spawn '{}' at depth {}",
+                max_depth,
+                role,
+                parent_depth + 1
+            ));
+        }
         let role_emb = self.pipeline.embedding().embed(role).await?;
 
         let role_tpl = self
@@ -912,6 +921,7 @@ impl AgentRuntime {
         if let Some(agent) = pool.get_agent_mut(&owner_id) {
             agent.result = Some(result.clone());
             agent.status = AgentStatus::Completed;
+            pool.release_budget_guard(&owner_id);
             pool.notify_completed(&owner_id);
         }
         result
