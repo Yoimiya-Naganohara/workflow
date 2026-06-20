@@ -10,11 +10,15 @@ use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub env: Vec<String>,
     pub api: Option<String>,
     pub doc: Option<String>,
+    #[serde(default)]
     pub models: HashMap<String, Model>,
 }
 
@@ -36,7 +40,9 @@ impl Provider {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Model {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub name: String,
     pub family: Option<String>,
     #[serde(default)]
@@ -52,9 +58,11 @@ pub struct Model {
     pub knowledge: Option<String>,
     pub release_date: Option<String>,
     pub last_updated: Option<String>,
+    #[serde(default)]
     pub modalities: Modalities,
     #[serde(default)]
     pub open_weights: bool,
+    #[serde(default)]
     pub limit: ModelLimit,
     #[serde(default = "default_cost")]
     pub cost: Cost,
@@ -169,15 +177,19 @@ impl Model {
 //  Modalities, Limit, Cost
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Modalities {
+    #[serde(default)]
     pub input: Vec<String>,
+    #[serde(default)]
     pub output: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModelLimit {
+    #[serde(default)]
     pub context: u64,
+    #[serde(default)]
     pub output: u64,
     #[serde(default)]
     pub input: Option<u64>,
@@ -185,7 +197,9 @@ pub struct ModelLimit {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cost {
+    #[serde(default)]
     pub input: f64,
+    #[serde(default)]
     pub output: f64,
     #[serde(default)]
     pub cache_read: Option<f64>,
@@ -242,6 +256,32 @@ impl ModelsDevSource {
     }
 }
 
+/// Filter out providers/models with empty or null identifiers.
+/// These entries would fail at runtime if kept.
+fn filter_valid_providers(providers: Vec<Provider>) -> Vec<Provider> {
+    providers
+        .into_iter()
+        .filter(|p| {
+            if p.id.is_empty() || p.name.is_empty() {
+                tracing::warn!("Skipping provider with empty id/name");
+                return false;
+            }
+            true
+        })
+        .map(|mut p| {
+            // Remove models with empty id/name
+            p.models.retain(|_, m| {
+                if m.id.is_empty() || m.name.is_empty() {
+                    tracing::warn!("Skipping model with empty id/name in provider '{}'", p.id);
+                    return false;
+                }
+                true
+            });
+            p
+        })
+        .collect()
+}
+
 #[async_trait::async_trait]
 impl ProviderSource for ModelsDevSource {
     fn name(&self) -> &'static str {
@@ -273,6 +313,7 @@ impl ProviderSource for ModelsDevSource {
                 p
             })
             .collect();
+        providers = filter_valid_providers(providers);
         providers.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(providers)
     }
@@ -325,6 +366,7 @@ impl ProviderSource for LocalFileSource {
                 p
             })
             .collect();
+        providers = filter_valid_providers(providers);
         providers.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(providers)
     }

@@ -136,6 +136,20 @@ pub async fn runtime_event_broker(
                 );
                 let _ = app_tx.send(crate::tui::effect::AppEvent::SystemLog { content });
             }
+
+            // ── Delegation events (Phase 2+) ──
+            // These are infrastructure-level mutations.  They become
+            // visible in the TUI once the delegation engine is wired
+            // up (Phase 3).  For now they just bump the tree version.
+            RuntimeEvent::SpawnTask { .. }
+            | RuntimeEvent::TaskCompleted { .. }
+            | RuntimeEvent::TaskFailed { .. }
+            | RuntimeEvent::EscalateTask { .. }
+            | RuntimeEvent::MergeTaskResult { .. } => {
+                // Task graph mutation — the TUI diagnostic tree
+                // will reflect it on next render via the bumped
+                // agent_tree_version.
+            }
         }
     }
 }

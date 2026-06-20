@@ -136,6 +136,9 @@ pub struct Agent {
     pub children: Vec<AgentId>,
     pub depth: u32,
     pub goal: String,
+    /// The task this agent is executing in the TaskGraph (Phase 2A).
+    /// `None` for bootstrap agents and pre-Phase 2 agents.
+    pub task_id: Option<crate::core::types::TaskId>,
     pub config: AgentConfig,
     pub status: AgentStatus,
     pub result: Option<String>,
@@ -662,6 +665,7 @@ mod tests {
             tokens_output: 0,
             tool_trace: VecDeque::new(),
             inbox: VecDeque::new(),
+            task_id: None,
             sandbox: None,
         };
         let id = pool.add_agent(agent);
@@ -691,6 +695,7 @@ mod tests {
             tokens_output: 0,
             tool_trace: VecDeque::new(),
             inbox: VecDeque::new(),
+            task_id: None,
             sandbox: None,
         };
         pool.add_agent(agent);

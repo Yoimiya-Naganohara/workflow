@@ -468,6 +468,7 @@ impl Plan {
                     tokens_output: 0,
                     tool_trace: std::collections::VecDeque::new(),
                     inbox: std::collections::VecDeque::new(),
+                    task_id: None,
                     sandbox: None,
                 };
                 let agent_id = agent.id;
@@ -546,6 +547,321 @@ impl Plan {
                 PlanStatus::Failed => "Failed",
             }
         )
+    }
+
+    /// Convert this linear plan into a graph-backed [`GraphPlan`].
+    ///
+    /// Each task becomes a child of the root.  Dependencies between
+    /// tasks must be added separately via [`GraphPlan::add_dependency`].
+    pub fn into_graph(self) -> GraphPlan {
+        let mut graph = crate::runtime::task_graph::TaskGraph::new();
+        let root_id = graph.spawn_root(&self.goal);
+
+        for task in &self.tasks {
+            if let Some(child_id) = graph.spawn_child(root_id, &task.description) {
+                // Map old status to new status
+                match task.status {
+                    crate::agent::plan::TaskStatus::Pending => {
+                        // stays Created — resolved by ready_tasks()
+                    }
+                    crate::agent::plan::TaskStatus::Running => {
+                        let _ = graph.mark_ready(child_id);
+                    }
+                    crate::agent::plan::TaskStatus::Completed => {
+                        let _ = graph.mark_ready(child_id);
+                        let _ = graph.mark_complete(child_id);
+                    }
+                    crate::agent::plan::TaskStatus::Failed => {
+                        let _ = graph.mark_failed(child_id, "");
+                    }
+                }
+                // Store result if any
+                if let Some(ref result) = task.result {
+                    if let Some(node) = graph.get_mut(&child_id) {
+                        node.result = Some(result.clone());
+                    }
+                }
+            }
+        }
+
+        GraphPlan {
+            graph,
+            root_id,
+            status: self.status,
+            plan_name: self.goal.clone(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        }
+    }
+}
+
+// ============================================================================
+//  GraphPlan — DAG-backed plan using TaskGraph
+// ============================================================================
+
+/// A plan backed by a [`TaskGraph`] instead of a flat `Vec<Task>`.
+///
+/// This is the Phase 1 replacement for the linear `Plan` struct.
+/// It provides:
+///
+/// - Decomposition hierarchy (parent/children)
+/// - Dependency tracking (run-after constraints)
+/// - Fan-in/fan-out via DAG scheduling
+/// - Agent assignment per node
+///
+/// # Migration path
+///
+/// 1. New code uses `GraphPlan` directly.
+/// 2. Old code continues using `Plan` and `PlanRegistry`.
+/// 3. `Plan::into_graph()` provides the bridge.
+/// 4. Future: `PlanGraphRegistry` replaces `PlanRegistry`.
+#[derive(Debug, Clone)]
+pub struct GraphPlan {
+    /// The underlying DAG.
+    pub graph: crate::runtime::task_graph::TaskGraph,
+    /// The root task node ID.
+    pub root_id: crate::core::types::TaskId,
+    /// Plan-level status (backport from old PlanStatus).
+    pub status: PlanStatus,
+    /// Plan name / identifier.
+    pub plan_name: String,
+    /// Creation timestamp.
+    pub created_at: u64,
+}
+
+impl GraphPlan {
+    /// Create a new graph plan with a single root goal.
+    pub fn new(goal: &str) -> Self {
+        let mut graph = crate::runtime::task_graph::TaskGraph::new();
+        let root_id = graph.spawn_root(goal);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        Self {
+            graph,
+            root_id,
+            status: PlanStatus::Draft,
+            plan_name: goal.to_string(),
+            created_at: now,
+        }
+    }
+
+    /// Create a new graph plan with a specific root task ID (for replay/persistence).
+    pub fn from_graph(
+        graph: crate::runtime::task_graph::TaskGraph,
+        root_id: crate::core::types::TaskId,
+    ) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let plan_name = graph
+            .get(&root_id)
+            .map_or("unknown".to_string(), |n| n.goal.clone());
+        Self {
+            graph,
+            root_id,
+            status: PlanStatus::Draft,
+            plan_name,
+            created_at: now,
+        }
+    }
+
+    /// Add a sub-task as a child of the root.
+    pub fn spawn_subtask(&mut self, goal: &str) -> Option<crate::core::types::TaskId> {
+        self.graph.spawn_child(self.root_id, goal)
+    }
+
+    /// Add a sub-task as a child of a specific parent.
+    pub fn spawn_child_of(
+        &mut self,
+        parent_id: crate::core::types::TaskId,
+        goal: &str,
+    ) -> Option<crate::core::types::TaskId> {
+        self.graph.spawn_child(parent_id, goal)
+    }
+
+    /// Add a dependency edge between two tasks.
+    pub fn add_dependency(
+        &mut self,
+        task_id: crate::core::types::TaskId,
+        depends_on: crate::core::types::TaskId,
+    ) -> Result<(), String> {
+        self.graph.add_dependency(task_id, depends_on)
+    }
+
+    /// Returns the list of tasks ready for execution (dependencies satisfied).
+    pub fn ready_tasks(&self) -> Vec<crate::core::types::TaskId> {
+        self.graph.ready_tasks()
+    }
+
+    /// Mark a task as running (assigned to an agent).
+    pub fn mark_running(
+        &mut self,
+        task_id: crate::core::types::TaskId,
+        agent_id: AgentId,
+    ) -> Result<(), String> {
+        self.graph.mark_running(task_id, agent_id)
+    }
+
+    /// Mark a task as completed.  May trigger parent completion.
+    pub fn mark_complete(
+        &mut self,
+        task_id: crate::core::types::TaskId,
+        result: &str,
+    ) -> Result<(), String> {
+        if let Some(node) = self.graph.get_mut(&task_id) {
+            node.result = Some(result.to_string());
+        }
+        self.graph.mark_complete(task_id)?;
+
+        // Check plan-level completion
+        if self.graph.subgraph_complete(self.root_id) {
+            self.status = PlanStatus::Completed;
+        }
+        Ok(())
+    }
+
+    /// Mark a task as failed.
+    pub fn mark_failed(
+        &mut self,
+        task_id: crate::core::types::TaskId,
+        error: &str,
+    ) -> Result<(), String> {
+        self.graph.mark_failed(task_id, error)?;
+        self.status = PlanStatus::Failed;
+        Ok(())
+    }
+
+    /// Mark the root as Decomposed (it has spawned children).
+    pub fn mark_decomposed(&mut self) -> Result<(), String> {
+        self.graph.mark_decomposed(self.root_id)
+    }
+
+    /// Get all leaf tasks (no children) in the decomposition tree.
+    /// These are the tasks that need agents assigned.
+    pub fn leaf_tasks(&self) -> Vec<crate::core::types::TaskId> {
+        self.graph.leaf_tasks()
+    }
+
+    /// Human-readable summary.
+    pub fn summary(&self) -> String {
+        let counts = self.graph.status_counts(Some(self.root_id));
+        let total: usize = counts.values().sum();
+        let done = counts
+            .get(&crate::runtime::task_graph::TaskStatus::Completed)
+            .copied()
+            .unwrap_or(0);
+        format!(
+            "[{}/{}] {} | {}",
+            done,
+            total,
+            match self.status {
+                PlanStatus::Draft => "Draft",
+                PlanStatus::Approved => "Approved",
+                PlanStatus::Executing => "Executing",
+                PlanStatus::Completed => "Completed",
+                PlanStatus::Failed => "Failed",
+            },
+            self.graph,
+        )
+    }
+}
+
+// ============================================================================
+//  PlanGraphRegistry — stores graph-backed plans by ID
+// ============================================================================
+
+/// Registry for [`GraphPlan`] entries.
+///
+/// This is the graph-native replacement for [`PlanRegistry`].
+/// Unlike [`PlanRegistry`] which stores flat `PlanEntity` lists,
+/// this registry stores full DAGs keyed by plan name.
+pub struct PlanGraphRegistry {
+    plans: HashMap<String, GraphPlan>,
+    by_agent: HashMap<AgentId, Vec<String>>,
+}
+
+impl PlanGraphRegistry {
+    pub fn new() -> Self {
+        Self {
+            plans: HashMap::new(),
+            by_agent: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, name: &str, plan: GraphPlan, agent_id: Option<AgentId>) {
+        let name = name.to_string();
+        self.plans.insert(name.clone(), plan);
+        if let Some(aid) = agent_id {
+            self.by_agent.entry(aid).or_default().push(name);
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<&GraphPlan> {
+        self.plans.get(name)
+    }
+
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut GraphPlan> {
+        self.plans.get_mut(name)
+    }
+
+    pub fn get_by_agent(&self, agent_id: AgentId) -> Vec<&GraphPlan> {
+        self.by_agent
+            .get(&agent_id)
+            .map(|names| names.iter().filter_map(|n| self.plans.get(n)).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn search(&self, query: &str) -> Vec<&GraphPlan> {
+        let q = query.to_lowercase();
+        self.plans
+            .values()
+            .filter(|p| p.plan_name.to_lowercase().contains(&q))
+            .collect()
+    }
+
+    pub fn all(&self) -> Vec<&GraphPlan> {
+        self.plans.values().collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.plans.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.plans.is_empty()
+    }
+
+    /// Delete a plan by name.
+    pub fn delete(&mut self, name: &str) -> bool {
+        if self.plans.remove(name).is_some() {
+            // Clean up by_agent references
+            for v in self.by_agent.values_mut() {
+                v.retain(|n| n != name);
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get all plan names that reference a given task ID.
+    pub fn find_by_task(&self, task_id: crate::core::types::TaskId) -> Vec<&str> {
+        self.plans
+            .iter()
+            .filter(|(_, plan)| plan.graph.contains(&task_id))
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+}
+
+impl Default for PlanGraphRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

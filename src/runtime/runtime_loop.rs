@@ -26,7 +26,9 @@ use tokio::sync::{RwLock, mpsc};
 use crate::agent::{AgentPool, AgentStatus};
 use crate::core::types::AgentId;
 use crate::runtime::AgentRuntime;
+use crate::runtime::dispatch::PipelineDispatchDecider;
 use crate::runtime::event::RuntimeEvent;
+use crate::runtime::scheduler::TaskScheduler;
 use crate::tools::ToolServerHandle;
 
 /// Background agent lifecycle loop.
@@ -41,6 +43,8 @@ pub struct RuntimeEventLoop {
     /// Reference to the TUI AppState — used to create sandboxed
     /// tool servers when the agent has a sandbox handle.
     state: Option<std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>>,
+    /// Phase 2B: extracted scheduler — graph query + pipeline + agent spawn.
+    scheduler: TaskScheduler,
 }
 
 impl RuntimeEventLoop {
@@ -53,6 +57,9 @@ impl RuntimeEventLoop {
         tool_server: ToolServerHandle,
         state: Option<std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>>,
     ) -> Self {
+        let decider = Box::new(PipelineDispatchDecider::new(runtime.clone()));
+        let scheduler =
+            TaskScheduler::new(runtime.clone(), pool.clone(), broker_tx.clone(), decider);
         Self {
             runtime,
             pool,
@@ -60,6 +67,7 @@ impl RuntimeEventLoop {
             broker_tx,
             tool_server,
             state,
+            scheduler,
         }
     }
 
@@ -227,6 +235,22 @@ impl RuntimeEventLoop {
                         }
                     });
                 }
+                RuntimeEvent::SpawnTask {
+                    goal,
+                    role,
+                    parent_agent,
+                } => {
+                    self.handle_spawn_task(goal, role, parent_agent).await;
+                }
+
+                RuntimeEvent::TaskCompleted { task_id, result } => {
+                    self.handle_task_completed(task_id, &result).await;
+                }
+
+                RuntimeEvent::TaskFailed { task_id, error } => {
+                    self.handle_task_failed(task_id, &error).await;
+                }
+
                 other => {
                     // Everything else → forward to broker.
                     let _ = self.broker_tx.send(other).await;
@@ -235,6 +259,120 @@ impl RuntimeEventLoop {
         }
     }
 
+    // ── Phase 2A: Delegation handlers ──
+
+    /// Handle `SpawnTask` — create a task node in the DAG, then schedule.
+    ///
+    /// Precondition: parent agent MUST have a `task_id`.  Phase 2B guarantees
+    /// this because `bootstrap_root_agent` now creates a root task.
+    async fn handle_spawn_task(&self, goal: String, role: String, parent_agent: AgentId) {
+        // Step 1: Extract parent's task_id and clone task_graph Arc.
+        let (effective_parent_id, task_graph) = {
+            let p = self.pool.read().await;
+            let pid = p.get_agent(&parent_agent).and_then(|a| a.task_id);
+            let pid = match pid {
+                Some(id) => id,
+                None => {
+                    tracing::error!(
+                        "handle_spawn_task: parent {:02x}.. has no task_id — inconsistent",
+                        parent_agent[0]
+                    );
+                    return;
+                }
+            };
+            let rt = self.runtime.read().await;
+            let tg = rt.task_graph.clone();
+            (pid, tg)
+        };
+
+        // Step 2: Spawn child task in the graph.
+        let child_task_id: crate::core::types::TaskId = {
+            let mut g = task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            match g.spawn_child(effective_parent_id, &goal) {
+                Some(cid) => {
+                    if let Some(node) = g.get_mut(&cid) {
+                        node.role = Some(role.clone());
+                    }
+                    // Ensure parent is marked Decomposed.
+                    if let Some(parent) = g.get(&effective_parent_id) {
+                        if parent.status == crate::runtime::task_graph::TaskStatus::Created
+                            || parent.status == crate::runtime::task_graph::TaskStatus::Ready
+                        {
+                            g.mark_decomposed(effective_parent_id).ok();
+                        }
+                    }
+                    cid
+                }
+                None => {
+                    tracing::error!(
+                        "handle_spawn_task: parent {:02x}.. not found in graph",
+                        effective_parent_id[0]
+                    );
+                    return;
+                }
+            }
+        };
+
+        tracing::info!(
+            "SpawnTask: created task {:02x}.. under parent {:02x}.. (role={}, goal={:.60})",
+            child_task_id[0],
+            effective_parent_id[0],
+            role,
+            goal
+        );
+
+        self.scheduler.dispatch().await;
+    }
+
+    /// Handle `TaskCompleted` — mark a task done in the graph, then schedule.
+    async fn handle_task_completed(&self, task_id: crate::core::types::TaskId, result: &str) {
+        {
+            let rt = self.runtime.read().await;
+            let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            if let Err(e) = g.mark_complete(task_id) {
+                tracing::warn!(
+                    "TaskCompleted: mark_complete({:02x}..) failed: {}",
+                    task_id[0],
+                    e
+                );
+            } else {
+                // Store the result on the node.
+                if let Some(node) = g.get_mut(&task_id) {
+                    node.result = Some(result.to_string());
+                }
+                tracing::info!("TaskCompleted: task {:02x}.. done", task_id[0]);
+            }
+        }
+        self.scheduler.dispatch().await;
+    }
+
+    /// Handle `TaskFailed` — mark a task failed in the graph, then schedule.
+    async fn handle_task_failed(&self, task_id: crate::core::types::TaskId, error: &str) {
+        {
+            let rt = self.runtime.read().await;
+            let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            if let Err(e) = g.mark_failed(task_id, error) {
+                tracing::warn!(
+                    "TaskFailed: mark_failed({:02x}..) failed: {}",
+                    task_id[0],
+                    e
+                );
+            } else {
+                tracing::info!("TaskFailed: task {:02x}.. failed", task_id[0]);
+            }
+        }
+        self.scheduler.dispatch().await;
+    }
+
+    /// Query the TaskGraph for ready tasks and activate agents for them.
+    ///
+    /// For each ready task:
+    /// 1. MARK_RUNNING first (anti-double-dispatch — prevents `ready_tasks()`
+    ///    from returning this task again while the pipeline runs)
+    /// 2. Runs the decision pipeline (L-1/L0/L1/L2)
+    /// 3. If approved, creates an agent and sends `ActivateAgent`
+    /// 4. If rejected, marks the task as `Rejected` (not `Failed` — the task
+    ///    never started execution)
     // ── Handlers ──
 
     async fn handle_activate_inner(
@@ -414,17 +552,60 @@ impl RuntimeEventLoop {
                         pid,
                     )
                     .await;
+
+                    // ── Phase 4: Emit TaskCompleted to update the task graph ──
+                    if let Some(ref st) = state {
+                        if let Ok(s) = st.try_read() {
+                            if let Some(tx) = &s.core.runtime_event_tx {
+                                let task_id = {
+                                    let p = pool.read().await;
+                                    p.get_agent(&agent_id).and_then(|a| a.task_id)
+                                };
+                                if let Some(tid) = task_id {
+                                    tx.send(RuntimeEvent::TaskCompleted {
+                                        task_id: tid,
+                                        result: summary.clone(),
+                                    })
+                                    .await
+                                    .ok();
+                                }
+                            }
+                        }
+                    }
                 }
             }
             AgentStatus::Failed => {
-                let error = if result.is_empty() {
+                let error_msg = if result.is_empty() {
                     "Agent execution failed (no result)".to_string()
                 } else {
-                    result
+                    result.clone()
                 };
                 let _ = broker_tx
-                    .send(RuntimeEvent::AgentFailed { agent_id, error })
+                    .send(RuntimeEvent::AgentFailed {
+                        agent_id,
+                        error: error_msg.clone(),
+                    })
                     .await;
+
+                // ── Phase 4: Emit TaskFailed to update the task graph ──
+                if let Some(ref st) = state {
+                    if let Ok(s) = st.try_read() {
+                        if let Some(tx) = &s.core.runtime_event_tx {
+                            let task_id = {
+                                let p = pool.read().await;
+                                p.get_agent(&agent_id).and_then(|a| a.task_id)
+                            };
+                            if let Some(tid) = task_id {
+                                tx.send(RuntimeEvent::TaskFailed {
+                                    task_id: tid,
+                                    error: error_msg,
+                                })
+                                .await
+                                .ok();
+                            }
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -606,6 +787,7 @@ mod tests {
             tokens_output: 0,
             tool_trace: std::collections::VecDeque::new(),
             inbox: std::collections::VecDeque::new(),
+            task_id: None,
             sandbox: None,
         }
     }

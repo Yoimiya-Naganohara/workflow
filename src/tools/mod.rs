@@ -903,6 +903,7 @@ mod tests {
                 tokens_output: 0,
                 tool_trace: std::collections::VecDeque::new(),
                 inbox: std::collections::VecDeque::new(),
+                task_id: None,
                 sandbox: None,
             });
         }
@@ -1073,6 +1074,7 @@ mod tests {
             tokens_output: 0,
             tool_trace: std::collections::VecDeque::new(),
             inbox: std::collections::VecDeque::new(),
+            task_id: None,
             sandbox: None,
         });
 

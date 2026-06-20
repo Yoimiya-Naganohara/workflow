@@ -55,6 +55,10 @@ pub struct AgentRuntime {
     role_template_store: Arc<RoleTemplateStore>,
     /// Tracks optimization frequency per role.
     pub optimization_tracker: std::sync::Mutex<super::optimizer::OptimizationTracker>,
+    /// Task graph DAG — the single source of truth for delegation hierarchy
+    /// and execution ordering (Phase 2A).
+    /// Shared with `RuntimeEventLoop` via this `Arc`.
+    pub task_graph: std::sync::Arc<std::sync::Mutex<crate::runtime::task_graph::TaskGraph>>,
 }
 
 impl AgentRuntime {
@@ -287,6 +291,9 @@ impl AgentRuntime {
             optimization_tracker: std::sync::Mutex::new(
                 crate::runtime::optimizer::OptimizationTracker::new(),
             ),
+            task_graph: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::runtime::task_graph::TaskGraph::new(),
+            )),
         };
 
         // Compute role embeddings in background (non-blocking).
@@ -576,6 +583,16 @@ impl AgentRuntime {
                 ..Default::default()
             });
 
+        // Phase 2B: Create a root task in the graph so Agent ↔ Task mapping
+        // is always consistent — no more "agent exists but task doesn't" window.
+        let root_task_id: crate::core::types::TaskId = {
+            let mut g = self.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            let id = g.spawn_root(goal);
+            // Mark as Decomposed so it can receive children.
+            g.mark_decomposed(id).ok();
+            id
+        };
+
         let agent_id: AgentId = rand::random();
         // Create sandbox (best-effort — failure means no filesystem isolation).
         let sandbox = crate::tools::sandbox::SandboxHandle::new(&agent_id)
@@ -607,6 +624,7 @@ impl AgentRuntime {
             tokens_output: 0,
             tool_trace: std::collections::VecDeque::new(),
             inbox: std::collections::VecDeque::new(),
+            task_id: Some(root_task_id),
             sandbox,
         };
         agent_pool.add_agent(agent);
@@ -696,6 +714,7 @@ impl AgentRuntime {
                     tool_trace: std::collections::VecDeque::new(),
                     inbox: std::collections::VecDeque::new(),
                     sandbox: sandbox.clone(),
+                    task_id: None,
                 };
                 agent_pool.add_agent(agent);
                 Ok(agent_id)
@@ -807,6 +826,7 @@ impl AgentRuntime {
                     tokens_output: 0,
                     tool_trace: std::collections::VecDeque::new(),
                     inbox: std::collections::VecDeque::new(),
+                    task_id: None,
                     sandbox: sandbox.clone(),
                 };
                 agent_pool.add_agent(agent);

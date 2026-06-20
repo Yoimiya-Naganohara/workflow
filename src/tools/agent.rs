@@ -349,127 +349,31 @@ impl Tool for SpawnAgent {
             return Err(ToolCallError("goal is required".to_string()));
         }
 
-        let child_goal = match args
-            .expected_output
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            Some(expected) => format!(
-                "{}\n\nDelegation reason: {}\n\nExpected output: {}",
-                goal,
-                args.reason.trim(),
-                expected
-            ),
-            None => format!("{}\n\nDelegation reason: {}", goal, args.reason.trim()),
-        };
-
-        // Phase 1: Extract all needed data in a single read lock to avoid
-        // TOCTOU races with other tools modifying the pool concurrently.
-        let (runtime, agent_pool, parent_id, runtime_tx) = {
+        // Phase 2A: Emit SpawnTask event to the task graph via the event loop.
+        // The scheduler (in RuntimeEventLoop) will create the task node,
+        // run the pipeline, and eventually activate a child agent.
+        let (runtime_tx, parent_id) = {
             let s = self.state.read().await;
-            let runtime = s
-                .core
-                .runtime
-                .clone()
-                .ok_or_else(|| ToolCallError("Runtime not initialized".to_string()))?;
             let parent_id = s.core.responsible_agent_id.ok_or_else(|| {
                 ToolCallError("No responsible parent agent is active".to_string())
             })?;
             let runtime_tx = s.core.runtime_event_tx.clone().ok_or_else(|| {
                 ToolCallError("Runtime event channel not initialized".to_string())
             })?;
-            (runtime, s.core.agent_pool.clone(), parent_id, runtime_tx)
+            (runtime_tx, parent_id)
         };
 
-        let child_id = match runtime
-            .read()
-            .await
-            .spawn_plan_task_agent(
-                parent_id,
-                &role,
-                &child_goal,
-                &mut *agent_pool.write().await,
-            )
-            .await
-        {
-            Ok(id) => id,
-            Err(e) => {
-                let reason = e.to_string();
-                let recoverable = !reason.contains("depth limit")
-                    && !reason.contains("security")
-                    && !reason.contains("denied");
-                return Ok(SpawnAgentOutput::Rejected {
-                    role,
-                    goal,
-                    reason,
-                    recoverable,
-                });
-            }
-        };
-
-        // Phase 2: Dispatch ActivateAgent to the background event loop.
         runtime_tx
-            .send(crate::runtime::event::RuntimeEvent::ActivateAgent {
-                agent_id: child_id,
-                parent_id: Some(parent_id),
+            .send(crate::runtime::event::RuntimeEvent::SpawnTask {
+                goal: goal.clone(),
+                role: role.clone(),
+                parent_agent: parent_id,
             })
             .await
             .map_err(|_| ToolCallError("Background runtime loop is dead".to_string()))?;
 
-        // Blocking mode: wait for the child to complete before returning.
-        if args.blocking.unwrap_or(false) {
-            let notify = {
-                let pool = agent_pool.read().await;
-                pool.get_completion_notify(&child_id)
-            };
-            if let Some(notify) = notify {
-                // Wait up to 5 minutes for the child to finish.
-                let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(300);
-                tokio::time::timeout_at(deadline, async {
-                    notify.notified().await;
-                })
-                .await
-                .map_err(|_| ToolCallError("Timeout waiting for child agent (300s)".to_string()))?;
-            }
-            // Read the child's result from the pool.
-            let pool = agent_pool.read().await;
-            let child_id_str = crate::agent::AgentPool::agent_id_str(&child_id);
-            match pool.get_agent(&child_id) {
-                Some(agent) => match (&agent.status, &agent.result) {
-                    (crate::agent::AgentStatus::Completed, Some(result)) => {
-                        return Ok(SpawnAgentOutput::Completed {
-                            agent_id: child_id_str,
-                            role,
-                            goal,
-                            result: result.clone(),
-                        });
-                    }
-                    _ => {
-                        return Ok(SpawnAgentOutput::Completed {
-                            agent_id: child_id_str,
-                            role,
-                            goal,
-                            result: agent
-                                .result
-                                .clone()
-                                .unwrap_or_else(|| format!("Agent status: {:?}", agent.status)),
-                        });
-                    }
-                },
-                None => {
-                    return Ok(SpawnAgentOutput::Completed {
-                        agent_id: child_id_str,
-                        role,
-                        goal,
-                        result: "Agent not found after completion".to_string(),
-                    });
-                }
-            }
-        }
-
         Ok(SpawnAgentOutput::Running {
-            agent_id: crate::agent::AgentPool::agent_id_str(&child_id),
+            agent_id: format!("pending-{:04x}", rand::random::<u16>()),
             role,
             goal,
         })

@@ -607,7 +607,7 @@ impl Tui {
         use crate::tui::command_tree::*;
 
         // Extract what we need before mutable access
-        let (selected_id, node_action) = {
+        {
             let palette = &state.ui.command_palette;
             let items = palette.filtered_items();
             if items.is_empty() {
@@ -623,33 +623,29 @@ impl Tui {
 
             match &node.kind {
                 NodeKind::Branch { provider } => {
-                    (item.id.clone(), PaletteAction::Branch(*provider))
+                    let path_clone = palette.path.clone();
+                    let ctx = CommandContext {
+                        path: &path_clone,
+                        core: &state.core,
+                    };
+                    let children = provider(&ctx);
+                    let palette = &mut state.ui.command_palette;
+                    palette.path.push(PathEntry {
+                        id: item.id.clone(),
+                    });
+                    palette.level = PaletteLevel::Dynamic(children);
+                    palette.filter.clear();
+                    palette.selected = 0;
                 }
-                NodeKind::Execute { handler } => {
-                    (item.id.clone(), PaletteAction::Execute(*handler))
+                NodeKind::Execute { .. } => {
+                    // Phase 2b: use CommandRuntime::execute() with ParsedCommand
+                    let mut tokens: Vec<String> =
+                        palette.path.iter().map(|e| e.id.clone()).collect();
+                    tokens.push(item.id.clone());
+                    let parsed = ParsedCommand { tokens };
+                    let runtime = CommandRuntime;
+                    runtime.execute(&parsed, state);
                 }
-            }
-        };
-
-        match node_action {
-            PaletteAction::Branch(provider) => {
-                let path_clone = state.ui.command_palette.path.clone();
-                let ctx = CommandContext {
-                    path: &path_clone,
-                    core: &state.core,
-                };
-                let children = provider(&ctx);
-                let palette = &mut state.ui.command_palette;
-                palette.path.push(PathEntry { id: selected_id });
-                palette.level = PaletteLevel::Dynamic(children);
-                palette.filter.clear();
-                palette.selected = 0;
-            }
-            PaletteAction::Execute(handler) => {
-                let path = state.ui.command_palette.path.clone();
-                let _ = handler(&path, state);
-                state.popup_mode = PopupMode::None;
-                state.ui.command_palette = CommandPalette::default();
             }
         }
     }

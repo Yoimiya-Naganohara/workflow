@@ -1,11 +1,15 @@
 #![allow(clippy::module_inception)]
 
 pub mod config;
+pub mod decomposition;
+pub mod dispatch;
 pub mod event;
 pub mod optimizer;
 pub mod pipeline;
 pub mod runtime;
 pub mod runtime_loop;
+pub mod scheduler;
+pub mod task_graph;
 
 pub use config::{AgentRuntimeConfig, RoleTemplate};
 pub use event::RuntimeEvent;
