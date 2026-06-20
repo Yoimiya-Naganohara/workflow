@@ -89,6 +89,96 @@ impl RuntimeEventLoop {
             tokio::task::yield_now().await;
 
             match event {
+                RuntimeEvent::InboxMessage { .. } => {
+                    // Clone before destructuring so we can forward to broker.
+                    let forward = event.clone();
+                    if let RuntimeEvent::InboxMessage {
+                        agent_id,
+                        from_name: _,
+                        preview: _,
+                        unread_count: _,
+                    } = &event
+                    {
+                        // Re-activate idle/completed agents so they process
+                        // incoming messages promptly (notification mode).
+                        let needs_reactivation = {
+                            let p = self.pool.read().await;
+                            p.get_agent(agent_id).is_some_and(|a| {
+                                matches!(
+                                    a.status,
+                                    crate::agent::AgentStatus::Completed
+                                        | crate::agent::AgentStatus::Failed
+                                        | crate::agent::AgentStatus::Idle
+                                )
+                            })
+                        };
+                        if needs_reactivation {
+                            if let Ok(mut p) = self.pool.try_write() {
+                                if let Some(agent) = p.get_agent_mut(agent_id) {
+                                    agent.status = crate::agent::AgentStatus::Planning;
+                                    agent.last_active_at = crate::agent::now_secs();
+                                }
+                            }
+                            let rt = self.runtime.clone();
+                            let pool = self.pool.clone();
+                            let ts = self.tool_server.clone();
+                            let bt = self.broker_tx.clone();
+                            let st = self.state.clone();
+                            let bt_mon = bt.clone();
+                            let agent_id_mon = *agent_id;
+                            let work_handle = tokio::spawn(async move {
+                                Self::handle_activate_inner(
+                                    rt,
+                                    pool,
+                                    ts,
+                                    bt,
+                                    st,
+                                    agent_id_mon,
+                                    None,
+                                )
+                                .await;
+                            });
+                            tokio::spawn(async move {
+                                if let Err(join_err) = work_handle.await {
+                                    if join_err.is_panic() {
+                                        let panic_payload = join_err.into_panic();
+                                        let msg = panic_payload
+                                            .downcast_ref::<&str>()
+                                            .map(|s| s.to_string())
+                                            .or_else(|| {
+                                                panic_payload.downcast_ref::<String>().cloned()
+                                            })
+                                            .unwrap_or_else(|| {
+                                                format!("Agent task panicked: {:?}", panic_payload)
+                                            });
+                                        tracing::error!(
+                                            agent_id = ?agent_id_mon,
+                                            "Agent task panicked: {}",
+                                            msg
+                                        );
+                                        let _ = bt_mon
+                                            .send(RuntimeEvent::AgentFailed {
+                                                agent_id: agent_id_mon,
+                                                error: format!("Agent panicked: {}", msg),
+                                            })
+                                            .await;
+                                    }
+                                }
+                            });
+                        } else {
+                            // Agent is already running — bump last_active_at
+                            // so the inbox hint is visible on next LLM call.
+                            if let Ok(mut p) = self.pool.try_write() {
+                                if let Some(agent) = p.get_agent_mut(agent_id) {
+                                    agent.last_active_at = crate::agent::now_secs();
+                                }
+                            }
+                        }
+                    }
+                    // Always forward to broker so the TUI shows notification.
+                    let _ = self.broker_tx.send(forward).await;
+                }
+
                 RuntimeEvent::ActivateAgent {
                     agent_id,
                     parent_id,
@@ -295,6 +385,21 @@ impl RuntimeEventLoop {
                         }
                     }
 
+                    // Emit InboxMessage to notify the parent about the
+                    // child's result (notification mode for online agents).
+                    let inbox_count = {
+                        let p = pool.read().await;
+                        p.get_agent(&pid).map(|a| a.inbox.len()).unwrap_or(0)
+                    };
+                    let _ = broker_tx
+                        .send(RuntimeEvent::InboxMessage {
+                            agent_id: pid,
+                            from_name: child_name.clone(),
+                            preview: summary.chars().take(200).collect(),
+                            unread_count: inbox_count,
+                        })
+                        .await;
+
                     let _ = broker_tx
                         .send(RuntimeEvent::ChildCompleted {
                             parent_id: pid,
@@ -322,6 +427,45 @@ impl RuntimeEventLoop {
                     .await;
             }
             _ => {}
+        }
+
+        // ── Notification mode: re-activate if unread messages remain ──
+        // After completing (or failing), check if the agent still has
+        // pending messages. If so, dispatch a new activation so the
+        // agent processes them without waiting for external events.
+        let has_unread = {
+            let p = pool.read().await;
+            p.get_agent(&agent_id)
+                .map(|a| !a.inbox.is_empty())
+                .unwrap_or(false)
+        };
+        if has_unread {
+            // Use runtime_event_tx from AppState if available;
+            // fall back to broker_tx so the event loop picks it up.
+            let dispatched = if let Some(ref st) = state {
+                if let Ok(s) = st.try_read() {
+                    if let Some(tx) = &s.core.runtime_event_tx {
+                        tx.send(RuntimeEvent::ActivateAgent {
+                            agent_id,
+                            parent_id,
+                        })
+                        .await
+                        .is_ok()
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if !dispatched {
+                tracing::warn!(
+                    ?agent_id,
+                    "Agent has unread messages but no event channel to re-activate"
+                );
+            }
         }
     }
 

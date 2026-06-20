@@ -114,34 +114,29 @@ impl Tool for SendMessage {
             tokio::time::sleep(std::time::Duration::from_micros(50)).await;
         }
 
-        // If the recipient is in a terminal state (Completed/Failed/Idle),
-        // re-activate it so it can process the incoming message.
-        let needs_reactivation = matches!(
-            recipient.1,
-            crate::agent::AgentStatus::Completed
-                | crate::agent::AgentStatus::Failed
-                | crate::agent::AgentStatus::Idle
-        );
-
-        if needs_reactivation {
-            // Transition to Planning so the event loop picks it up.
-            {
-                if let Ok(mut pool) = s.core.agent_pool.try_write() {
-                    if let Some(agent) = pool.get_agent_mut(&recipient.0) {
-                        agent.status = crate::agent::AgentStatus::Planning;
-                        agent.last_active_at = crate::agent::now_secs();
-                    }
+        // Emit InboxMessage event so the recipient gets notified.
+        // The RuntimeEventLoop handles re-activation of idle/completed
+        // agents and bumps version flags for running ones (notification mode).
+        let preview: String = args.message.chars().take(200).collect();
+        if let Some(tx) = &s.core.runtime_event_tx {
+            // Count unread messages after delivery (best-effort).
+            let count = {
+                if let Ok(pool) = s.core.agent_pool.try_read() {
+                    pool.get_agent(&recipient.0)
+                        .map(|a| a.inbox.len())
+                        .unwrap_or(0)
+                } else {
+                    0
                 }
-            }
-            // Dispatch ActivateAgent to the background event loop.
-            if let Some(tx) = &s.core.runtime_event_tx {
-                let _ = tx
-                    .send(crate::runtime::RuntimeEvent::ActivateAgent {
-                        agent_id: recipient.0,
-                        parent_id: None,
-                    })
-                    .await;
-            }
+            };
+            let _ = tx
+                .send(crate::runtime::RuntimeEvent::InboxMessage {
+                    agent_id: recipient.0,
+                    from_name: sender_name,
+                    preview,
+                    unread_count: count,
+                })
+                .await;
         }
 
         Ok(format!("Message sent to '{}'.", args.recipient))

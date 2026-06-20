@@ -44,4 +44,20 @@ pub enum RuntimeEvent {
     /// A parent agent's aggregation synthesis has completed.
     /// The `result` is the final merged output ready for display.
     AggregationCompleted { agent_id: AgentId, result: String },
+
+    /// A message was delivered to an agent's inbox.
+    ///
+    /// The event loop checks whether the recipient is currently active
+    /// and re-activates idle/completed agents so they process the
+    /// message promptly (notification mode for online agents).
+    InboxMessage {
+        /// Recipient agent ID.
+        agent_id: AgentId,
+        /// Sender's human-readable name.
+        from_name: String,
+        /// Message preview (first 200 chars).
+        preview: String,
+        /// Total unread message count in the inbox.
+        unread_count: usize,
+    },
 }
