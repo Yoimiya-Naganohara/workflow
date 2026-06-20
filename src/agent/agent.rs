@@ -485,6 +485,19 @@ impl AgentPool {
         }
     }
 
+    /// Clean up sandbox directories for evicted agents (best-effort).
+    fn cleanup_sandboxes(&self, evicted: &[AgentId]) {
+        for id in evicted {
+            // Find and clean up sandbox by checking all agents for the one being evicted.
+            // Since we're called before removal, iterate the full list.
+            if let Some(agent) = self.agents.iter().find(|a| a.id == *id) {
+                if let Some(ref sb) = agent.sandbox {
+                    sb.cleanup();
+                }
+            }
+        }
+    }
+
     /// Evict completed/failed agents whose idle time exceeds `ttl_secs`.
     /// Never evicts the responsible agent (protected_id) or the last remaining agent.
     /// Returns the number of evicted agents.
@@ -494,27 +507,48 @@ impl AgentPool {
         }
         let now = now_secs();
         let ttl = self.ttl_secs;
-        let before = self.agents.len();
         let protect = protected_id.copied();
-        self.agents.retain(|a| {
-            // Never evict the protected (currently active) agent
-            if Some(&a.id) == protect.as_ref() {
-                return true;
-            }
-            // Evict Completed, Failed, or Idle agents past TTL.
-            // Idle agents are kept for reuse but must not accumulate forever.
-            match a.status {
-                crate::agent::AgentStatus::Completed
-                | crate::agent::AgentStatus::Failed
-                | crate::agent::AgentStatus::Idle => now.saturating_sub(a.last_active_at) < ttl,
-                // Planning/AwaitingChildren — still active, keep
-                _ => true,
-            }
-        });
+
+        // Collect evicted IDs first for sandbox cleanup
+        let evicted: Vec<AgentId> = self
+            .agents
+            .iter()
+            .filter(|a| {
+                if Some(&a.id) == protect.as_ref() {
+                    return false;
+                }
+                match a.status {
+                    crate::agent::AgentStatus::Completed
+                    | crate::agent::AgentStatus::Failed
+                    | crate::agent::AgentStatus::Idle => {
+                        now.saturating_sub(a.last_active_at) >= ttl
+                    }
+                    _ => false,
+                }
+            })
+            .map(|a| a.id)
+            .collect();
+
+        if evicted.is_empty() {
+            return 0;
+        }
+
+        // Clean up sandboxes before removing
+        self.cleanup_sandboxes(&evicted);
+
+        let before = self.agents.len();
+        let evict_set: std::collections::HashSet<AgentId> = evicted.iter().copied().collect();
+        self.agents.retain(|a| !evict_set.contains(&a.id));
+
         // Retain budget guards only for remaining agents
         let remaining: Vec<AgentId> = self.agents.iter().map(|a| a.id).collect();
         self.budget_guards.retain(|id, _| remaining.contains(id));
-        before - self.agents.len()
+
+        let evicted_count = before - self.agents.len();
+        if evicted_count > 0 {
+            tracing::info!("Evicted {} stale agent(s) (ttl={}s)", evicted_count, ttl);
+        }
+        evicted_count
     }
 
     /// Evict the least recently used agents when pool exceeds `max_agents`.
@@ -571,6 +605,9 @@ impl AgentPool {
         if to_evict.is_empty() {
             return 0;
         }
+
+        // Clean up sandboxes before removing
+        self.cleanup_sandboxes(&to_evict);
 
         let evict_set: std::collections::HashSet<AgentId> = to_evict.iter().copied().collect();
         self.agents.retain(|a| !evict_set.contains(&a.id));

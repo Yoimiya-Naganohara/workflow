@@ -84,6 +84,10 @@ impl RuntimeEventLoop {
                     );
                 }
             }
+            // Yield to the async runtime so other tasks
+            // (spawned agents, lock holders) can make progress.
+            tokio::task::yield_now().await;
+
             match event {
                 RuntimeEvent::ActivateAgent {
                     agent_id,
@@ -96,9 +100,41 @@ impl RuntimeEventLoop {
                     let ts = self.tool_server.clone();
                     let bt = self.broker_tx.clone();
                     let st = self.state.clone();
-                    tokio::spawn(async move {
+                    // Clone bt for the monitoring task before moving the
+                    // original into the work spawn.
+                    let bt_mon = bt.clone();
+                    let agent_id_mon = agent_id;
+                    // Spawn the work and monitor its JoinHandle for panics.
+                    // When a tokio::spawn task panics, the runtime catches it
+                    // and the JoinHandle yields a JoinError with is_panic()=true.
+                    let work_handle = tokio::spawn(async move {
                         Self::handle_activate_inner(rt, pool, ts, bt, st, agent_id, parent_id)
                             .await;
+                    });
+                    tokio::spawn(async move {
+                        if let Err(join_err) = work_handle.await {
+                            if join_err.is_panic() {
+                                let panic_payload = join_err.into_panic();
+                                let msg = panic_payload
+                                    .downcast_ref::<&str>()
+                                    .map(|s| s.to_string())
+                                    .or_else(|| panic_payload.downcast_ref::<String>().cloned())
+                                    .unwrap_or_else(|| {
+                                        format!("Agent task panicked: {:?}", panic_payload)
+                                    });
+                                tracing::error!(
+                                    agent_id = ?agent_id_mon,
+                                    "Agent task panicked: {}",
+                                    msg
+                                );
+                                let _ = bt_mon
+                                    .send(RuntimeEvent::AgentFailed {
+                                        agent_id: agent_id_mon,
+                                        error: format!("Agent panicked: {}", msg),
+                                    })
+                                    .await;
+                            }
+                        }
                     });
                 }
                 other => {

@@ -164,7 +164,7 @@ impl DecisionPipeline {
                     );
                     self.suspend
                         .lock()
-                        .expect("suspend mutex poisoned")
+                        .unwrap_or_else(|e| e.into_inner())
                         .enqueue(request, priority);
                 }
                 return Ok(SpawnDecision::Rejected(rejection));
@@ -176,7 +176,7 @@ impl DecisionPipeline {
 
         // ── L1: Experience retrieval & confidence check ──
         let _l1_assessment: L1Assessment = {
-            let exp = self.experience.lock().expect("experience mutex poisoned");
+            let exp = self.experience.lock().unwrap_or_else(|e| e.into_inner());
             exp.check_confidence(task_emb, role_emb, role_template_id, role_min_experiences)?
         };
 
@@ -184,7 +184,7 @@ impl DecisionPipeline {
         if let Some(rejection) = self
             .audit_engine
             .lock()
-            .expect("audit_engine poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .screen_request(&request)
         {
             return Ok(SpawnDecision::Rejected(rejection));
@@ -202,7 +202,7 @@ impl DecisionPipeline {
             return Ok(SpawnDecision::Rejected(SpawnRejection::SystemOverloaded));
         }
         {
-            let mut slot = self.pending_guard.lock().expect("pending_guard poisoned");
+            let mut slot = self.pending_guard.lock().unwrap_or_else(|e| e.into_inner());
             *slot = guard;
         }
 
@@ -231,28 +231,28 @@ impl DecisionPipeline {
     pub fn add_experience(&self, entry: ExperienceEntry) {
         self.experience
             .lock()
-            .expect("experience mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .add_experience(entry);
     }
 
     pub fn experience_count(&self) -> usize {
         self.experience
             .lock()
-            .expect("experience mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .experience_count()
     }
 
     pub fn flush_experience_pool(&self) -> Result<()> {
         self.experience
             .lock()
-            .expect("experience mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .flush()
     }
 
     pub fn clear_experience_pool(&self) -> Result<()> {
         self.experience
             .lock()
-            .expect("experience mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .clear()
     }
 
@@ -260,26 +260,26 @@ impl DecisionPipeline {
     pub fn consolidate_experience_pool(&self) {
         self.experience
             .lock()
-            .expect("experience mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .consolidate();
     }
 
     pub fn bedrock_count(&self) -> usize {
         self.experience
             .lock()
-            .expect("experience mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .bedrock_count()
     }
 
     pub fn fluid_count(&self) -> usize {
         self.experience
             .lock()
-            .expect("experience mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .fluid_count()
     }
 
     pub fn pending_suspended(&self) -> usize {
-        self.suspend.lock().expect("suspend mutex poisoned").len()
+        self.suspend.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     pub fn available_permits(&self) -> usize {
@@ -298,7 +298,7 @@ impl DecisionPipeline {
     pub fn take_pending_guard(&self) -> Option<BudgetGuard> {
         self.pending_guard
             .lock()
-            .expect("pending_guard poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .take()
     }
 
@@ -310,7 +310,7 @@ impl DecisionPipeline {
     ) -> Vec<(ExperienceEntry, f32)> {
         self.experience
             .lock()
-            .expect("experience mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .retrieve(query, k)
     }
 
@@ -318,7 +318,7 @@ impl DecisionPipeline {
     pub fn get_experiences_by_role(&self, role_id: u32) -> Vec<ExperienceEntry> {
         self.experience
             .lock()
-            .expect("experience mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .get_experiences_by_role(role_id)
     }
 }
