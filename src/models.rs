@@ -81,9 +81,15 @@ pub enum ReasoningOption {
     #[serde(rename = "toggle")]
     Toggle,
     #[serde(rename = "effort")]
-    Effort { values: Vec<String> },
+    Effort {
+        #[serde(default)]
+        values: Vec<String>,
+    },
     #[serde(rename = "budget_tokens")]
-    BudgetTokens { values: Vec<String> },
+    BudgetTokens {
+        #[serde(default)]
+        values: Vec<String>,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -253,8 +259,13 @@ impl ProviderSource for ModelsDevSource {
             anyhow::bail!("models.dev HTTP {}", status);
         }
         let text = resp.text().await?;
-        let data: HashMap<String, Provider> =
-            serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
+        let data: HashMap<String, Provider> = serde_json::from_str(&text).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse models.dev/api.json ({} bytes): {}",
+                text.len(),
+                e
+            )
+        })?;
         let mut providers: Vec<Provider> = data
             .into_iter()
             .map(|(id, mut p)| {

@@ -207,6 +207,11 @@ pub struct UiState {
     /// Reasoning effort sent to the LLM: None = off, Some("low"/"medium"/"high"/"max").
     pub reasoning_effort: Option<String>,
 
+    // ── Command Palette (Phase 1) ──
+    /// Tree-based command navigation state machine.
+    /// Only active when `popup_mode == PopupMode::CommandPalette`.
+    pub command_palette: crate::tui::command_tree::CommandPalette,
+
     // ── System prompt cache ──
     /// Cached system prompt for the current session.
     /// Built once on first message, reused for all subsequent messages.
@@ -261,6 +266,9 @@ pub enum PopupMode {
         cmd: String,
         input: String,
     },
+
+    /// Tree-based command palette (Phase 1).
+    CommandPalette,
 }
 
 impl AppState {
@@ -886,6 +894,7 @@ impl Default for UiState {
             chat_scroll: 0,
             auto_scroll: true,
             think_frame: 0,
+            command_palette: crate::tui::command_tree::CommandPalette::default(),
             command_popup_selection: 0,
             input_history: Vec::new(),
             input_history_idx: None,

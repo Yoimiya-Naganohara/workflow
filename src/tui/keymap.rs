@@ -143,6 +143,12 @@ impl Default for Keymap {
             Action::InspectAgent,
         );
 
+        // Command palette
+        km.bind(
+            KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE),
+            Action::OpenCommandPicker,
+        );
+
         km
     }
 }

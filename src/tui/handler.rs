@@ -89,10 +89,11 @@ impl Tui {
 
             Action::OpenCommandPicker => {
                 ui.focus = Focus::Input;
-                ui.input = "/".to_string();
-                ui.input_cursor = 1;
-                ui.command_popup_selection = 0;
-                state.popup_mode = PopupMode::Commands;
+                ui.command_palette.activate();
+                // 将输入框设为当前路径的显示文本，供回退兼容
+                ui.input = ui.command_palette.display_path();
+                ui.input_cursor = ui.input.len();
+                state.popup_mode = PopupMode::CommandPalette;
             }
 
             Action::InspectAgent => {
@@ -227,6 +228,11 @@ impl Tui {
     fn handle_popup_keys(&self, state: &mut AppState, key: crossterm::event::KeyEvent) -> bool {
         let ui = &mut state.ui;
         let core = &mut state.core;
+
+        // ── Command Palette has its own key handler independent of popup_selected ──
+        if matches!(state.popup_mode, PopupMode::CommandPalette) {
+            return self.handle_palette_key(state, key);
+        }
 
         match key.code {
             KeyCode::Esc => {
@@ -481,6 +487,9 @@ impl Tui {
                     PopupMode::AgentDetail { .. } => {
                         // Enter closes the agent detail popup.
                     }
+                    PopupMode::CommandPalette => {
+                        // Handled by handle_palette_key before the main match.
+                    }
                     PopupMode::None => {}
                 }
                 state.popup_mode = PopupMode::None;
@@ -542,6 +551,105 @@ impl Tui {
                     _ => {}
                 }
                 true
+            }
+        }
+    }
+
+    // ── Command Palette key handlers ──
+
+    /// Handle keys for the command palette navigation.
+    fn handle_palette_key(&self, state: &mut AppState, key: crossterm::event::KeyEvent) -> bool {
+        let palette = &mut state.ui.command_palette;
+
+        match key.code {
+            KeyCode::Up => {
+                palette.selected = palette.selected.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                palette.selected += 1;
+            }
+            KeyCode::Esc => {
+                state.popup_mode = PopupMode::None;
+                state.ui.command_palette = crate::tui::command_tree::CommandPalette::default();
+            }
+            KeyCode::Enter => {
+                self.handle_palette_enter(state);
+            }
+            KeyCode::Backspace => {
+                if !palette.filter.is_empty() {
+                    palette.filter.pop();
+                    palette.selected = 0;
+                } else if !palette.path.is_empty() {
+                    palette.path.pop();
+                    let ctx = crate::tui::command_tree::CommandContext {
+                        path: &palette.path,
+                        core: &state.core,
+                    };
+                    palette.level = crate::tui::command_tree::navigate_to(
+                        crate::tui::command_tree::ROOT,
+                        &palette.path,
+                        &ctx,
+                    );
+                    palette.selected = 0;
+                }
+            }
+            KeyCode::Char(c) => {
+                palette.filter.push(c);
+                palette.selected = 0;
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Handle Enter in the command palette: Branch → go deeper, Execute → run.
+    fn handle_palette_enter(&self, state: &mut AppState) {
+        use crate::tui::command_tree::*;
+
+        // Extract what we need before mutable access
+        let (selected_id, node_action) = {
+            let palette = &state.ui.command_palette;
+            let items = palette.filtered_items();
+            if items.is_empty() {
+                return;
+            }
+            let Some(item) = items.get(palette.selected) else {
+                return;
+            };
+            let nodes = palette.current_nodes();
+            let Some(node) = nodes.iter().find(|n| n.id.as_ref() == item.id) else {
+                return;
+            };
+
+            match &node.kind {
+                NodeKind::Branch { provider } => {
+                    (item.id.clone(), PaletteAction::Branch(*provider))
+                }
+                NodeKind::Execute { handler } => {
+                    (item.id.clone(), PaletteAction::Execute(*handler))
+                }
+            }
+        };
+
+        match node_action {
+            PaletteAction::Branch(provider) => {
+                let path_clone = state.ui.command_palette.path.clone();
+                let ctx = CommandContext {
+                    path: &path_clone,
+                    core: &state.core,
+                };
+                let children = provider(&ctx);
+                let palette = &mut state.ui.command_palette;
+                palette.path.push(PathEntry { id: selected_id });
+                palette.level = PaletteLevel::Dynamic(children);
+                palette.filter.clear();
+                palette.selected = 0;
+            }
+            PaletteAction::Execute(handler) => {
+                let path = state.ui.command_palette.path.clone();
+                let _ = handler(&path, state);
+                state.popup_mode = PopupMode::None;
+                state.ui.command_palette = CommandPalette::default();
             }
         }
     }

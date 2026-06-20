@@ -78,6 +78,11 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
         }
         PopupMode::AgentDetail { .. } => 12,
         PopupMode::ShellInput { .. } => 3,
+        PopupMode::CommandPalette => {
+            let palette = &state.ui.command_palette;
+            let count = palette.filtered_items().len();
+            (count.min(8) as u16 + 2).min(10)
+        }
     }
 }
 
@@ -97,6 +102,7 @@ pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
         PopupMode::ModelPicker => render_model_popup(f, area, state),
         PopupMode::FilePicker { .. } => render_file_popup(f, area, state),
         PopupMode::AgentDetail { agent_id } => render_agent_detail_popup(f, area, state, agent_id),
+        PopupMode::CommandPalette => render_command_palette_popup(f, area, state),
     }
 }
 
@@ -250,6 +256,70 @@ fn render_shell_input_popup(f: &mut Frame, area: Rect, cmd: &str, current_input:
             .block(crate::tui::style::panel("Shell Command"))
             .style(Style::default().fg(style::TEXT_PRIMARY)),
         area,
+    );
+}
+
+fn render_command_palette_popup(f: &mut Frame, area: Rect, state: &AppState) {
+    let palette = &state.ui.command_palette;
+    let items = palette.filtered_items();
+
+    if items.is_empty() {
+        return;
+    }
+
+    let path_str = palette.display_path();
+    let max_item_id = items.iter().map(|i| i.display.len()).max().unwrap_or(10);
+
+    let rows: Vec<Row> = items
+        .iter()
+        .map(|item| {
+            // 用 path + id 作为过滤匹配，后续支持 highlight
+            let icon = if item.has_children { "▶" } else { " " };
+            let display_text = if item.has_children {
+                format!("{} {}", icon, item.display)
+            } else {
+                item.display.clone()
+            };
+
+            Row::new(vec![
+                ratatui::text::Line::from(Span::styled(
+                    display_text,
+                    Style::default().fg(style::ACTIVE),
+                )),
+                ratatui::text::Line::from(Span::styled(&item.help, style::hint_style())),
+            ])
+        })
+        .collect();
+
+    let mut table_state = TableState::default();
+    let sel = palette.selected.min(items.len().saturating_sub(1));
+    table_state.select(Some(sel));
+
+    let title = if path_str.len() > 30 {
+        format!(
+            "Command …{}",
+            &path_str[path_str.len().saturating_sub(27)..]
+        )
+    } else {
+        format!("Command {}", path_str)
+    };
+
+    f.render_stateful_widget(
+        Table::new(
+            rows,
+            [
+                ratatui::layout::Constraint::Length(max_item_id as u16 + 2),
+                ratatui::layout::Constraint::Min(0),
+            ],
+        )
+        .block(crate::tui::style::panel(&title))
+        .row_highlight_style(
+            Style::default()
+                .fg(crate::tui::style::HIGHLIGHT_FG)
+                .bg(crate::tui::style::HIGHLIGHT_BG),
+        ),
+        area,
+        &mut table_state,
     );
 }
 

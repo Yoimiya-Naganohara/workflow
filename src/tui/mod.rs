@@ -1,6 +1,7 @@
 pub mod agent_tree;
 pub mod chat;
 pub mod chat_lines;
+pub mod command_tree;
 pub mod commands;
 pub mod controller;
 pub mod effect;
