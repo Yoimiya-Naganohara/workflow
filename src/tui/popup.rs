@@ -3,7 +3,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::Style,
     text::Span,
     widgets::{Paragraph, Row, Table, TableState},
 };
@@ -14,7 +14,7 @@ use crate::agent::AgentStatus;
 use crate::core::types::AgentId;
 use crate::models::filter_providers;
 use crate::tui::agent_tree::build_tool_trace_preview;
-use crate::tui::commands::{COMMANDS, resolve_dynamic_items};
+
 use crate::tui::state::{AppState, PopupMode};
 
 use crate::tui::style;
@@ -23,32 +23,6 @@ use crate::tui::style;
 pub(crate) fn popup_height(state: &AppState) -> u16 {
     match &state.popup_mode {
         PopupMode::None => 0,
-        PopupMode::Commands => {
-            let prefix = state.ui.input.trim().to_lowercase();
-            if prefix.is_empty() {
-                return 0;
-            }
-            let query = prefix.trim_start_matches('/');
-            let count = COMMANDS
-                .iter()
-                .filter(|(cmd, _)| cmd.to_lowercase().contains(query))
-                .count();
-            (count.min(6) as u16 + 2).min(8)
-        }
-        PopupMode::SubCommand { parent, items } => {
-            let resolved = resolve_subcommand_items_owned(parent, items, state);
-            let filter = filter_text_for_subcommand(&state.ui.input, parent);
-            let count = if filter.is_empty() {
-                resolved.len()
-            } else {
-                let fl = filter.to_lowercase();
-                resolved
-                    .iter()
-                    .filter(|(name, _)| name.to_lowercase().contains(&fl))
-                    .count()
-            };
-            (count.min(8) as u16 + 2).min(10)
-        }
         PopupMode::Providers => {
             let count = filter_providers(state.core.models.providers(), &state.ui.input).len();
             ((count.min(8) as u16 + 1) + 1).min(12)
@@ -93,10 +67,6 @@ pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
         PopupMode::ShellInput { cmd, input: _ } => {
             render_shell_input_popup(f, area, cmd, &state.ui.input)
         }
-        PopupMode::Commands => render_command_popup(f, area, state),
-        PopupMode::SubCommand { parent, items } => {
-            render_subcommand_popup(f, area, state, parent, items)
-        }
         PopupMode::Providers => render_provider_popup(f, area, state),
         PopupMode::KeyInput => render_key_popup(f, area, state),
         PopupMode::ModelPicker => render_model_popup(f, area, state),
@@ -104,137 +74,6 @@ pub(crate) fn render_popup(f: &mut Frame, area: Rect, state: &AppState) {
         PopupMode::AgentDetail { agent_id } => render_agent_detail_popup(f, area, state, agent_id),
         PopupMode::CommandPalette => render_command_palette_popup(f, area, state),
     }
-}
-
-/// Resolve owned items for popup_height / filtering when items are empty.
-fn resolve_subcommand_items_owned(
-    parent: &str,
-    items: &[(String, String)],
-    state: &AppState,
-) -> Vec<(String, String)> {
-    if !items.is_empty() {
-        return items.to_vec();
-    }
-    resolve_dynamic_items(parent, &state.core)
-}
-
-/// Extract filter text for subcommand popup.
-/// If input starts with parent+space, extract the suffix.
-/// Otherwise use the whole input (dispatch cleared the parent).
-fn filter_text_for_subcommand<'a>(input: &'a str, parent: &str) -> &'a str {
-    if let Some(after) = input.strip_prefix(parent) {
-        if let Some(stripped) = after.strip_prefix(' ') {
-            stripped
-        } else {
-            after
-        }
-    } else {
-        input
-    }
-}
-
-// ── Command popup ──
-
-fn render_command_popup(f: &mut Frame, area: Rect, state: &AppState) {
-    let prefix = state.ui.input.trim().to_lowercase();
-    if prefix.is_empty() {
-        return;
-    }
-
-    // Substring matching (interactive code-completion style)
-    let matches: Vec<_> = COMMANDS
-        .iter()
-        .filter(|(cmd, _)| {
-            let cmd_lower = cmd.to_lowercase();
-            // Match each character of prefix in order (fuzzy-like)
-            // For simplicity, use substring match which is what users expect
-            // from a command completion dropdown.
-            cmd_lower.contains(prefix.trim_start_matches('/'))
-        })
-        .collect();
-
-    if matches.is_empty() {
-        return;
-    }
-
-    let max_cmd_len = matches.iter().map(|(cmd, _)| cmd.len()).max().unwrap_or(10);
-    let query = prefix.trim_start_matches('/');
-
-    let rows: Vec<Row> = matches
-        .iter()
-        .map(|(cmd, desc)| {
-            // Highlight matching characters in the command name
-            let cmd_spans = if query.is_empty() {
-                vec![Span::styled(*cmd, Style::default().fg(style::ACTIVE))]
-            } else {
-                highlight_matches(cmd, query)
-            };
-
-            Row::new(vec![
-                ratatui::text::Line::from(cmd_spans),
-                ratatui::text::Line::from(Span::styled(*desc, style::hint_style())),
-            ])
-        })
-        .collect();
-
-    let mut table_state = TableState::default();
-    let sel = state.popup_selected.min(matches.len().saturating_sub(1));
-    table_state.select(Some(sel));
-
-    f.render_stateful_widget(
-        Table::new(
-            rows,
-            [
-                ratatui::layout::Constraint::Length(max_cmd_len as u16),
-                ratatui::layout::Constraint::Min(0),
-            ],
-        )
-        .block(style::panel("Commands"))
-        .row_highlight_style(
-            Style::default()
-                .fg(style::HIGHLIGHT_FG)
-                .bg(style::HIGHLIGHT_BG),
-        ),
-        area,
-        &mut table_state,
-    );
-}
-
-/// Build styled spans for a command name, highlighting characters that match `query`.
-fn highlight_matches(cmd: &str, query: &str) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let mut remaining = cmd;
-    let mut query_chars = query.chars().peekable();
-
-    while let Some(ch) = remaining.chars().next() {
-        let lower_ch = ch.to_lowercase().next().unwrap_or(ch);
-        if let Some(&qc) = query_chars.peek() {
-            if lower_ch == qc {
-                spans.push(Span::styled(
-                    ch.to_string(),
-                    Style::default()
-                        .fg(style::ACTIVE)
-                        .add_modifier(Modifier::BOLD)
-                        .add_modifier(Modifier::UNDERLINED),
-                ));
-                query_chars.next();
-            } else {
-                spans.push(Span::styled(
-                    ch.to_string(),
-                    Style::default().fg(style::TEXT_SECONDARY),
-                ));
-            }
-        } else {
-            spans.push(Span::styled(
-                ch.to_string(),
-                Style::default().fg(style::TEXT_SECONDARY),
-            ));
-        }
-        let mut iter = remaining.chars();
-        iter.next();
-        remaining = iter.as_str();
-    }
-    spans
 }
 
 fn render_shell_input_popup(f: &mut Frame, area: Rect, cmd: &str, current_input: &str) {
@@ -323,95 +162,8 @@ fn render_command_palette_popup(f: &mut Frame, area: Rect, state: &AppState) {
     );
 }
 
-fn render_subcommand_popup(
-    f: &mut Frame,
-    area: Rect,
-    state: &AppState,
-    parent: &str,
-    items: &[(String, String)],
-) {
-    // Resolve items: use stored items, or fetch dynamic items
-    let resolved = if items.is_empty() {
-        resolve_dynamic_items(parent, &state.core)
-    } else {
-        items.to_vec()
-    };
-
-    if resolved.is_empty() {
-        return;
-    }
-
-    let filter = filter_text_for_subcommand(&state.ui.input, parent);
-    let fl = filter.to_lowercase();
-    let filtered: Vec<_> = if filter.is_empty() {
-        resolved.iter().collect()
-    } else {
-        resolved
-            .iter()
-            .filter(|(name, _)| name.to_lowercase().contains(&fl))
-            .collect()
-    };
-
-    if filtered.is_empty() {
-        return;
-    }
-
-    let max_name_len = filtered
-        .iter()
-        .map(|(name, _)| name.len())
-        .max()
-        .unwrap_or(10);
-    let rows: Vec<Row> = filtered
-        .iter()
-        .map(|(name, desc)| {
-            Row::new(vec![
-                Span::styled(name.as_str(), Style::default().fg(style::ACTIVE)),
-                Span::styled(desc.as_str(), style::hint_style()),
-            ])
-        })
-        .collect();
-
-    let mut table_state = TableState::default();
-    let sel = state.popup_selected.min(filtered.len().saturating_sub(1));
-    table_state.select(Some(sel));
-
-    let title = if items.is_empty() && !resolved.is_empty() {
-        // Dynamic items — derive title from parent
-        let parts: Vec<&str> = parent.rsplitn(2, ' ').collect();
-        let sub = parts[0];
-        let mut chars = sub.chars();
-        let capitalized = match chars.next() {
-            Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
-            None => String::new(),
-        };
-        format!("{} · {}", parts.get(1).unwrap_or(&""), capitalized)
-    } else {
-        format!("{} · sub-commands", parent)
-    };
-    f.render_stateful_widget(
-        Table::new(
-            rows,
-            [
-                ratatui::layout::Constraint::Length(max_name_len as u16),
-                ratatui::layout::Constraint::Min(0),
-            ],
-        )
-        .block(style::panel(&title))
-        .row_highlight_style(
-            Style::default()
-                .fg(style::HIGHLIGHT_FG)
-                .bg(style::HIGHLIGHT_BG),
-        ),
-        area,
-        &mut table_state,
-    );
-}
-
-// ── Provider popup ──
-
 fn render_provider_popup(f: &mut Frame, area: Rect, state: &AppState) {
     let filtered = filter_providers(state.core.models.providers(), &state.ui.input);
-    // Always show "Add Custom Provider" row at the bottom regardless of filter.
     let total_items = filtered.len() + 1;
 
     if total_items == 0 {

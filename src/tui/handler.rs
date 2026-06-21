@@ -45,7 +45,6 @@ impl Tui {
                 ui.focus = Focus::Input;
                 ui.input.clear();
                 ui.input_cursor = 0;
-                ui.command_popup_selection = 0;
             }
 
             Action::CancelResponse => {
@@ -140,43 +139,6 @@ impl Tui {
                 }
             }
 
-            Action::CommandPrev if ui.focus == Focus::Input && ui.input.starts_with('/') => {
-                let prefix = ui.input.trim().to_lowercase();
-                let matches: Vec<_> = commands::COMMANDS
-                    .iter()
-                    .filter(|(cmd, _)| cmd.starts_with(&prefix))
-                    .collect();
-                if !matches.is_empty() {
-                    ui.command_popup_selection = (matches.len() + ui.command_popup_selection)
-                        .saturating_sub(1)
-                        % matches.len();
-                }
-            }
-
-            Action::CommandNext if ui.focus == Focus::Input && ui.input.starts_with('/') => {
-                let prefix = ui.input.trim().to_lowercase();
-                let matches: Vec<_> = commands::COMMANDS
-                    .iter()
-                    .filter(|(cmd, _)| cmd.starts_with(&prefix))
-                    .collect();
-                if !matches.is_empty() {
-                    ui.command_popup_selection = (ui.command_popup_selection + 1) % matches.len();
-                }
-            }
-
-            Action::TabComplete => {
-                if ui.focus == Focus::Input && ui.input.starts_with('/') {
-                    let prefix = ui.input.trim().to_lowercase();
-                    let matches: Vec<_> = commands::COMMANDS
-                        .iter()
-                        .filter(|(cmd, _)| cmd.starts_with(&prefix))
-                        .collect();
-                    if !matches.is_empty() {
-                        state.popup_selected = (state.popup_selected + 1) % matches.len();
-                    }
-                }
-            }
-
             Action::TypeChar(c) if ui.focus == Focus::Input => {
                 let byte_idx = char_idx_to_byte_idx(&ui.input, ui.input_cursor);
                 ui.input.insert(byte_idx, c);
@@ -188,8 +150,8 @@ impl Tui {
                     };
                     state.popup_selected = 0;
                 } else if ui.input.starts_with('/') && state.popup_mode == PopupMode::None {
-                    state.popup_mode = PopupMode::Commands;
-                    ui.command_popup_selection = 0;
+                    ui.command_palette.activate();
+                    state.popup_mode = PopupMode::CommandPalette;
                 }
             }
 
@@ -202,7 +164,7 @@ impl Tui {
                     if (matches!(state.popup_mode, PopupMode::FilePicker { .. })
                         && !ui.input.contains('@'))
                         || ((ui.input.is_empty() || !ui.input.starts_with('/'))
-                            && matches!(state.popup_mode, PopupMode::Commands))
+                            && matches!(state.popup_mode, PopupMode::CommandPalette))
                     {
                         state.popup_mode = PopupMode::None;
                     }
@@ -238,7 +200,6 @@ impl Tui {
             KeyCode::Esc => {
                 let was_key_input = matches!(state.popup_mode, PopupMode::KeyInput);
                 state.popup_mode = PopupMode::None;
-                ui.command_popup_selection = 0;
                 state.popup_selected = 0;
                 if was_key_input {
                     // Clear the input so the partially-typed API key doesn't remain visible.
@@ -260,62 +221,6 @@ impl Tui {
 
             KeyCode::Enter => {
                 match &state.popup_mode {
-                    PopupMode::Commands => {
-                        let prefix = ui.input.trim().to_lowercase();
-                        let query = prefix.trim_start_matches('/');
-                        let matches: Vec<_> = commands::COMMANDS
-                            .iter()
-                            .filter(|(cmd, _)| cmd.to_lowercase().contains(query))
-                            .collect();
-                        if let Some((cmd, _)) =
-                            matches.get(state.popup_selected.min(matches.len().saturating_sub(1)))
-                        {
-                            state.popup_mode = PopupMode::None;
-                            state.popup_selected = 0;
-                            ui.command_popup_selection = 0;
-                            // Submit directly — dispatch handler decides whether to open
-                            // a SubCommand/Providers/ShellInput popup or execute immediately.
-                            ui.input = cmd.to_string();
-                            ui.input_cursor = Self::char_count(&ui.input);
-                            return self.handle_input_submit(state);
-                        }
-                    }
-                    PopupMode::SubCommand { parent, items } => {
-                        // Filter items by input text (same logic as popup.rs render)
-                        let filter_text = {
-                            let input = &ui.input;
-                            if let Some(after) = input.strip_prefix(parent) {
-                                if let Some(stripped) = after.strip_prefix(' ') {
-                                    stripped
-                                } else {
-                                    after
-                                }
-                            } else {
-                                input.as_str()
-                            }
-                        };
-                        let fl = filter_text.to_lowercase();
-                        let filtered: Vec<_> = if filter_text.is_empty() {
-                            items.iter().collect()
-                        } else {
-                            items
-                                .iter()
-                                .filter(|(name, _)| name.to_lowercase().contains(&fl))
-                                .collect()
-                        };
-                        if let Some((name, _)) =
-                            filtered.get(state.popup_selected.min(filtered.len().saturating_sub(1)))
-                        {
-                            let full_cmd = format!("{} {}", parent, name);
-                            // Submit directly — dispatch handler decides whether
-                            // to execute or open a further ShellInput prompt.
-                            state.popup_mode = PopupMode::None;
-                            state.popup_selected = 0;
-                            ui.input = full_cmd;
-                            ui.input_cursor = Self::char_count(&ui.input);
-                            return self.handle_input_submit(state);
-                        }
-                    }
                     PopupMode::ShellInput { cmd, input: _ } => {
                         // Read the actual typed text from ui.input (the popup's stored
                         // input field is never updated — keyboard input goes to ui.input).
@@ -497,21 +402,7 @@ impl Tui {
                 true
             }
 
-            KeyCode::Tab => {
-                // Tab cycles through command matches or does nothing in other popups
-                if state.popup_mode == PopupMode::Commands {
-                    let prefix = ui.input.trim().to_lowercase();
-                    let query = prefix.trim_start_matches('/');
-                    let matches: Vec<_> = commands::COMMANDS
-                        .iter()
-                        .filter(|(cmd, _)| cmd.to_lowercase().contains(query))
-                        .collect();
-                    if !matches.is_empty() {
-                        state.popup_selected = (state.popup_selected + 1) % matches.len();
-                    }
-                }
-                true
-            }
+            KeyCode::Tab => true,
 
             // All other keys: let the input handle them (typing, backspace, etc.)
             _ => {
@@ -534,7 +425,7 @@ impl Tui {
                                 && !ui.input.contains('@'))
                                 || ui.input.is_empty()
                                 || (!ui.input.starts_with('/')
-                                    && matches!(state.popup_mode, PopupMode::Commands))
+                                    && matches!(state.popup_mode, PopupMode::CommandPalette))
                             {
                                 state.popup_mode = PopupMode::None;
                             }
@@ -692,16 +583,8 @@ impl Tui {
 
         // ── Slash commands ──
         if trimmed.starts_with('/') && commands::dispatch(trimmed, state, &now) {
-            // Keep input for interactive popups where the user continues
-            // typing to filter args (parent with space like "/role default").
-            let is_interactive = matches!(
-                &state.popup_mode,
-                PopupMode::SubCommand { parent, .. } if parent.contains(' ')
-            );
-            if !is_interactive {
-                state.ui.input.clear();
-                state.ui.input_cursor = 0;
-            }
+            state.ui.input.clear();
+            state.ui.input_cursor = 0;
             return true;
         }
 

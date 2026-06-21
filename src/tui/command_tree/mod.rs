@@ -388,24 +388,6 @@ pub fn legacy_command_names() -> Vec<&'static str> {
         .collect()
 }
 
-pub fn resolve_dynamic_items(parent: &str, core: &CoreState) -> Vec<(String, String)> {
-    let provider: Option<NodeProvider> = match parent {
-        "/role default" | "/role show" | "/role edit" | "/role delete" | "/role optimize" => {
-            Some(provider::role_names_show_provider)
-        }
-        "/sessions switch" => Some(provider::sessions_provider),
-        _ => None,
-    };
-    let Some(provider) = provider else {
-        return vec![];
-    };
-    let ctx = CommandContext { path: &[], core };
-    provider(&ctx)
-        .into_iter()
-        .map(|n| (n.id.to_string(), n.help.to_string()))
-        .collect()
-}
-
 // ═══════════════════════════════════════════════════════════════
 //  Tests
 // ═══════════════════════════════════════════════════════════════

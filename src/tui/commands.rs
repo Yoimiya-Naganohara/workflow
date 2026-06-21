@@ -5,7 +5,7 @@
 //! This file exists only as a stable entry point for `handle_input_submit`
 //! in `handler.rs` and the command-line interface.
 
-use crate::tui::state::{AppState, CoreState};
+use crate::tui::state::AppState;
 
 // ═══════════════════════════════════════════════════════════════
 //  Command dispatch
@@ -26,20 +26,15 @@ pub fn dispatch(trimmed: &str, state: &mut AppState, _now: &str) -> bool {
 //  Command registry (for help text and autocomplete)
 // ═══════════════════════════════════════════════════════════════
 
-/// Resolve dynamic items for the old popup system (subcommand completions).
-/// Used by `popup.rs` for `PopupMode::SubCommand` rendering.
-pub fn resolve_dynamic_items(parent: &str, core: &CoreState) -> Vec<(String, String)> {
-    // Phase 2c: dynamic items are provided by the command tree's NodeProviders.
-    // This function is kept for backward compat with the old popup rendering.
-    crate::tui::command_tree::resolve_dynamic_items(parent, core)
-}
-
 /// All registered commands for auto-generated help and command popup.
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/connect", "Configure a provider"),
     ("/models", "Open model picker"),
     ("/status", "Show system status"),
-    ("/pool", "Pool management (stats/flush/clear/query/export/import)"),
+    (
+        "/pool",
+        "Pool management (stats/flush/clear/query/export/import)",
+    ),
     ("/reflect", "Reflection control (on/off/status/rule/max)"),
     ("/role", "Role templates (show/create/default/embed/delete)"),
     ("/agent", "Agent management (inspect)"),
@@ -47,10 +42,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/clear", "Clear conversation"),
     ("/refresh", "Refresh system prompt cache"),
     ("/sessions", "Switch to a saved session"),
-    (
-        "/memo",
-        "Role memo management (show/write/delete/roles)",
-    ),
+    ("/memo", "Role memo management (show/write/delete/roles)"),
     ("/think", "Set reasoning display level (0/1/2)"),
     ("/help", "Show help"),
 ];

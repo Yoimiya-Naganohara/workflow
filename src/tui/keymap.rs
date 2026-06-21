@@ -22,14 +22,11 @@ pub enum Action {
     SwitchPanel,
 
     // Input
-    TabComplete,
     SendMessage,
     TypeChar(char),
     DeleteChar,
     HistoryPrev,
     HistoryNext,
-    CommandPrev,
-    CommandNext,
 
     // Global actions
     OpenProviderPicker,
@@ -94,10 +91,6 @@ impl Default for Keymap {
         km.bind(
             KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
             Action::CancelResponse,
-        );
-        km.bind(
-            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
-            Action::TabComplete,
         );
 
         // Navigation
@@ -201,14 +194,12 @@ pub fn format_action(action: &Action) -> String {
         Action::Confirm => "Confirm selection",
         Action::Cancel => "Cancel / Close dialog",
         Action::SwitchPanel => "Switch panel",
-        Action::TabComplete => "Complete command / Toggle sidebar",
+
         Action::SendMessage => "Send message",
         Action::TypeChar(_) => "Type character",
         Action::DeleteChar => "Delete character",
         Action::HistoryPrev => "Previous input history",
         Action::HistoryNext => "Next input history",
-        Action::CommandPrev => "Previous command",
-        Action::CommandNext => "Next command",
         Action::OpenProviderPicker => "Open provider picker",
         Action::RestoreContext => "Restore previous context",
         Action::OpenCommandPicker => "Open command picker",

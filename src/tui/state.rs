@@ -158,7 +158,7 @@ pub struct UiState {
     pub chat_scroll: usize,
     pub auto_scroll: bool,
     pub think_frame: u8,
-    pub command_popup_selection: usize,
+
     pub input_history: Vec<String>,
     pub input_history_idx: Option<usize>,
     pub active_chat_request_id: u64,
@@ -890,7 +890,7 @@ impl Default for UiState {
             auto_scroll: true,
             think_frame: 0,
             command_palette: crate::tui::command_tree::CommandPalette::default(),
-            command_popup_selection: 0,
+
             input_history: Vec::new(),
             input_history_idx: None,
             active_chat_request_id: 0,
