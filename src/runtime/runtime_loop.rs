@@ -364,6 +364,8 @@ impl RuntimeEventLoop {
         self.scheduler.dispatch().await;
     }
 
+    // ── Handlers ──
+
     /// Query the TaskGraph for ready tasks and activate agents for them.
     ///
     /// For each ready task:
@@ -373,8 +375,6 @@ impl RuntimeEventLoop {
     /// 3. If approved, creates an agent and sends `ActivateAgent`
     /// 4. If rejected, marks the task as `Rejected` (not `Failed` — the task
     ///    never started execution)
-    // ── Handlers ──
-
     async fn handle_activate_inner(
         runtime: Arc<RwLock<AgentRuntime>>,
         pool: Arc<RwLock<AgentPool>>,

@@ -39,11 +39,11 @@ impl CommandRuntime {
                 let found = nodes.iter().find(|n| n.id.as_ref() == token.as_str())?;
                 match &found.kind {
                     NodeKind::Execute { handler } => {
-                        let h: Handler = handler.clone();
+                        let h: Handler = *handler;
                         NodeInfo::Execute(h)
                     }
                     NodeKind::Branch { provider } => {
-                        let p: NodeProvider = provider.clone();
+                        let p: NodeProvider = *provider;
                         NodeInfo::Branch(p)
                     }
                 }

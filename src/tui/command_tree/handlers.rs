@@ -584,7 +584,7 @@ pub fn role_show(inv: &CommandInvocation, state: &mut AppState) -> CommandResult
         ))
     })();
     let msg = msg.unwrap_or_else(|| {
-        if !state.core.runtime.is_some() {
+        if state.core.runtime.is_none() {
             "Runtime not available".to_string()
         } else if let Some(rt) = state.core.runtime.as_ref() {
             if rt.try_read().is_err() {

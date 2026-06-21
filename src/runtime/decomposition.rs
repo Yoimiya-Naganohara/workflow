@@ -266,11 +266,9 @@ impl DecompositionEngine for DefaultDecompositionEngine {
                     subtask_goals.push(current.trim().to_string());
                 }
                 current = trimmed.to_string();
-            } else if !trimmed.is_empty() {
-                if !current.is_empty() {
-                    current.push(' ');
-                    current.push_str(trimmed);
-                }
+            } else if !trimmed.is_empty() && !current.is_empty() {
+                current.push(' ');
+                current.push_str(trimmed);
             }
         }
         if !current.is_empty() && current != goal {

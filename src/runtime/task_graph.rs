@@ -38,18 +38,13 @@ use crate::core::types::{AgentId, TaskId};
 /// This enum lives close to the graph layer, not in the Delegation Engine,
 /// because failure propagation is a **graph semantics invariant** — it must
 /// be enforced at the data structure level, not the orchestration level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum FailurePolicy {
     /// A child failure immediately marks the parent as `Failed` and
     /// propagates recursively upward.  Siblings continue running but
     /// their results are ultimately discarded.
+    #[default]
     FailFast,
-}
-
-impl Default for FailurePolicy {
-    fn default() -> Self {
-        Self::FailFast
-    }
 }
 
 // ============================================================================
@@ -460,11 +455,9 @@ impl TaskGraph {
 
         // Phase 2: check decomposed status without holding the mutable borrow.
         if is_decomposed {
-            let all_children_done = children.iter().all(|cid| {
-                self.nodes
-                    .get(cid)
-                    .map_or(false, |c| c.status.is_terminal())
-            });
+            let all_children_done = children
+                .iter()
+                .all(|cid| self.nodes.get(cid).is_some_and(|c| c.status.is_terminal()));
             if !all_children_done {
                 return Err("Cannot complete decomposed node: children still active".to_string());
             }
@@ -507,12 +500,12 @@ impl TaskGraph {
         // a higher orchestration layer, not in the graph.
         if let Some(pid) = parent_id {
             let should_complete_parent = {
-                self.nodes.get(&pid).map_or(false, |parent| {
+                self.nodes.get(&pid).is_some_and(|parent| {
                     if parent.status == TaskStatus::Decomposed {
                         parent.children.iter().all(|cid| {
                             self.nodes
                                 .get(cid)
-                                .map_or(false, |c| c.status == TaskStatus::Completed)
+                                .is_some_and(|c| c.status == TaskStatus::Completed)
                         })
                     } else {
                         false
@@ -623,7 +616,7 @@ impl TaskGraph {
             let parent_is_decomposed = self
                 .nodes
                 .get(&pid)
-                .map_or(false, |p| p.status == TaskStatus::Decomposed);
+                .is_some_and(|p| p.status == TaskStatus::Decomposed);
 
             if parent_is_decomposed {
                 // Collect leaf failure reasons for a summary message.
@@ -757,7 +750,7 @@ impl TaskGraph {
                 node.dependencies.iter().all(|dep_id| {
                     self.nodes
                         .get(dep_id)
-                        .map_or(false, |dep| dep.status.is_terminal())
+                        .is_some_and(|dep| dep.status.is_terminal())
                 })
             })
             .map(|(id, _)| *id)
@@ -776,7 +769,7 @@ impl TaskGraph {
                     .filter(|&dep_id| {
                         self.nodes
                             .get(dep_id)
-                            .map_or(true, |dep| !dep.status.is_terminal())
+                            .is_none_or(|dep| !dep.status.is_terminal())
                     })
                     .copied()
                     .collect();
@@ -852,14 +845,10 @@ impl TaskGraph {
     pub fn ancestor_chain(&self, id: TaskId) -> Vec<TaskId> {
         let mut chain = Vec::new();
         let mut current = id;
-        loop {
-            if let Some(node) = self.nodes.get(&current) {
-                chain.push(current);
-                if let Some(parent) = node.parent {
-                    current = parent;
-                } else {
-                    break;
-                }
+        while let Some(node) = self.nodes.get(&current) {
+            chain.push(current);
+            if let Some(parent) = node.parent {
+                current = parent;
             } else {
                 break;
             }
@@ -890,7 +879,7 @@ impl TaskGraph {
         self.subgraph(id).iter().all(|sub_id| {
             self.nodes
                 .get(sub_id)
-                .map_or(false, |n| n.status.is_terminal())
+                .is_some_and(|n| n.status.is_terminal())
         })
     }
 
@@ -946,9 +935,9 @@ impl TaskGraph {
         };
         ids.into_iter()
             .filter(|tid| {
-                self.nodes.get(tid).map_or(false, |n| {
-                    n.status == TaskStatus::Failed && n.children.is_empty()
-                })
+                self.nodes
+                    .get(tid)
+                    .is_some_and(|n| n.status == TaskStatus::Failed && n.children.is_empty())
             })
             .collect()
     }
