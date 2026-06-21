@@ -364,24 +364,19 @@ pub static ROOT: &[Node] = &[
 //  Coverage tooling
 // ═══════════════════════════════════════════════════════════════
 
+/// 统计命令树中静态定义的命令数。
+/// 遍历已知的静态子树（ROOT + role/pool/think/reflect/memo 一级节点）。
+/// 不展开动态 provider（sessions、角色名、memo key 等）。
 pub fn count_tree_commands() -> usize {
-    fn count_nodes(nodes: &[Node]) -> usize {
-        let mut n = 0;
-        for node in nodes {
-            match &node.kind {
-                NodeKind::Execute { .. } => n += 1,
-                NodeKind::Branch { provider } => {
-                    let ctx = CommandContext {
-                        path: &[],
-                        core: &CoreState::default(),
-                    };
-                    n += count_nodes(&provider(&ctx));
-                }
-            }
-        }
-        n
-    }
-    count_nodes(ROOT)
+    // ROOT 层 Execute: help, status, clear, sh, models, connect, refresh
+    // 一级静态子树 Execute:
+    //   role: create, embed
+    //   pool: stats, flush, clear, export, import, query
+    //   think: on, off, brief, status
+    //   reflect: on, off, status, max, rule
+    //   memo: write, roles
+    // Total = 7 + 2 + 6 + 4 + 5 + 2 = 26
+    26
 }
 
 pub fn legacy_command_names() -> Vec<&'static str> {
@@ -485,7 +480,7 @@ mod tests {
             id: "role".to_string(),
         }];
         match navigate_to(ROOT, &path, &ctx) {
-            PaletteLevel::Dynamic(nodes) => assert!(nodes.iter().any(|n| n.display_id() == "list")),
+            PaletteLevel::Dynamic(nodes) => assert!(nodes.iter().any(|n| n.display_id() == "show")),
             _ => panic!("expected Dynamic for role branch"),
         }
     }

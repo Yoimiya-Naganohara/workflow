@@ -45,12 +45,6 @@ use crate::node;
 pub fn role_provider(_ctx: &CommandContext) -> Vec<Node> {
     vec![
         node!(
-            "list",
-            "list",
-            "List all role templates",
-            Execute(super::handlers::role_list)
-        ),
-        node!(
             "show",
             "show",
             "Show role template detail",
@@ -213,12 +207,6 @@ pub fn memo_keys_delete_provider(ctx: &CommandContext) -> Vec<Node> {
 pub fn memo_provider(_ctx: &CommandContext) -> Vec<Node> {
     vec![
         node!(
-            "list",
-            "list",
-            "List memos for current role",
-            Execute(super::handlers::memo_list)
-        ),
-        node!(
             "show",
             "show",
             "Show a memo by key",
@@ -246,20 +234,38 @@ pub fn memo_provider(_ctx: &CommandContext) -> Vec<Node> {
 }
 
 pub fn agent_provider(_ctx: &CommandContext) -> Vec<Node> {
-    vec![
-        node!(
-            "list",
-            "list",
-            "List all agents with status",
-            Execute(super::handlers::agent_list)
-        ),
-        node!(
-            "inspect",
-            "inspect",
-            "Show agent detail by ID",
-            Execute(super::handlers::agent_inspect)
-        ),
-    ]
+    vec![node!(
+        "inspect",
+        "inspect",
+        "Show agent detail by ID",
+        Branch(agent_inspect_provider)
+    )]
+}
+
+pub fn agent_inspect_provider(ctx: &CommandContext) -> Vec<Node> {
+    let pool = match ctx.core.agent_pool.try_read() {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+    let agents = pool.agents();
+    if agents.is_empty() {
+        return vec![];
+    }
+    agents
+        .iter()
+        .map(|a| {
+            let id_str = crate::agent::AgentPool::agent_id_str(&a.id);
+            let short = id_str[..12.min(id_str.len())].to_string();
+            Node {
+                id: Cow::Owned(short.clone()),
+                display: Cow::Owned(format!("{} - {}", short, a.name)),
+                help: Cow::Owned(format!("{:?}, depth={}", a.status, a.depth)),
+                kind: NodeKind::Execute {
+                    handler: super::handlers::agent_inspect,
+                },
+            }
+        })
+        .collect()
 }
 
 pub fn reflect_provider(_ctx: &CommandContext) -> Vec<Node> {

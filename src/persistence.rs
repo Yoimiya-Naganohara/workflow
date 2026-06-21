@@ -335,16 +335,66 @@ pub fn save_provider_cache(registry: &ModelRegistry) -> Result<()> {
     write_atomic(&path, &json)
 }
 
-/// Save role-scoped memos to persistent state.
-pub fn save_role_memos(role: &str, memos: &[MemoEntry]) -> Result<()> {
-    let mut state = load();
-    state.role_memos.insert(role.to_string(), memos.to_vec());
-    save(&state)
+/// Path to the dedicated memos file (separate from state.json).
+fn memos_file() -> Result<PathBuf> {
+    Ok(config_dir()?.join("role_memos.json"))
 }
 
-/// Loads all persisted role-scoped memos.
+/// Save role-scoped memos to a dedicated memos file.
+///
+/// Using a separate file avoids rewriting the full state.json on every
+/// memo write, which is both slow and risks data corruption from
+/// concurrent writes.
+pub fn save_role_memos(role: &str, memos: &[MemoEntry]) -> Result<()> {
+    let path = memos_file()?;
+    let mut all_memos: HashMap<String, Vec<MemoEntry>> = if path.exists() {
+        let text = std::fs::read_to_string(&path)?;
+        serde_json::from_str(&text).unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
+    all_memos.insert(role.to_string(), memos.to_vec());
+    let json = serde_json::to_string_pretty(&all_memos)?;
+    write_atomic(&path, &json)
+}
+
+/// Load all persisted role-scoped memos from the dedicated memos file.
+///
+/// Falls back to the legacy `state.json` `role_memos` field for migration.
 pub fn load_role_memos() -> HashMap<String, Vec<MemoEntry>> {
-    load().role_memos
+    let path = match memos_file() {
+        Ok(p) => p,
+        Err(_) => return HashMap::new(),
+    };
+    if path.exists() {
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                let memos: HashMap<String, Vec<MemoEntry>> =
+                    serde_json::from_str(&text).unwrap_or_default();
+                if !memos.is_empty() {
+                    return memos;
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to read role_memos.json: {}", e);
+            }
+        }
+    }
+    // Fallback: migrate from legacy state.json role_memos field
+    let legacy = load().role_memos;
+    if !legacy.is_empty() {
+        tracing::info!(
+            "Migrating {} role memo entries from state.json to role_memos.json",
+            legacy.len()
+        );
+        // Write to the new file on first migration
+        if let Ok(p) = memos_file() {
+            if let Ok(json) = serde_json::to_string_pretty(&legacy) {
+                let _ = write_atomic(&p, &json);
+            }
+        }
+    }
+    legacy
 }
 
 pub fn load_provider_cache() -> Option<ModelRegistry> {

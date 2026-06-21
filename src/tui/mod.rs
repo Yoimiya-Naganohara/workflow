@@ -219,7 +219,10 @@ impl Tui {
                     }
                 }
 
-                _ = interval.tick() => {}
+                _ = interval.tick() => {
+                    // Auto-save every 30 seconds (background, best-effort).
+                    self.save_session().await;
+                }
             }
 
             self.draw().await?;

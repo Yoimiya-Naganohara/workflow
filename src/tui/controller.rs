@@ -299,6 +299,18 @@ pub async fn load_initial_state(state: &mut AppState) {
         }
     }
 
+    // ── Load persisted role memos into the agent pool ──
+    {
+        let persisted_memos = crate::persistence::load_role_memos();
+        if !persisted_memos.is_empty() {
+            if let Ok(mut pool) = state.core.agent_pool.try_write() {
+                for (role, memos) in persisted_memos {
+                    pool.role_memos_mut().entry(role).or_default().extend(memos);
+                }
+            }
+        }
+    }
+
     // ── Load persisted session (opencode-style) ──
     if let Some(mut session) = crate::persistence::load_session() {
         let count = session.len();

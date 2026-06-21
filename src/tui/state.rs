@@ -245,11 +245,6 @@ pub struct AppState {
 pub enum PopupMode {
     #[default]
     None,
-    Commands,
-    SubCommand {
-        parent: String,
-        items: Vec<(String, String)>,
-    },
     Providers,
     KeyInput,
     ModelPicker,

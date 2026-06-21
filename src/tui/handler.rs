@@ -629,6 +629,15 @@ impl Tui {
                         core: &state.core,
                     };
                     let children = provider(&ctx);
+                    if children.is_empty() {
+                        // 空分支——没有可选子项
+                        state
+                            .core
+                            .messages
+                            .push(ChatMessage::system("No items available."));
+                        state.popup_mode = PopupMode::None;
+                        return;
+                    }
                     let palette = &mut state.ui.command_palette;
                     palette.path.push(PathEntry {
                         id: item.id.clone(),

@@ -275,40 +275,6 @@ fn current_agent_role(state: &AppState) -> Option<String> {
     Some(pool.get_agent(&agent_id)?.role.clone())
 }
 
-pub fn memo_list(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
-    let Some(role) = current_agent_role(state) else {
-        state
-            .core
-            .messages
-            .push(ChatMessage::system("No active agent"));
-        return CommandResult::handled();
-    };
-    let pool = match state.core.agent_pool.try_read() {
-        Ok(p) => p,
-        Err(_) => {
-            state
-                .core
-                .messages
-                .push(ChatMessage::system("Agent pool locked"));
-            return CommandResult::handled();
-        }
-    };
-    let memos = pool.get_role_memos(&role);
-    if memos.is_empty() {
-        state
-            .core
-            .messages
-            .push(ChatMessage::system(format!("No memos for role '{}'", role)));
-        return CommandResult::handled();
-    }
-    let mut lines = format!("Memos for role '{}' ({}):\n", role, memos.len());
-    for m in memos.iter().rev() {
-        lines.push_str(&format!("  {}  ({} bytes)\n", m.key, m.value.len()));
-    }
-    state.core.messages.push(ChatMessage::system(lines));
-    CommandResult::handled()
-}
-
 pub fn memo_show(inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let key = inv
         .args
@@ -498,39 +464,6 @@ fn role_arg(inv: &CommandInvocation) -> Option<&str> {
         .or_else(|| inv.command_path.last().map(|s| s.as_str()))
 }
 
-pub fn role_list(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
-    let msg = (|| -> Option<String> {
-        let runtime = state.core.runtime.as_ref()?;
-        let guard = runtime.try_read().ok()?;
-        let templates = guard.all_role_templates();
-        if templates.is_empty() {
-            return Some("No role templates found.".to_string());
-        }
-        let mut lines = vec!["Role Templates:".to_string()];
-        for t in &templates {
-            lines.push(format!(
-                "  id={:<3}  {:<30}  label={:<20}  embedded={}",
-                t.template_id,
-                t.role,
-                t.label,
-                if t.embedding.is_some() { "✓" } else { "✗" }
-            ));
-        }
-        Some(lines.join("\n"))
-    })();
-    state
-        .core
-        .messages
-        .push(ChatMessage::system(msg.unwrap_or_else(|| {
-            if state.core.runtime.is_some() {
-                "Runtime locked".to_string()
-            } else {
-                "Runtime not available".to_string()
-            }
-        })));
-    CommandResult::handled()
-}
-
 pub fn role_create(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
     state.core.messages.push(ChatMessage::system(
         "Role creation — edit role templates in ~/.workflow/role_templates.json",
@@ -645,50 +578,15 @@ pub fn role_delete(inv: &CommandInvocation, state: &mut AppState) -> CommandResu
 
 // ── /agent ──
 
-pub fn agent_list(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
-    let pool = match state.core.agent_pool.try_read() {
-        Ok(p) => p,
-        Err(_) => {
-            state
-                .core
-                .messages
-                .push(ChatMessage::system("Agent pool locked"));
-            return CommandResult::handled();
-        }
-    };
-    let agents = pool.agents();
-    if agents.is_empty() {
-        state
-            .core
-            .messages
-            .push(ChatMessage::system("No agents in pool."));
-        return CommandResult::handled();
-    }
-    let mut lines = vec![format!("Agents ({}):", agents.len())];
-    for a in agents {
-        let id_str = crate::agent::AgentPool::agent_id_str(&a.id);
-        lines.push(format!(
-            "  {:<12} {:<18} depth={}  {:?}",
-            &id_str[..12],
-            a.name,
-            a.depth,
-            a.status
-        ));
-    }
-    state
-        .core
-        .messages
-        .push(ChatMessage::system(lines.join("\n")));
-    CommandResult::handled()
-}
-
 pub fn agent_inspect(inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
-    let id_str = inv.args.join(" ");
+    let id_str = inv
+        .args
+        .first()
+        .or_else(|| inv.command_path.last())
+        .map(|s| s.as_str())
+        .unwrap_or("");
     if id_str.is_empty() {
-        return CommandResult::handled().with_effect(UiEffect::OpenPopup(PopupMode::ShellInput {
-            cmd: "/agent inspect".to_string(),
-            input: String::new(),
-        }));
+        return CommandResult::error("Usage: agent inspect <id>");
     }
     let pool = match state.core.agent_pool.try_read() {
         Ok(p) => p,
