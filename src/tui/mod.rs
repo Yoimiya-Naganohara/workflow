@@ -42,6 +42,8 @@ pub struct Tui {
     chat_cache_key: (usize, usize, bool, usize, Option<u8>, bool, usize),
     app_event_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::effect::AppEvent>,
     app_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::tui::effect::AppEvent>,
+    last_session_save: std::time::Instant,
+    last_session_message_count: usize,
 }
 
 impl Tui {
@@ -72,6 +74,8 @@ impl Tui {
             chat_cache_key: (0, 0, false, 0, None, true, 0),
             app_event_tx,
             app_event_rx,
+            last_session_save: std::time::Instant::now(),
+            last_session_message_count: 0,
         })
     }
 
@@ -129,25 +133,25 @@ impl Tui {
                         Some(Ok(event)) => {
                             match event {
                                 Event::Key(key) if key.kind == KeyEventKind::Press => {
-                                    let mut state = self.state.write().await;
-
                                     if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
                                         && key.code == KeyCode::Char('c')
                                     {
+                                        self.save_session().await;
                                         return Ok(());
                                     }
 
-                                    match state.ui.panel {
-                                        Panel::Chat => {
-                                            if !self.handle_chat_keys(&mut state, key) {
-                                                self.save_session().await;
-                                                return Ok(());
-                                            }
-                                        }
-                                    }
-
+                                    let mut state = self.state.write().await;
+                                    let should_quit = match state.ui.panel {
+                                        Panel::Chat => !self.handle_chat_keys(&mut state, key),
+                                    };
                                     let effects = std::mem::take(&mut state.effects);
                                     drop(state);
+
+                                    if should_quit {
+                                        self.save_session().await;
+                                        return Ok(());
+                                    }
+
                                     for effect in effects {
                                         let tx = self.app_event_tx.clone();
                                         tokio::spawn(async move {
@@ -221,7 +225,10 @@ impl Tui {
 
                 _ = interval.tick() => {
                     // Auto-save every 30 seconds (background, best-effort).
-                    self.save_session().await;
+                    if self.last_session_save.elapsed() >= std::time::Duration::from_secs(30) {
+                        self.save_session().await;
+                        self.last_session_save = std::time::Instant::now();
+                    }
                 }
             }
 
@@ -230,16 +237,21 @@ impl Tui {
     }
 
     /// Save conversation messages for the next session (opencode-style).
-    /// Also saves a timestamped copy to sessions/ for /sessions popup.
-    /// Saves the system prompt cache to ensure consistent behavior on restore.
-    async fn save_session(&self) {
+    /// Always overwrites `session.json` (crash recovery).
+    /// Only creates a new timestamped session in `sessions/` when messages have
+    /// actually changed — each entry in the sessions list should represent a truly
+    /// distinct conversation state, not a periodic snapshot.
+    async fn save_session(&mut self) {
         let state = self.state.read().await;
-        if !state.core.messages.is_empty() {
-            let _ = crate::persistence::save_session(&state.core.messages);
-            // Also save to sessions/ with a timestamp name so /sessions can find it.
+        if state.core.messages.is_empty() {
+            return;
+        }
+        let msg_count = state.core.messages.len();
+        let is_new = msg_count != self.last_session_message_count;
+        let _ = crate::persistence::save_session(&state.core.messages);
+        if is_new {
             let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
             let _ = crate::persistence::save_session_as(&ts, &state.core.messages);
-            // Save system prompt cache if available
             if let Some(ref prompt) = state.ui.cached_system_prompt {
                 let _ = crate::persistence::save_session_prompt(
                     &ts,
@@ -247,6 +259,7 @@ impl Tui {
                     &state.ui.cached_prompt_role,
                 );
             }
+            self.last_session_message_count = msg_count;
         }
     }
 }

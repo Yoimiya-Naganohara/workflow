@@ -71,12 +71,18 @@ pub fn clear(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
 
 // ── /sh ──
 
-pub fn shell(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
-    state.popup_mode = PopupMode::ShellInput {
-        cmd: "/sh".to_string(),
-        input: String::new(),
-    };
-    state.popup_selected = 0;
+pub fn shell(inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+    let cmd = inv.args.join(" ");
+    if cmd.is_empty() {
+        state.popup_mode = PopupMode::ShellInput {
+            cmd: "/sh".to_string(),
+            input: String::new(),
+        };
+        state.popup_selected = 0;
+    } else {
+        state.core.messages.push(ChatMessage::system(format!("$ {}", cmd)));
+        state.effects.push(Effect::ExecuteShell { command: cmd });
+    }
     CommandResult::handled()
 }
 
