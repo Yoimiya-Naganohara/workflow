@@ -1,287 +1,135 @@
-//! Task Scheduler — the **pure dispatcher** between TaskGraph and agents.
-//!
-//! # Responsibility
-//!
-//! The scheduler does exactly one thing: turn a `Dispatching` task into a
-//! running agent or a decomposed set of subtasks.  It does NOT know about:
-//!
-//! - Pipelines (L-1/L0/L1/L2)
-//! - Retry strategies
-//! - Escalation logic
-//! - Decomposition internals
-//!
-//! All of those belong in their respective trait implementations
-//! ([`DispatchDecider`](super::dispatch::DispatchDecider),
-//! [`DecompositionEngine`](super::decomposition::DecompositionEngine)).
-//!
-//! # Dispatch loop (freeze contract)
-//!
-//! ```text
-//! dispatch()
-//!   ├── graph.ready_tasks()             ← query
-//!   ├── for each task:
-//!   │     ├── mark_dispatching()          ← lock
-//!   │     ├── engine.should_decompose()?  ← split check (Phase 3)
-//!   │     │     └── engine.decompose()    ← graph mutation
-//!   │     ├── decider.decide(task)        ← exec decision
-//!   │     └── apply decision
-//! ```
-//!
-//! The scheduler is called after every graph mutation (`SpawnTask`,
-//! `TaskCompleted`, `TaskFailed`) from the runtime event loop.
+//! Task Scheduler — the pure dispatcher between TaskGraph and agents.
 
 use std::sync::Arc;
-
 use tokio::sync::{RwLock, mpsc};
 
 use crate::agent::{Agent, AgentConfig, AgentPool, AgentStatus};
 use crate::core::types::AgentId;
 use crate::runtime::AgentRuntime;
-use crate::runtime::decomposition::DecompositionEngine;
+use crate::runtime::decomposition::{CapabilityRegistry, DecompositionEngine, EscalationPolicy, RoleSelector, TaskOutcome, TaskOutcomeStore};
+use crate::runtime::strategy_graph::{StrategyGraph, StrategyType, TaskSignature};
 use crate::runtime::dispatch::{DispatchDecider, DispatchDecision};
 use crate::runtime::event::RuntimeEvent;
 
-/// Pure dispatcher — no pipeline logic, no retry policy.
-/// Optionally includes a `DecompositionEngine` for task splitting (Phase 3).
 pub struct TaskScheduler {
     runtime: Arc<RwLock<AgentRuntime>>,
     pool: Arc<RwLock<AgentPool>>,
     broker_tx: mpsc::Sender<RuntimeEvent>,
-    /// The single decision authority for task execution.
     decider: Box<dyn DispatchDecider>,
-    /// Optional decomposition engine (Phase 3).
-    /// When `Some`, tasks that exceed structural tension thresholds
-    /// are split before reaching the decider.
     decomposition: Option<Box<dyn DecompositionEngine>>,
+    role_selector: Option<Box<dyn RoleSelector>>,
+    capability_registry: Option<Arc<RwLock<CapabilityRegistry>>>,
+    escalation: Option<Box<dyn EscalationPolicy>>,
+    outcome_store: Option<Arc<RwLock<TaskOutcomeStore>>>,
+    /// Phase 5: strategy graph for per-task strategy selection.
+    strategy_graph: Option<Arc<std::sync::Mutex<StrategyGraph>>>,
 }
 
 impl TaskScheduler {
-    pub fn new(
-        runtime: Arc<RwLock<AgentRuntime>>,
-        pool: Arc<RwLock<AgentPool>>,
-        broker_tx: mpsc::Sender<RuntimeEvent>,
-        decider: Box<dyn DispatchDecider>,
-    ) -> Self {
-        Self {
-            runtime,
-            pool,
-            broker_tx,
-            decider,
-            decomposition: None,
-        }
+    pub fn new(runtime: Arc<RwLock<AgentRuntime>>, pool: Arc<RwLock<AgentPool>>, broker_tx: mpsc::Sender<RuntimeEvent>, decider: Box<dyn DispatchDecider>) -> Self {
+        Self { runtime, pool, broker_tx, decider, decomposition: None, role_selector: None, capability_registry: None, escalation: None, outcome_store: None, strategy_graph: None }
     }
+    pub fn with_decomposition(mut self, engine: Box<dyn DecompositionEngine>) -> Self { self.decomposition = Some(engine); self }
+    pub fn with_routing(mut self, sel: Box<dyn RoleSelector>, reg: Arc<RwLock<CapabilityRegistry>>) -> Self { self.role_selector = Some(sel); self.capability_registry = Some(reg); self }
+    pub fn with_escalation(mut self, policy: Box<dyn EscalationPolicy>, store: Arc<RwLock<TaskOutcomeStore>>) -> Self { self.escalation = Some(policy); self.outcome_store = Some(store); self }
+    pub fn with_strategy_graph(mut self, sg: Arc<std::sync::Mutex<StrategyGraph>>) -> Self { self.strategy_graph = Some(sg); self }
 
-    /// Attach a decomposition engine (Phase 3 entry point).
-    pub fn with_decomposition(mut self, engine: Box<dyn DecompositionEngine>) -> Self {
-        self.decomposition = Some(engine);
-        self
-    }
-
-    /// Run one dispatch tick.
-    ///
-    /// Called after every graph mutation.  For each ready task:
-    ///
-    /// 1. `mark_dispatching()` — anti-double-dispatch lock
-    /// 2. `engine.should_decompose()?` — optional split check (Phase 3)
-    /// 3. `decider.decide()` — single decision call
-    /// 4. Apply decision
     pub async fn dispatch(&self) {
-        // ── Phase 1: Query ready tasks from the graph ──
         let ready: Vec<(AgentId, String, Option<String>)> = {
             let rt = self.runtime.read().await;
             let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
-            g.ready_tasks()
-                .iter()
-                .filter_map(|tid| {
-                    let node = g.get(tid)?;
-                    Some((*tid, node.goal.clone(), node.role.clone()))
-                })
-                .collect()
+            g.ready_tasks().iter().filter_map(|tid| { let n = g.get(tid)?; Some((*tid, n.goal.clone(), n.role.clone())) }).collect()
         };
-
-        if ready.is_empty() {
-            return;
-        }
-
+        if ready.is_empty() { return; }
         tracing::info!("TaskScheduler::dispatch: {} ready task(s)", ready.len());
-
         for (task_id, task_goal, task_role) in ready {
             let role = task_role.clone().unwrap_or_else(|| "worker".to_string());
-
-            // ── Phase 2: Anti-double-dispatch lock ──
-            {
+            // ── Phase 5: StrategyGraph selection ──
+            let selected_strategy = self.strategy_graph.as_ref().map(|sg| {
+                let _sig = TaskSignature { goal_length_chars: task_goal.len(), domain_count: task_role.as_ref().map(|_| 2u32).unwrap_or(1), estimated_complexity: 0.5, role_count: 1 };
+                sg.lock().unwrap_or_else(|e| e.into_inner()).select_strategy(StrategyType::Estimator, 0)
+            });
+            if let Some(sid) = selected_strategy {
+                tracing::debug!("scheduler: task {:02x}.. using strategy {:?}", task_id[0], sid);
+            }
+            // ── End Phase 5 ──
+            { // mark_dispatching
                 let rt = self.runtime.read().await;
                 let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
-                if let Err(e) = g.mark_dispatching(task_id) {
-                    tracing::warn!(
-                        "scheduler: mark_dispatching({:02x}..) failed: {} — skipping",
-                        task_id[0],
-                        e
-                    );
-                    continue;
-                }
+                if let Err(e) = g.mark_dispatching(task_id) { tracing::warn!("scheduler: mark_dispatching({:02x}..) failed: {} — skipping", task_id[0], e); continue; }
             }
-
-            // ── Phase 2.5: Check for decomposition (Phase 3 entry) ──
-            // The scheduler does NOT know how decomposition works — it
-            // just asks the engine.  If the engine says "decompose",
-            // it mutates the graph and we skip this task on this tick.
-            // The subtasks will be picked up by the next dispatch call.
             if let Some(ref engine) = self.decomposition {
-                let should_split = {
-                    let rt = self.runtime.read().await;
-                    let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
-                    engine.should_decompose(task_id, &g)
-                };
-                if should_split {
+                let should = { let rt = self.runtime.read().await; let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner()); engine.should_decompose(task_id, &g) };
+                if should {
                     let rt = self.runtime.read().await;
                     let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
                     let children = engine.decompose(task_id, &mut g);
-                    if !children.is_empty() {
-                        tracing::info!(
-                            "scheduler: task {:02x}.. decomposed into {} subtask(s)",
-                            task_id[0],
-                            children.len()
-                        );
-                    }
-                    continue; // subtasks picked up by next dispatch
+                    if !children.is_empty() { tracing::info!("scheduler: task {:02x}.. decomposed into {} subtask(s)", task_id[0], children.len()); }
+                    continue;
                 }
             }
-
-            // ── Phase 3: Single decision call — no pipeline knowledge ──
             let decision = self.decider.decide(task_id, &task_goal, &role).await;
-
-            // ── Phase 4: Apply decision ──
             match decision {
-                DispatchDecision::Approved { config } => {
-                    self.apply_approved(task_id, &task_goal, &role, config)
-                        .await;
-                }
+                DispatchDecision::Approved { config } => self.apply_approved(task_id, &task_goal, &role, config).await,
                 DispatchDecision::Rejected { reason } => {
-                    tracing::warn!(
-                        "scheduler: task {:02x}.. rejected: {:?}",
-                        task_id[0],
-                        reason
-                    );
+                    tracing::warn!("scheduler: task {:02x}.. rejected: {:?}", task_id[0], reason);
                     let rt = self.runtime.read().await;
                     let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
                     g.mark_rejected(task_id, &format!("{}", reason)).ok();
+                    // Record outcome + check escalation.
+                    if let Some(ref store) = self.outcome_store {
+                        if let Ok(mut s) = store.try_write() { s.record(TaskOutcome { task_id, agent_id: None, role: role.clone(), success: false, latency_ms: 0, tokens_input: 0, tokens_output: 0 }); }
+                    }
                 }
                 DispatchDecision::RetryLater { reason } => {
-                    tracing::info!(
-                        "scheduler: task {:02x}.. will retry: {}",
-                        task_id[0],
-                        reason
-                    );
+                    tracing::info!("scheduler: task {:02x}.. will retry: {}", task_id[0], reason);
                     let rt = self.runtime.read().await;
                     let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
-                    if g.mark_created(task_id).is_err() {
-                        g.mark_rejected(task_id, &format!("RetryLater fallback: {}", reason))
-                            .ok();
-                    }
+                    if g.mark_created(task_id).is_err() { g.mark_rejected(task_id, &format!("RetryLater fallback: {}", reason)).ok(); }
                 }
-                DispatchDecision::Escalate {
-                    target_role,
-                    reason,
-                } => {
-                    tracing::warn!(
-                        "scheduler: task {:02x}.. escalated to {}: {}",
-                        task_id[0],
-                        target_role,
-                        reason
-                    );
+                DispatchDecision::Escalate { target_role, reason } => {
+                    tracing::warn!("scheduler: task {:02x}.. escalated to {}: {}", task_id[0], target_role, reason);
                     let rt = self.runtime.read().await;
                     let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
-                    if let Some(node) = g.get_mut(&task_id) {
-                        node.metadata
-                            .insert("escalated_to".into(), target_role.clone());
-                        node.metadata.insert("escalated_reason".into(), reason);
-                    }
+                    if let Some(node) = g.get_mut(&task_id) { node.metadata.insert("escalated_to".into(), target_role.clone()); node.metadata.insert("escalated_reason".into(), reason); }
                     g.mark_blocked(task_id).ok();
                 }
             }
         }
     }
 
-    // ── Decision application helpers ──
+    async fn apply_approved(&self, task_id: AgentId, task_goal: &str, role: &str, config: crate::core::types::ChildAgentConfig) {
+        let effective_role = if let Some(ref selector) = self.role_selector {
+            let candidates = self.capability_registry.as_ref().map(|reg| reg.try_read().map(|r| r.all()).unwrap_or_default()).unwrap_or_default();
+            let routing = {
+                let rt = self.runtime.read().await;
+                let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                match g.get(&task_id) { Some(node) => selector.select(node, &candidates), None => crate::runtime::decomposition::RoutingDecision { role: role.to_string(), confidence: 0.5, capability_score: 0.0, skill_match: 0.5 } }
+            };
+            if routing.confidence < 0.3 { tracing::warn!("routing: task {:02x}.. low confidence ({:.2})", task_id[0], routing.confidence); }
+            routing.role
+        } else { role.to_string() };
 
-    /// Create an agent and mark the task Running.
-    async fn apply_approved(
-        &self,
-        task_id: AgentId,
-        task_goal: &str,
-        role: &str,
-        config: crate::core::types::ChildAgentConfig,
-    ) {
+        if let Some(ref reg) = self.capability_registry {
+            if let Ok(mut r) = reg.try_write() { r.record_outcome(&TaskOutcome { task_id, agent_id: None, role: effective_role.clone(), success: true, latency_ms: 0, tokens_input: 0, tokens_output: 0 }); }
+        }
+
         let agent_id: AgentId = rand::random();
-        let sandbox = crate::tools::sandbox::SandboxHandle::new(&agent_id)
-            .map(std::sync::Arc::new)
-            .ok();
-
+        let sandbox = crate::tools::sandbox::SandboxHandle::new(&agent_id).map(Arc::new).ok();
         let agent = Agent {
             id: agent_id,
-            name: format!(
-                "{}-{:04x}",
-                role,
-                u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])
-            ),
-            role: role.to_string(),
-            role_template_id: None,
-            parent_id: None,
-            children: Vec::new(),
-            depth: 0,
+            name: format!("{}-{:04x}", effective_role, u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])),
+            role: effective_role.clone(),
+            role_template_id: None, parent_id: None, children: Vec::new(), depth: 0,
             goal: task_goal.to_string(),
-            config: AgentConfig {
-                model_id: String::new(),
-                allowed_tools: config.allowed_tools,
-                ..Default::default()
-            },
-            status: AgentStatus::Idle,
-            result: None,
-            child_results: Vec::new(),
-            context: Vec::new(),
-            last_active_at: crate::agent::now_secs(),
-            tokens_input: 0,
-            tokens_output: 0,
-            tool_trace: std::collections::VecDeque::new(),
-            inbox: std::collections::VecDeque::new(),
-            task_id: Some(task_id),
-            sandbox,
+            config: AgentConfig { model_id: String::new(), allowed_tools: config.allowed_tools, ..Default::default() },
+            status: AgentStatus::Idle, result: None, child_results: Vec::new(), context: Vec::new(),
+            last_active_at: crate::agent::now_secs(), tokens_input: 0, tokens_output: 0,
+            tool_trace: std::collections::VecDeque::new(), inbox: std::collections::VecDeque::new(),
+            task_id: Some(task_id), sandbox,
         };
-
-        // Transition Dispatching → Running.
-        {
-            let rt = self.runtime.read().await;
-            let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
-            if let Err(e) = g.mark_running(task_id, agent_id) {
-                tracing::warn!(
-                    "scheduler: mark_running({:02x}..) failed: {}",
-                    task_id[0],
-                    e
-                );
-            }
-        }
-
-        // Add to pool.
-        {
-            let mut p = self.pool.write().await;
-            p.add_agent(agent);
-            let guard = {
-                let rt = self.runtime.read().await;
-                rt.take_pending_guard()
-            };
-            if let Some(g) = guard {
-                p.attach_budget_guard(agent_id, g);
-            }
-        }
-
-        // Activate.
-        let _ = self
-            .broker_tx
-            .send(RuntimeEvent::ActivateAgent {
-                agent_id,
-                parent_id: None,
-            })
-            .await;
+        { let rt = self.runtime.read().await; let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner()); if let Err(e) = g.mark_running(task_id, agent_id) { tracing::warn!("scheduler: mark_running({:02x}..) failed: {}", task_id[0], e); } }
+        { let mut p = self.pool.write().await; p.add_agent(agent); if let Some(g) = { let rt = self.runtime.read().await; rt.take_pending_guard() } { p.attach_budget_guard(agent_id, g); } }
+        let _ = self.broker_tx.send(RuntimeEvent::ActivateAgent { agent_id, parent_id: None }).await;
     }
 }

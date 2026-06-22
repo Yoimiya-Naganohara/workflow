@@ -43,6 +43,7 @@
 
 use crate::core::types::TaskId;
 use crate::runtime::task_graph::{TaskGraph, TaskNode};
+use std::collections::HashMap;
 
 // ============================================================================
 //  StructuralTension — the "why" behind decomposition
@@ -325,6 +326,187 @@ impl DecompositionEngine for NoopDecompositionEngine {
 
     fn decompose(&self, _task_id: TaskId, _graph: &mut TaskGraph) -> Vec<TaskId> {
         Vec::new()
+    }
+}
+
+// ============================================================================
+//  Phase 3 — TaskOutcome / Capability / Role / Escalation
+// ============================================================================
+
+use crate::core::types::AgentId;
+
+#[derive(Debug, Clone)]
+pub struct TaskOutcome {
+    pub task_id: TaskId,
+    pub agent_id: Option<AgentId>,
+    pub role: String,
+    pub success: bool,
+    pub latency_ms: u64,
+    pub tokens_input: u32,
+    pub tokens_output: u32,
+}
+
+pub struct TaskOutcomeStore {
+    outcomes: Vec<TaskOutcome>,
+    by_role: HashMap<String, Vec<usize>>,
+}
+
+impl TaskOutcomeStore {
+    pub fn new() -> Self { Self { outcomes: Vec::new(), by_role: HashMap::new() } }
+    pub fn record(&mut self, o: TaskOutcome) {
+        let idx = self.outcomes.len();
+        let role = o.role.clone();
+        self.outcomes.push(o);
+        self.by_role.entry(role).or_default().push(idx);
+    }
+    pub fn failure_rate(&self, _keywords: &[&str]) -> f32 {
+        if self.outcomes.is_empty() { return 0.0; }
+        self.outcomes.iter().filter(|o| !o.success).count() as f32 / self.outcomes.len() as f32
+    }
+    pub fn failure_rate_by_role(&self, role: &str) -> f32 {
+        self.by_role.get(role).map(|indices: &Vec<usize>| {
+            if indices.is_empty() { return 0.0; }
+            indices.iter().filter(|&&idx| !self.outcomes[idx].success).count() as f32 / indices.len() as f32
+        }).unwrap_or(0.0)
+    }
+    pub fn recent(&self, n: usize) -> &[TaskOutcome] {
+        let start = self.outcomes.len().saturating_sub(n);
+        &self.outcomes[start..]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CapabilityProfile {
+    pub role: String,
+    pub success_rate: f32,
+    pub avg_latency_ms: u64,
+    pub avg_token_cost: u32,
+    pub completed_tasks: u64,
+    pub failed_tasks: u64,
+}
+
+pub struct CapabilityRegistry {
+    profiles: HashMap<String, CapabilityProfile>,
+}
+
+impl CapabilityRegistry {
+    pub fn new() -> Self { Self { profiles: HashMap::new() } }
+    pub fn get(&self, role: &str) -> Option<&CapabilityProfile> { self.profiles.get(role) }
+    pub fn all(&self) -> Vec<CapabilityProfile> { self.profiles.values().cloned().collect() }
+    pub fn record_outcome(&mut self, outcome: &TaskOutcome) {
+        let entry = self.profiles.entry(outcome.role.clone()).or_insert(CapabilityProfile {
+            role: outcome.role.clone(), success_rate: 0.0, avg_latency_ms: 0, avg_token_cost: 0,
+            completed_tasks: 0, failed_tasks: 0,
+        });
+        let total = entry.completed_tasks + entry.failed_tasks + 1;
+        entry.avg_latency_ms = ((entry.avg_latency_ms as u64 * (total - 1).max(1) as u64) + outcome.latency_ms) / total as u64;
+        entry.avg_token_cost = ((entry.avg_token_cost as u32 * (total - 1).max(1) as u32) + outcome.tokens_input + outcome.tokens_output) / total as u32;
+        if outcome.success { entry.completed_tasks += 1; } else { entry.failed_tasks += 1; }
+        entry.success_rate = entry.completed_tasks as f32 / (entry.completed_tasks + entry.failed_tasks).max(1) as f32;
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RoleScore {
+    pub role: String,
+    pub total_score: f32,
+    pub skill_match: f32,
+    pub success_score: f32,
+    pub latency_score: f32,
+    pub cost_score: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct RoutingDecision {
+    pub role: String,
+    pub confidence: f32,
+    pub capability_score: f32,
+    pub skill_match: f32,
+}
+
+pub trait RoleSelector: Send + Sync {
+    fn score_all(&self, task: &TaskNode, candidates: &[CapabilityProfile]) -> Vec<RoleScore>;
+    fn select(&self, task: &TaskNode, candidates: &[CapabilityProfile]) -> RoutingDecision {
+        let mut scored = self.score_all(task, candidates);
+        scored.sort_by(|a,b| b.total_score.partial_cmp(&a.total_score).unwrap_or(std::cmp::Ordering::Equal));
+        match scored.into_iter().next() {
+            Some(top) => RoutingDecision { role: top.role, confidence: top.total_score, capability_score: top.success_score, skill_match: top.skill_match },
+            None => RoutingDecision { role: "worker".to_string(), confidence: 0.0, capability_score: 0.0, skill_match: 0.0 },
+        }
+    }
+}
+
+pub struct DefaultRoleSelector;
+impl DefaultRoleSelector {
+    fn skill_match(goal: &str, role: &str) -> f32 {
+        let g = goal.to_lowercase();
+        match role {
+            "developer" | "backend" | "frontend" => {
+                if g.contains("api")||g.contains("backend")||g.contains("frontend")||g.contains("database")||g.contains("ui") { 0.9 }
+                else if g.contains("implement")||g.contains("build")||g.contains("code") { 0.8 } else { 0.3 }
+            }
+            "tester" => { if g.contains("test")||g.contains("verify")||g.contains("qa") { 0.95 } else { 0.2 } }
+            "security_auditor" => { if g.contains("security")||g.contains("audit")||g.contains("threat") { 0.95 } else { 0.1 } }
+            "reviewer" => { if g.contains("review")||g.contains("inspect") { 0.9 } else { 0.3 } }
+            "planner" => { if g.contains("plan")||g.contains("design")||g.contains("architecture") { 0.9 } else { 0.3 } }
+            "devops" => { if g.contains("deploy")||g.contains("infra")||g.contains("ci") { 0.95 } else { 0.2 } }
+            "researcher" => { if g.contains("research")||g.contains("analyze") { 0.9 } else { 0.3 } }
+            "general_business_analyst" => { if g.contains("requirement")||g.contains("spec")||g.contains("stakeholder") { 0.9 } else { 0.2 } }
+            _ => 0.5,
+        }
+    }
+}
+
+impl RoleSelector for DefaultRoleSelector {
+    fn score_all(&self, task: &TaskNode, candidates: &[CapabilityProfile]) -> Vec<RoleScore> {
+        if candidates.is_empty() {
+            let inferred = "developer".to_string();
+            return vec![RoleScore { role: inferred, total_score: 1.0, skill_match: 1.0, success_score: 0.0, latency_score: 0.5, cost_score: 0.5 }];
+        }
+        candidates.iter().map(|c| {
+            let skill = Self::skill_match(&task.goal, &c.role);
+            let lat_norm = 1.0 - (c.avg_latency_ms as f32 / 10_000.0).clamp(0.0, 1.0);
+            let cost_norm = 1.0 - (c.avg_token_cost as f32 / 10_000.0).clamp(0.0, 1.0);
+            let total = 0.40 * skill + 0.30 * c.success_rate + 0.20 * lat_norm + 0.10 * cost_norm;
+            RoleScore { role: c.role.clone(), total_score: total, skill_match: skill, success_score: c.success_rate, latency_score: lat_norm, cost_score: cost_norm }
+        }).collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EscalationReason {
+    RepeatedFailure { count: u32, last_error: String },
+    NoCapableRole { confidence: f32 },
+    BudgetExceeded { requested: u64, remaining: i64 },
+    HumanRequired { reason: String },
+}
+
+pub trait EscalationPolicy: Send + Sync {
+    fn should_escalate(&self, _task: &TaskNode, recent_outcomes: &[TaskOutcome]) -> Option<EscalationReason>;
+}
+
+pub struct DefaultEscalationPolicy {
+    pub max_consecutive_failures: u32,
+    pub latency_threshold_ms: u64,
+}
+
+impl Default for DefaultEscalationPolicy {
+    fn default() -> Self { Self { max_consecutive_failures: 3, latency_threshold_ms: 30_000 } }
+}
+
+impl EscalationPolicy for DefaultEscalationPolicy {
+    fn should_escalate(&self, _task: &TaskNode, recent_outcomes: &[TaskOutcome]) -> Option<EscalationReason> {
+        let fails = recent_outcomes.iter().rev().take_while(|o| !o.success).count() as u32;
+        if fails >= self.max_consecutive_failures {
+            let last = recent_outcomes.last().map(|o| format!("Failed after {}ms", o.latency_ms)).unwrap_or_default();
+            return Some(EscalationReason::RepeatedFailure { count: fails, last_error: last });
+        }
+        if let Some(last) = recent_outcomes.last() {
+            if last.latency_ms > self.latency_threshold_ms {
+                return Some(EscalationReason::HumanRequired { reason: format!("Latency {}ms > {}ms", last.latency_ms, self.latency_threshold_ms) });
+            }
+        }
+        None
     }
 }
 
