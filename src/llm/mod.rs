@@ -131,14 +131,17 @@ impl LlmProvider {
                     .extended_details()
                     .await?;
                 let total = resp.usage.total_tokens as u32;
-                (resp.output, total)
+                let cached = resp.usage.cached_input_tokens as u32;
+                let cache_create = resp.usage.cache_creation_input_tokens as u32;
+                (resp.output, total, cached, cache_create)
             }};
         }
 
         let mut last_error = None;
         for attempt in 0..=max_retries {
             let result = tokio::time::timeout(timeout, async {
-                let (content, tokens_used): (String, u32) = match self {
+                let (content, tokens_used, cached_input_tokens, cache_creation_input_tokens):
+                    (String, u32, u32, u32) = match self {
                     Self::OpenAi(c) => complete_ext!(c),
                     Self::Anthropic(c) => complete_ext!(c),
                     Self::Cohere(c) => complete_ext!(c),
@@ -152,6 +155,8 @@ impl LlmProvider {
                 Ok(LlmResponse {
                     content,
                     tokens_used,
+                    cached_input_tokens,
+                    cache_creation_input_tokens,
                 })
             })
             .await;

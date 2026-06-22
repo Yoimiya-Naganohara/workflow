@@ -113,6 +113,10 @@ pub enum AppEvent {
         response_index: usize,
         input: u32,
         output: u32,
+        /// Input tokens served from provider-managed cache.
+        cached_input: u32,
+        /// Input tokens written to provider-managed cache.
+        cache_creation_input: u32,
     },
     ChatToolCall {
         response_index: usize,
@@ -366,11 +370,13 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                                     timestamp,
                                 });
                             }
-                            ToolEvent::TokenUsage { input, output } => {
+                            ToolEvent::TokenUsage { input, output, cached_input, cache_creation_input } => {
                                 let _ = tx.send(AppEvent::ChatTokenUsage {
                                     response_index,
                                     input,
                                     output,
+                                    cached_input,
+                                    cache_creation_input,
                                 });
                             }
                             ToolEvent::Done => {

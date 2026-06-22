@@ -340,6 +340,8 @@ impl LlmProvider {
                             yield ToolEvent::TokenUsage {
                                 input: usage.input_tokens as u32,
                                 output: usage.output_tokens as u32,
+                                cached_input: usage.cached_input_tokens as u32,
+                                cache_creation_input: usage.cache_creation_input_tokens as u32,
                             };
                         }
                         yield ToolEvent::Done;
@@ -374,11 +376,15 @@ mod tests {
         let event = ToolEvent::TokenUsage {
             input: 150,
             output: 75,
+            cached_input: 10,
+            cache_creation_input: 20,
         };
         match event {
-            ToolEvent::TokenUsage { input, output } => {
+            ToolEvent::TokenUsage { input, output, cached_input, cache_creation_input } => {
                 assert_eq!(input, 150);
                 assert_eq!(output, 75);
+                assert_eq!(cached_input, 10);
+                assert_eq!(cache_creation_input, 20);
             }
             _ => panic!("expected TokenUsage"),
         }

@@ -1255,7 +1255,7 @@ Messages may contain important context from sibling agents.",
                             }
                         }
                     }
-                    crate::llm::ToolEvent::TokenUsage { input, output } => {
+                    crate::llm::ToolEvent::TokenUsage { input, output, .. } => {
                         // Track cumulative token usage for cost/consumption reporting.
                         tokens_input = tokens_input.max(input);
                         tokens_output = tokens_output.max(output);
@@ -1489,7 +1489,7 @@ Messages may contain important context from sibling agents.",
                             }
                         } // try_write drops here — minimal lock duration
                     }
-                    crate::llm::ToolEvent::TokenUsage { input, output } => {
+                    crate::llm::ToolEvent::TokenUsage { input, output, .. } => {
                         tokens_input = tokens_input.max(input);
                         tokens_output = tokens_output.max(output);
                     }

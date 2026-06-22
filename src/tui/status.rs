@@ -120,7 +120,24 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         }
     }
 
-    // ── 8. Tokenizer uninitialised warning ──
+    // ── 8. Prompt cache hit count ──
+    let cache_read = state.ui.llm_cache_read;
+    let cache_write = state.ui.llm_cache_write;
+    if cache_read > 0 || cache_write > 0 {
+        let label = if cache_read > 0 && cache_write > 0 {
+            format!("  🗃️{:0.0}k↓{:0.0}k", cache_read as f64 / 1000.0, cache_write as f64 / 1000.0)
+        } else if cache_read > 0 {
+            format!("  🗃️{:0.0}k↓", cache_read as f64 / 1000.0)
+        } else {
+            format!("  🗃️↑{:0.0}k", cache_write as f64 / 1000.0)
+        };
+        spans.push(Span::styled(
+            label,
+            Style::default().fg(style::GREEN),
+        ));
+    }
+
+    // ── 9. Tokenizer uninitialised warning ──
     if state.ui.active_chat_requests == 0
         && !state.ui.tokenizer_initialized
         && (in_tokens > 0 || out_tokens > 0)
@@ -128,7 +145,7 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         spans.push(Span::styled(" ⚠T", Style::default().fg(style::WARNING)));
     }
 
-    // ── 9. Think level badge ──
+    // ── 10. Think level badge ──
     let think_labels = ["", " T1", " T2"];
     let level = state.ui.think_level.min(2) as usize;
     if let Some(ref effort) = state.ui.reasoning_effort {
@@ -143,7 +160,7 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         ));
     }
 
-    // ── 10. Embedding cache hit rate ──
+    // ── 11. Embedding cache hit rate ──
     let cache = state.ui.embedding_cache;
     let total = cache.hits + cache.misses;
     if total > 0 {
@@ -161,7 +178,7 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         ));
     }
 
-    // ── 11. Permits indicator (if constrained) ──
+    // ── 12. Permits indicator (if constrained) ──
     let permits_used = state
         .ui
         .permits_total

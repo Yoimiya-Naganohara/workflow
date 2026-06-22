@@ -117,6 +117,10 @@ pub struct LlmRequest {
 pub struct LlmResponse {
     pub content: String,
     pub tokens_used: u32,
+    /// Input tokens served from provider-managed cache (prompt caching).
+    pub cached_input_tokens: u32,
+    /// Input tokens written to provider-managed cache.
+    pub cache_creation_input_tokens: u32,
 }
 
 pub type ChatStream = Pin<Box<dyn Stream<Item = Result<String>> + Send>>;
@@ -141,6 +145,10 @@ pub enum ToolEvent {
     TokenUsage {
         input: u32,
         output: u32,
+        /// Input tokens served from provider-managed cache.
+        cached_input: u32,
+        /// Input tokens written to provider-managed cache.
+        cache_creation_input: u32,
     },
     Done,
 }

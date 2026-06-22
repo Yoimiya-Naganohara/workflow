@@ -224,6 +224,10 @@ pub struct UiState {
     // ── Cache metrics ──
     /// Embedding service cache hit/miss stats (refreshed each render tick).
     pub embedding_cache: CacheStats,
+    /// Accumulated provider-managed cache reads (prompt caching).
+    pub llm_cache_read: u64,
+    /// Accumulated provider-managed cache writes.
+    pub llm_cache_write: u64,
 }
 
 // ── AppState ──
@@ -473,11 +477,15 @@ impl AppState {
                 response_index: _,
                 input,
                 output,
+                cached_input,
+                cache_creation_input,
             } => {
                 // API reports per-request cumulative — trust it over local estimate
                 self.ui.cached_input_tokens = input;
                 self.ui.cached_output_tokens = output;
                 self.ui.has_api_tokens = true;
+                self.ui.llm_cache_read += cached_input as u64;
+                self.ui.llm_cache_write += cache_creation_input as u64;
             }
             AppEvent::OptimizationResult {
                 role_name,
@@ -919,6 +927,8 @@ impl Default for UiState {
             cached_system_prompt: None,
             cached_prompt_role: String::new(),
             embedding_cache: CacheStats::default(),
+            llm_cache_read: 0,
+            llm_cache_write: 0,
         }
     }
 }
