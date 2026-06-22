@@ -663,6 +663,27 @@ impl Tui {
             }
 
             let agent_id = crate::tui::controller::ensure_initial_agent_sync(core, &input);
+
+            // ── Compiler pass: root task creation ──
+            // Ensure every agent has a corresponding TaskGraph node.
+            if let Some(aid) = agent_id {
+                if let Some(rt) = &core.runtime {
+                    if let Ok(r) = rt.try_read() {
+                        let mut graph = r.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                        let needs_task = core.agent_pool.try_read().ok().map(|p| p.get_agent(&aid).and_then(|a| a.task_id).is_none()).unwrap_or(false);
+                        if needs_task {
+                            let tid = graph.spawn_root(&input);
+                            graph.mark_decomposed(tid).ok();
+                            if let Ok(mut pool) = core.agent_pool.try_write() {
+                                if let Some(agent) = pool.get_agent_mut(&aid) {
+                                    agent.task_id = Some(tid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             let provider = core
                 .runtime
                 .as_ref()
