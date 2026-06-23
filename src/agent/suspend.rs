@@ -54,19 +54,24 @@ impl SuspendQueue {
             enqueued_at: std::time::Instant::now(),
         };
 
+        // SORTING INVARIANT: NaN values sort as Less-than-everything.
+        // When BOTH priorities are NaN, we must return Equal to keep
+        // binary_search_by consistent (a == b → b == a).
         let pos = self
             .queue
             .binary_search_by(|r| {
-                match (priority.is_nan(), r.priority.is_nan()) {
-                    // NaN always sorts first (Less = before existing)
-                    (true, _) => std::cmp::Ordering::Less,
-                    // Non-NaN goes after NaN
-                    (_, true) => std::cmp::Ordering::Greater,
-                    // Both normal floats: use partial_cmp
-                    _ => priority
-                        .partial_cmp(&r.priority)
-                        .unwrap_or(std::cmp::Ordering::Equal),
+                if priority.is_nan() && r.priority.is_nan() {
+                    return std::cmp::Ordering::Equal;
                 }
+                if priority.is_nan() {
+                    return std::cmp::Ordering::Less;
+                }
+                if r.priority.is_nan() {
+                    return std::cmp::Ordering::Greater;
+                }
+                priority
+                    .partial_cmp(&r.priority)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .unwrap_or_else(|p| p);
         self.queue.insert(pos, entry);

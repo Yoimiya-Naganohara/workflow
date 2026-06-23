@@ -299,7 +299,14 @@ impl LlmProvider {
     {
         let stream = stream! {
             let mut stream = stream;
+            // Track tool calls for duplicate detection.
+            // Key = "tool_name:args_json", value = count of repeats.
+            // Detects when the LLM calls the exact same tool with the exact
+            // same arguments 3+ times — a reliable indicator of a tool loop.
+            let mut dup_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
             while let Some(item) = stream.next().await {
+
                 match item {
                     Ok(MultiTurnStreamItem::StreamAssistantItem(
                         StreamedAssistantContent::Text(Text { text, .. }),
@@ -314,6 +321,28 @@ impl LlmProvider {
                     )) => {
                         let tool_name = tool_call.function.name.clone();
                         let args = tool_call.function.arguments.clone();
+
+                        // ── Duplicate detection: same tool + same args ──
+                        let call_key = format!("{}:{}", tool_name, args);
+                        let count = dup_count.entry(call_key).or_insert(0);
+                        *count += 1;
+
+                        if *count >= 3 {
+                            tracing::warn!(
+                                "Forcing tool loop close: '{}' called {} times with same args",
+                                tool_name,
+                                count
+                            );
+                            yield ToolEvent::Text(format!(
+                                "\n\n[Tool loop detected: '{}' repeated {} times. Generating summary.]\n",
+                                tool_name, count
+                            ));
+                            yield ToolEvent::Done {
+                                reason: DoneReason::LoopTerminated,
+                            };
+                            break;
+                        }
+
                         yield ToolEvent::ToolCall {
                             name: tool_name,
                             args,
@@ -323,17 +352,13 @@ impl LlmProvider {
                     Ok(MultiTurnStreamItem::StreamAssistantItem(
                         StreamedAssistantContent::Reasoning(reasoning),
                     )) => {
-                        // Surface reasoning as text so user can see chain-of-thought
                         for block in reasoning.content {
                             if let rig::message::ReasoningContent::Text { text, .. } = block {
-                                yield ToolEvent::Text(text);
+                                yield ToolEvent::Reasoning(text);
                             }
                         }
                     }
-                    Ok(MultiTurnStreamItem::CompletionCall(_call)) => {
-                        // Per-request usage skipped — FinalResponse below carries
-                        // the aggregate across all turns in the multi-turn stream.
-                    }
+                    Ok(MultiTurnStreamItem::CompletionCall(_call)) => {}
                     Ok(MultiTurnStreamItem::FinalResponse(response)) => {
                         let usage = response.usage();
                         if usage.input_tokens > 0 || usage.output_tokens > 0 {
@@ -344,13 +369,17 @@ impl LlmProvider {
                                 cache_creation_input: usage.cache_creation_input_tokens as u32,
                             };
                         }
-                        yield ToolEvent::Done;
+                        yield ToolEvent::Done {
+                            reason: DoneReason::Normal,
+                        };
                         break;
                     }
                     Ok(_) => {}
                     Err(err) => {
                         yield ToolEvent::Text(err.to_string());
-                        yield ToolEvent::Done;
+                        yield ToolEvent::Done {
+                            reason: DoneReason::StreamError,
+                        };
                         break;
                     }
                 }
@@ -380,7 +409,12 @@ mod tests {
             cache_creation_input: 20,
         };
         match event {
-            ToolEvent::TokenUsage { input, output, cached_input, cache_creation_input } => {
+            ToolEvent::TokenUsage {
+                input,
+                output,
+                cached_input,
+                cache_creation_input,
+            } => {
                 assert_eq!(input, 150);
                 assert_eq!(output, 75);
                 assert_eq!(cached_input, 10);
@@ -455,8 +489,26 @@ mod tests {
 
     #[test]
     fn test_tool_event_done() {
-        let event = ToolEvent::Done;
-        assert!(matches!(event, ToolEvent::Done));
+        let event = ToolEvent::Done {
+            reason: DoneReason::Normal,
+        };
+        assert!(matches!(event, ToolEvent::Done { .. }));
+    }
+
+    #[test]
+    fn test_tool_event_done_reason_variants() {
+        for reason in &[
+            DoneReason::Normal,
+            DoneReason::LoopTerminated,
+            DoneReason::StreamError,
+        ] {
+            let event = ToolEvent::Done { reason: *reason };
+            if let ToolEvent::Done { reason: r } = event {
+                assert_eq!(r, *reason);
+            } else {
+                panic!("expected Done");
+            }
+        }
     }
 
     #[test]

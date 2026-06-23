@@ -22,6 +22,10 @@ pub struct AgentRuntimeConfig {
     /// Path to the bedrock experience pool mmap file.
     /// Defaults to `~/.workflow/experience_a.bin`.
     pub bedrock_path: Option<std::path::PathBuf>,
+    /// Path to the role template store JSON file.
+    /// Defaults to `~/.workflow/role_templates.json`.
+    /// Set to a temp dir in tests to avoid writing to the user's config.
+    pub role_template_path: Option<std::path::PathBuf>,
 }
 
 impl Default for AgentRuntimeConfig {
@@ -35,6 +39,7 @@ impl Default for AgentRuntimeConfig {
             semantic_conflict_threshold: crate::core::types::DEFAULT_SEMANTIC_THRESHOLD,
             suspend_timeout_ms: crate::core::types::DEFAULT_SUSPEND_TIMEOUT_MS,
             bedrock_path: None,
+            role_template_path: None,
         }
     }
 }
@@ -180,6 +185,7 @@ mod tests {
             semantic_conflict_threshold: -0.3,
             suspend_timeout_ms: 100,
             bedrock_path: Some(std::path::PathBuf::from("/tmp/test.bin")),
+            role_template_path: Some(std::path::PathBuf::from("/tmp/test_roles.json")),
         };
         assert_eq!(cfg.max_concurrent_agents, 5);
         assert_eq!(cfg.admission_timeout_ms, 200);
@@ -191,6 +197,10 @@ mod tests {
         assert_eq!(
             cfg.bedrock_path.as_deref(),
             Some(std::path::Path::new("/tmp/test.bin"))
+        );
+        assert_eq!(
+            cfg.role_template_path.as_deref(),
+            Some(std::path::Path::new("/tmp/test_roles.json"))
         );
     }
 

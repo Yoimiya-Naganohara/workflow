@@ -104,8 +104,16 @@ impl Tui {
         .max(1) as usize;
 
         let total = self.chat_lines_cache.total_lines();
-        let max_scroll = total.saturating_sub(visible_height);
-        let chat_scroll = if state.ui.auto_scroll {
+        let max_scroll = self
+            .chat_lines_cache
+            .max_scroll_for_height(visible_height, chat_width);
+        let reached_bottom = !state.ui.auto_scroll && state.ui.chat_scroll >= max_scroll;
+        let chat_scroll = if state.ui.auto_scroll || reached_bottom {
+            if reached_bottom {
+                // User scrolled to the bottom — re-enable auto-scroll
+                // so new streaming content follows naturally.
+                // (Applied in the write section below.)
+            }
             max_scroll
         } else {
             state.ui.chat_scroll.min(max_scroll)
@@ -135,6 +143,7 @@ impl Tui {
                     .min(tree_lines.len().saturating_sub(1));
             s.ui.total_chat_lines = total;
             s.ui.chat_scroll = chat_scroll;
+            s.ui.auto_scroll = s.ui.auto_scroll || reached_bottom;
             s.ui.embedding_cache = embedding_cache;
         }
         let state = self.state.read().await;

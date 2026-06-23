@@ -3,9 +3,17 @@ pub mod llm;
 use crate::core::conflict::{ArbitrationResult, ConflictManifest};
 use crate::core::types::AgentId;
 
+/// If no successful audit happens within this many seconds, the
+/// collapse counter decays by one (allowing eventual recovery from
+/// transient failures).
+const COLLAPSE_RECOVERY_SECS: u64 = 300;
+
 pub struct L2RuleAuditEngine {
     max_consecutive_failures: u32,
     consecutive_failures: u32,
+    /// Unix epoch seconds of the most recent high-risk failure.
+    /// Used for time-based recovery from collapse.
+    last_failure_at: u64,
 }
 
 impl L2RuleAuditEngine {
@@ -13,13 +21,37 @@ impl L2RuleAuditEngine {
         Self {
             max_consecutive_failures,
             consecutive_failures: 0,
+            last_failure_at: 0,
+        }
+    }
+
+    /// Apply time-based decay: if enough time has passed since the last
+    /// failure, reduce the consecutive failure counter.
+    fn decay_failures(&mut self) {
+        if self.consecutive_failures == 0 {
+            return;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if now.saturating_sub(self.last_failure_at) >= COLLAPSE_RECOVERY_SECS {
+            self.consecutive_failures = self.consecutive_failures.saturating_sub(1);
+            self.last_failure_at = now;
         }
     }
 
     pub fn audit(&mut self, manifest: &ConflictManifest) -> L2RuleAuditResult {
+        // Attempt time-based recovery before checking collapse.
+        self.decay_failures();
+
         if self.consecutive_failures >= self.max_consecutive_failures {
             self.consecutive_failures =
                 (self.consecutive_failures + 1).min(self.max_consecutive_failures + 10);
+            self.last_failure_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
             return L2RuleAuditResult {
                 decision: ArbitrationResult::Prune(manifest.contending_agents.to_vec()),
                 risk_statement: "L2 collapsed due to consecutive failures".to_string(),
@@ -40,6 +72,10 @@ impl L2RuleAuditEngine {
         let risk = self.assess_risk(manifest);
         let decision = if risk.is_high {
             self.consecutive_failures += 1;
+            self.last_failure_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
             ArbitrationResult::Prune(manifest.contending_agents.to_vec())
         } else {
             self.consecutive_failures = 0;
@@ -97,6 +133,7 @@ impl L2RuleAuditEngine {
 
     pub fn reset_failures(&mut self) {
         self.consecutive_failures = 0;
+        self.last_failure_at = 0;
     }
 }
 
@@ -147,6 +184,9 @@ impl AuditEngine for L2RuleAuditEngine {
         &mut self,
         request: &crate::core::types::SpawnRequest,
     ) -> Option<crate::core::types::SpawnRejection> {
+        // Attempt time-based recovery from collapse before rejecting.
+        self.decay_failures();
+
         // Reject if collapsed.
         if self.consecutive_failures >= self.max_consecutive_failures {
             return Some(crate::core::types::SpawnRejection::L2Collapsed);

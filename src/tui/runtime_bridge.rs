@@ -56,7 +56,7 @@ pub async fn runtime_event_broker(
                     u16::from(child_id[0]) << 8 | u16::from(child_id[1])
                 );
                 let preview: String = result.chars().take(120).collect();
-                let content = format!("✅ Agent {} completed\n{}", id_str, preview);
+                let content = format!("[OK] Agent {} completed\n{}", id_str, preview);
 
                 // ── Inject child result into parent agent's LLM context ──
                 // So the AGENT sees the result on its next LLM call.
@@ -131,7 +131,7 @@ pub async fn runtime_event_broker(
                     u16::from(agent_id[0]) << 8 | u16::from(agent_id[1])
                 );
                 let content = format!(
-                    "📨 Message from {} → {} ({} unread)",
+                    "Message from {} -> {} ({} unread)",
                     from_name, id_str, unread_count
                 );
                 let _ = app_tx.send(crate::tui::effect::AppEvent::SystemLog { content });

@@ -53,12 +53,30 @@ pub(crate) static AMBIGUITY_PHRASE: &str =
     "Make it better, improve this, fix things up, do something";
 
 pub(crate) static DOMAIN_PHRASES: &[(&str, &str)] = &[
-    ("backend", "Build server-side API, database, authentication, business logic"),
-    ("frontend", "Build UI, client-side, user interface, dashboard, web pages"),
-    ("database", "Schema, tables, migrations, data model, query optimization"),
-    ("devops", "Deploy, CI/CD, Docker, infrastructure, monitoring, scaling"),
-    ("security", "Authentication, authorization, permissions, encryption, audit"),
-    ("testing", "Unit tests, integration tests, QA, validation, assertions"),
+    (
+        "backend",
+        "Build server-side API, database, authentication, business logic",
+    ),
+    (
+        "frontend",
+        "Build UI, client-side, user interface, dashboard, web pages",
+    ),
+    (
+        "database",
+        "Schema, tables, migrations, data model, query optimization",
+    ),
+    (
+        "devops",
+        "Deploy, CI/CD, Docker, infrastructure, monitoring, scaling",
+    ),
+    (
+        "security",
+        "Authentication, authorization, permissions, encryption, audit",
+    ),
+    (
+        "testing",
+        "Unit tests, integration tests, QA, validation, assertions",
+    ),
 ];
 
 /// Pre-computed reference embeddings.  Built once at runtime init.
@@ -90,7 +108,11 @@ impl ReferenceEmbeddings {
             }
         }
 
-        Self { role_prototypes: role_protos, ambiguity_reference: ambiguity_ref, domain_references: domain_refs }
+        Self {
+            role_prototypes: role_protos,
+            ambiguity_reference: ambiguity_ref,
+            domain_references: domain_refs,
+        }
     }
 }
 
@@ -119,7 +141,10 @@ impl EmbeddingGoalAnalyzer {
         }
     }
 
-    pub fn with_goal(references: ReferenceEmbeddings, goal_embedding: [f32; EMBEDDING_DIM]) -> Self {
+    pub fn with_goal(
+        references: ReferenceEmbeddings,
+        goal_embedding: [f32; EMBEDDING_DIM],
+    ) -> Self {
         let mut s = Self::new(references);
         s.goal_embedding = Mutex::new(Some(goal_embedding));
         s
@@ -142,8 +167,12 @@ impl GoalAnalyzer for EmbeddingGoalAnalyzer {
             Some(e) => e,
             None => return 0,
         };
-        let c = self.domain_references.iter()
-            .filter(|(_, ref_emb)| cosine_similarity_384(&goal_emb, ref_emb) > self.domain_threshold)
+        let c = self
+            .domain_references
+            .iter()
+            .filter(|(_, ref_emb)| {
+                cosine_similarity_384(&goal_emb, ref_emb) > self.domain_threshold
+            })
             .count() as u32;
         if c > 0 { c } else { 1 }
     }
@@ -169,9 +198,13 @@ impl GoalAnalyzer for EmbeddingGoalAnalyzer {
             }
         }
         best.or_else(|| {
-            self.role_prototypes.iter()
-                .max_by(|a, b| cosine_similarity_384(&goal_emb, &a.1)
-                    .partial_cmp(&cosine_similarity_384(&goal_emb, &b.1)).unwrap())
+            self.role_prototypes
+                .iter()
+                .max_by(|a, b| {
+                    cosine_similarity_384(&goal_emb, &a.1)
+                        .partial_cmp(&cosine_similarity_384(&goal_emb, &b.1))
+                        .unwrap()
+                })
                 .map(|(role, prot_emb)| (role.clone(), cosine_similarity_384(&goal_emb, prot_emb)))
         })
     }
@@ -188,9 +221,15 @@ pub struct MockGoalAnalyzer {
 }
 
 impl GoalAnalyzer for MockGoalAnalyzer {
-    fn estimate_domain_count(&self, _goal: &str) -> u32 { self.domain_count }
-    fn estimate_ambiguity(&self, _goal: &str) -> f32 { self.ambiguity }
-    fn estimate_role(&self, _goal: &str) -> Option<(String, f32)> { self.role.clone() }
+    fn estimate_domain_count(&self, _goal: &str) -> u32 {
+        self.domain_count
+    }
+    fn estimate_ambiguity(&self, _goal: &str) -> f32 {
+        self.ambiguity
+    }
+    fn estimate_role(&self, _goal: &str) -> Option<(String, f32)> {
+        self.role.clone()
+    }
 }
 
 // ============================================================================
@@ -203,7 +242,11 @@ mod tests {
 
     #[test]
     fn test_mock_goal_analyzer() {
-        let a = MockGoalAnalyzer { domain_count: 3, ambiguity: 0.8, role: Some(("tester".into(), 0.95)) };
+        let a = MockGoalAnalyzer {
+            domain_count: 3,
+            ambiguity: 0.8,
+            role: Some(("tester".into(), 0.95)),
+        };
         assert_eq!(a.estimate_domain_count("anything"), 3);
         assert!((a.estimate_ambiguity("anything") - 0.8).abs() < 1e-6);
         assert_eq!(a.estimate_role("anything"), Some(("tester".into(), 0.95)));

@@ -87,15 +87,17 @@ impl Tui {
 
         // ── Wire runtime event channel and spawn event loop + broker ──
         // Channel 1: tools → event loop (ActivateAgent)
-        let (runtime_tx, event_loop_rx) =
-            tokio::sync::mpsc::channel::<crate::runtime::RuntimeEvent>(256);
+        let (runtime_tx, event_loop_rx) = tokio::sync::mpsc::channel::<crate::runtime::RuntimeEvent>(
+            crate::core::types::RUNTIME_CHANNEL_CAPACITY,
+        );
         {
             let mut s = self.state.write().await;
             s.core.runtime_event_tx = Some(runtime_tx);
         }
         // Channel 2: event loop → broker (ChildCompleted, AggregationCompleted, etc.)
-        let (broker_tx, broker_rx) =
-            tokio::sync::mpsc::channel::<crate::runtime::RuntimeEvent>(256);
+        let (broker_tx, broker_rx) = tokio::sync::mpsc::channel::<crate::runtime::RuntimeEvent>(
+            crate::core::types::RUNTIME_CHANNEL_CAPACITY,
+        );
 
         let state_clone = self.state.clone();
         let pool = state_clone.read().await.core.agent_pool.clone();

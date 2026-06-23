@@ -140,8 +140,12 @@ impl LlmProvider {
         let mut last_error = None;
         for attempt in 0..=max_retries {
             let result = tokio::time::timeout(timeout, async {
-                let (content, tokens_used, cached_input_tokens, cache_creation_input_tokens):
-                    (String, u32, u32, u32) = match self {
+                let (content, tokens_used, cached_input_tokens, cache_creation_input_tokens): (
+                    String,
+                    u32,
+                    u32,
+                    u32,
+                ) = match self {
                     Self::OpenAi(c) => complete_ext!(c),
                     Self::Anthropic(c) => complete_ext!(c),
                     Self::Cohere(c) => complete_ext!(c),
@@ -200,6 +204,62 @@ impl LlmProvider {
 
     pub async fn complete(&self, request: LlmRequest) -> Result<LlmResponse> {
         self.do_complete(request).await
+    }
+
+    /// Build reasoning parameters from an effort level and the model's
+    /// `reasoning_options` (parsed from `api.json`).
+    ///
+    /// For OpenAI-compatible providers: `{"reasoning_effort": effort}`
+    /// For Anthropic: `{"thinking": {"type": "enabled", "effort": effort, "budget_tokens": N}}`
+    /// For others: returns `None`.
+    pub fn reasoning_params(
+        &self,
+        effort: &str,
+        reasoning_options: &[crate::models::ReasoningOption],
+    ) -> Option<serde_json::Value> {
+        match self {
+            // OpenAI / Azure / Copilot — flat `reasoning_effort`.
+            Self::OpenAi(_) | Self::Azure(_) | Self::Copilot(_) => {
+                Some(serde_json::json!({"reasoning_effort": effort}))
+            }
+            // Anthropic — structured thinking block.
+            // Parse reasoning_options to determine effort + budget_tokens.
+            Self::Anthropic(_) => {
+                use crate::models::ReasoningOption;
+                let mut params = serde_json::json!({
+                    "thinking": {
+                        "type": "enabled"
+                    }
+                });
+                if let Some(obj) = params.as_object_mut() {
+                    if let Some(thinking) = obj.get_mut("thinking").and_then(|v| v.as_object_mut())
+                    {
+                        for opt in reasoning_options {
+                            match opt {
+                                ReasoningOption::Effort { values } => {
+                                    if values.is_empty() || values.contains(&effort.to_string()) {
+                                        thinking.insert("effort".into(), serde_json::json!(effort));
+                                    }
+                                }
+                                ReasoningOption::BudgetTokens { .. } => {
+                                    let budget = match effort {
+                                        "low" => 8192,
+                                        "medium" => 16384,
+                                        "high" => 32768,
+                                        _ => 16384,
+                                    };
+                                    thinking
+                                        .insert("budget_tokens".into(), serde_json::json!(budget));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Some(params)
+            }
+            _ => None,
+        }
     }
 }
 

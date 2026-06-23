@@ -47,6 +47,7 @@ pub enum Effect {
         runtime: Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
         abort_registration: futures::future::AbortRegistration,
         reasoning_effort: Option<String>,
+        reasoning_options: Vec<crate::models::ReasoningOption>,
     },
     /// Compute embeddings for all roles missing them.
     ComputeRoleEmbeddings,
@@ -309,14 +310,11 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
             runtime,
             abort_registration,
             reasoning_effort,
+            reasoning_options,
         } => {
-            let additional_params = reasoning_effort.as_ref().map(|effort| {
-                serde_json::json!({
-                    "reasoning": {
-                        "effort": effort
-                    }
-                })
-            });
+            let additional_params = reasoning_effort
+                .as_ref()
+                .and_then(|effort| provider.reasoning_params(effort, &reasoning_options));
             let mut stream = match provider
                 .chat_with_tools_stream_mcp(
                     &model_id,
@@ -370,7 +368,12 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                                     timestamp,
                                 });
                             }
-                            ToolEvent::TokenUsage { input, output, cached_input, cache_creation_input } => {
+                            ToolEvent::TokenUsage {
+                                input,
+                                output,
+                                cached_input,
+                                cache_creation_input,
+                            } => {
                                 let _ = tx.send(AppEvent::ChatTokenUsage {
                                     response_index,
                                     input,
@@ -379,7 +382,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                                     cache_creation_input,
                                 });
                             }
-                            ToolEvent::Done => {
+                            ToolEvent::Done { .. } => {
                                 done_received = true;
                                 break;
                             }
@@ -534,11 +537,15 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
             let cfg = crate::reflection::ReflectionConfig::default();
             let tool_trace = ""; // tools are not tracked in this context yet
 
-            // Run rules. Semantic rules need the embedding service; obtain it
-            // inside a block so the RwLockReadGuard is dropped before `runtime`
-            // is moved into the SelfCheckResult event.
+            // Run rules. Semantic rules need the embedding service.
+            // Use read().await (not blocking_read()) to avoid panicking
+            // on current-thread tokio runtimes.
             let report = {
-                let embed_guard = runtime.as_ref().map(|rt| rt.blocking_read());
+                let embed_guard = if let Some(ref rt) = runtime {
+                    Some(rt.read().await)
+                } else {
+                    None
+                };
                 let embed_service = embed_guard.as_ref().map(|guard| guard.embedding_service());
                 let embed_ref: Option<&dyn crate::llm::EmbeddingService> = embed_service
                     .as_ref()
@@ -655,6 +662,39 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
 // ═══════════════════════════════════════════════════════════════
 
 fn format_tool_args(args: &serde_json::Value) -> String {
-    // Always use pretty-printing so each argument is on its own line.
-    serde_json::to_string_pretty(args).unwrap_or_else(|_| format!("{:?}", args))
+    // Flatten JSON object to key=value pairs, one per line.
+    // This is much more compact and readable than pretty-printed JSON.
+    match args {
+        serde_json::Value::Object(map) => {
+            let mut parts: Vec<String> = Vec::new();
+            for (key, val) in map {
+                let val_str = match val {
+                    serde_json::Value::String(s) => format!("{}", s),
+                    serde_json::Value::Number(n) => format!("{}", n),
+                    serde_json::Value::Bool(b) => format!("{}", b),
+                    serde_json::Value::Null => String::new(),
+                    // Arrays/objects: stringify compactly, truncated to 60 chars
+                    other => {
+                        let s = serde_json::to_string(other).unwrap_or_default();
+                        if s.len() > 60 {
+                            format!("{}…", &s[..57])
+                        } else {
+                            s
+                        }
+                    }
+                };
+                let line = if val_str.is_empty() {
+                    key.clone()
+                } else if val_str.contains(char::is_whitespace) || val_str.contains('=') {
+                    format!("{}=\"{}\"", key, val_str)
+                } else {
+                    format!("{}={}", key, val_str)
+                };
+                parts.push(line);
+            }
+            parts.join("\n")
+        }
+        // Non-object args: stringify compactly.
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
 }

@@ -28,9 +28,9 @@ pub fn status(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
         format!(
             "Reflection:      {}",
             if core.reflection.auto_reflect {
-                "🟢 on"
+                "on"
             } else {
-                "🔴 off"
+                "off"
             }
         ),
         format!(
@@ -80,7 +80,10 @@ pub fn shell(inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
         };
         state.popup_selected = 0;
     } else {
-        state.core.messages.push(ChatMessage::system(format!("$ {}", cmd)));
+        state
+            .core
+            .messages
+            .push(ChatMessage::system(format!("$ {}", cmd)));
         state.effects.push(Effect::ExecuteShell { command: cmd });
     }
     CommandResult::handled()
@@ -134,6 +137,39 @@ pub fn think_set(inv: &CommandInvocation, state: &mut AppState) -> CommandResult
         .first()
         .or_else(|| inv.command_path.last())
         .map(|s| s.as_str());
+
+    // Check reasoning effort keywords first.
+    if let Some(s) = setting {
+        let effort = match s {
+            "low" | "min" => Some("low"),
+            "medium" | "med" | "mid" => Some("medium"),
+            "high" | "max" | "deep" => Some("high"),
+            _ => None,
+        };
+        if let Some(e) = effort {
+            state.ui.reasoning_effort = Some(e.to_string());
+            state.ui.think_level = 2;
+            // Look up the current model's reasoning_options from api.json
+            // and store them in the pool for dynamic parameter building.
+            let opts = state.core.selected_models.first().and_then(|sel| {
+                state
+                    .core
+                    .models
+                    .get_model(&sel.provider_id, &sel.model_id)
+                    .map(|m| m.reasoning_options.clone())
+            });
+            if let Ok(mut pool) = state.core.agent_pool.try_write() {
+                pool.reasoning_effort = Some(e.to_string());
+                pool.reasoning_options = opts.unwrap_or_default();
+            }
+            state.core.messages.push(ChatMessage::system(format!(
+                "Reasoning effort: {}, display: full",
+                e
+            )));
+            return CommandResult::handled();
+        }
+    }
+
     let level = setting
         .and_then(|s| match s {
             "on" | "full" | "2" => Some(2u8),
@@ -144,6 +180,14 @@ pub fn think_set(inv: &CommandInvocation, state: &mut AppState) -> CommandResult
         .unwrap_or((state.ui.think_level + 1) % 3)
         .min(2);
     state.ui.think_level = level;
+    if level == 0 {
+        // Hiding reasoning also disables reasoning effort.
+        state.ui.reasoning_effort = None;
+        if let Ok(mut pool) = state.core.agent_pool.try_write() {
+            pool.reasoning_effort = None;
+            pool.reasoning_options = vec![];
+        }
+    }
     state.core.messages.push(ChatMessage::system(format!(
         "Reasoning display set to: {} ({})",
         ["hidden", "brief", "full"][level as usize],
@@ -153,9 +197,16 @@ pub fn think_set(inv: &CommandInvocation, state: &mut AppState) -> CommandResult
 }
 
 pub fn think_status(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+    let effort = state
+        .ui
+        .reasoning_effort
+        .as_ref()
+        .map(|e| format!(", effort: {}", e))
+        .unwrap_or_default();
     state.core.messages.push(ChatMessage::system(format!(
-        "Reasoning display: {}",
-        ["hidden (0)", "brief (1)", "full (2)"][state.ui.think_level as usize]
+        "Reasoning display: {} {}",
+        ["hidden (0)", "brief (1)", "full (2)"][state.ui.think_level as usize],
+        effort
     )));
     CommandResult::handled()
 }
@@ -266,7 +317,7 @@ pub fn session_switch(inv: &CommandInvocation, state: &mut AppState) -> CommandR
         crate::tui::controller::switch_session(&mut state.core, &mut state.ui, name);
         state.ui.auto_scroll = true;
         state.core.messages.push(ChatMessage::system(format!(
-            "🔄 Switched to session '{}' ({} messages).",
+            "Switched to session '{}' ({} messages).",
             name, count
         )));
     }
@@ -639,7 +690,7 @@ pub fn agent_inspect(inv: &CommandInvocation, state: &mut AppState) -> CommandRe
 pub fn reflect_on(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
     state.core.reflection.auto_reflect = true;
     state.core.messages.push(ChatMessage::system(
-        "🟢 Reflection enabled — agent responses will be self-checked after each turn.",
+        "Reflection enabled — agent responses will be self-checked after each turn.",
     ));
     CommandResult::handled()
 }
@@ -649,7 +700,7 @@ pub fn reflect_off(_inv: &CommandInvocation, state: &mut AppState) -> CommandRes
     state
         .core
         .messages
-        .push(ChatMessage::system("🔴 Reflection disabled."));
+        .push(ChatMessage::system("Reflection disabled."));
     CommandResult::handled()
 }
 
@@ -678,7 +729,7 @@ pub fn reflect_status(_inv: &CommandInvocation, state: &mut AppState) -> Command
     .collect();
     state.core.messages.push(ChatMessage::system(format!(
         "Reflection: {}\nMax retries: {}\nRules:\n{}",
-        if enabled { "🟢 on" } else { "🔴 off" },
+        if enabled { "on" } else { "off" },
         state.core.reflection.max_attempts,
         rules.join("\n")
     )));

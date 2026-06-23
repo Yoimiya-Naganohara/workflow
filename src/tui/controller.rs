@@ -316,7 +316,7 @@ pub async fn load_initial_state(state: &mut AppState) {
         let count = session.len();
         state.core.messages.append(&mut session);
         state.core.messages.push(ChatMessage::system(format!(
-            "📋 Restored {} messages from previous session",
+            "Restored {} messages from previous session",
             count,
         )));
     }

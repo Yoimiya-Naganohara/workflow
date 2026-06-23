@@ -194,6 +194,12 @@ pub struct AgentPool {
     /// Maximum number of agents in the pool. When exceeded, the least
     /// recently used Completed/Failed/Idle agents are evicted (LRU).
     pub max_agents: usize,
+    /// Reasoning effort passed to compatible LLM providers.
+    /// `None` = no reasoning, `Some("low"/"medium"/"high")` = effort level.
+    pub reasoning_effort: Option<String>,
+    /// Reasoning options parsed from `api.json` for the current model.
+    /// Used to build provider-specific reasoning parameters dynamically.
+    pub reasoning_options: Vec<crate::models::ReasoningOption>,
 }
 
 impl Default for AgentPool {
@@ -211,8 +217,10 @@ impl AgentPool {
             budget_guards: HashMap::new(),
             role_memos: HashMap::new(),
             pending_deps: HashMap::new(),
-            ttl_secs: 3600,
+            ttl_secs: crate::core::types::SECONDS_PER_HOUR,
             max_agents: crate::core::constants::DEFAULT_MAX_AGENTS,
+            reasoning_effort: None,
+            reasoning_options: vec![],
         }
     }
 

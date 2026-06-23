@@ -22,6 +22,7 @@
 //! The header contains a magic number, version, entry count and
 //! capacity so the file can be grown incrementally.
 
+use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,7 +60,30 @@ struct PoolHeader {
     entry_size: u32, // sizeof(ExperienceEntry) – validation
     capacity: u32,   // max entries the current file can hold
     count: u32,      // current entries
-    _pad: [u8; 44],  // 64-byte header total
+    checksum: u32,   // hash of header+entries — catches file corruption
+    _pad: [u8; 40],  // 64-byte header total (padding after checksum)
+}
+
+impl PoolHeader {
+    /// Compute a checksum over all header fields (with `checksum` treated as 0)
+    /// plus the raw bytes of all entries.
+    fn compute_checksum(capacity: u32, count: u32, entries_bytes: &[u8]) -> u32 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        MAGIC.hash(&mut hasher);
+        VERSION.hash(&mut hasher);
+        (EXPERIENCE_SIZE as u32).hash(&mut hasher);
+        capacity.hash(&mut hasher);
+        count.hash(&mut hasher);
+        // The checksum field itself is NOT hashed (treated as 0).
+        0u32.hash(&mut hasher);
+        entries_bytes.hash(&mut hasher);
+        hasher.finish() as u32
+    }
+
+    fn verify(&self, entries_bytes: &[u8]) -> bool {
+        let expected = Self::compute_checksum(self.capacity, self.count, entries_bytes);
+        self.checksum == expected
+    }
 }
 
 #[allow(unused)]
@@ -133,7 +157,8 @@ impl ExperiencePool {
                     entry_size: EXPERIENCE_SIZE as u32,
                     capacity: cap as u32,
                     count: 0,
-                    _pad: [0u8; 44],
+                    checksum: PoolHeader::compute_checksum(cap as u32, 0, &[]),
+                    _pad: [0u8; 40],
                 };
                 unsafe {
                     std::ptr::copy_nonoverlapping(
@@ -169,10 +194,10 @@ impl ExperiencePool {
             return Ok((Vec::new(), None, None, DEFAULT_CAPACITY));
         }
 
+        // Verify checksum against the entries data that follows the header.
+        // Only hash the bytes for the declared `count` entries — trailing
+        // zeros beyond count are not part of the checksum computation.
         let count = header.count as usize;
-        let capacity = header.capacity as usize;
-
-        // Validate count against mmap file size — prevent UB from corrupted header.
         let file_bytes = ro.len();
         let max_entries =
             file_bytes.saturating_sub(HEADER_SIZE) / std::mem::size_of::<ExperienceEntry>();
@@ -185,6 +210,15 @@ impl ExperiencePool {
         } else {
             count
         };
+
+        let entries_bytes_len = count * std::mem::size_of::<ExperienceEntry>();
+        let entries_raw = &ro[HEADER_SIZE..HEADER_SIZE + entries_bytes_len];
+        if !header.verify(entries_raw) {
+            warn!("Experience pool file has corrupt data (checksum mismatch) – starting fresh");
+            return Ok((Vec::new(), None, None, DEFAULT_CAPACITY));
+        }
+
+        let capacity = header.capacity as usize;
 
         let entries: &[ExperienceEntry] = unsafe {
             std::slice::from_raw_parts(
@@ -289,10 +323,20 @@ impl ExperiencePool {
             .as_mut()
             .expect("mmap_mut must exist after grow");
 
-        // Update header count.
+        let entries_bytes_slice = unsafe {
+            std::slice::from_raw_parts(
+                self.entries.as_ptr() as *const u8,
+                self.entries.len() * EXPERIENCE_SIZE,
+            )
+        };
+        let checksum =
+            PoolHeader::compute_checksum(self.capacity as u32, count as u32, entries_bytes_slice);
+
+        // Write header with checksum.
         {
             let header: &mut PoolHeader = unsafe { &mut *(mm.as_mut_ptr() as *mut PoolHeader) };
             header.count = count as u32;
+            header.checksum = checksum;
         }
 
         // Write entries.
@@ -328,13 +372,25 @@ impl ExperiencePool {
         let mut mm = unsafe { MmapMut::map_mut(&file)? };
 
         // Write updated header.
+        let entries_bytes_slice = unsafe {
+            std::slice::from_raw_parts(
+                self.entries.as_ptr() as *const u8,
+                self.entries.len() * EXPERIENCE_SIZE,
+            )
+        };
+        let checksum = PoolHeader::compute_checksum(
+            new_capacity as u32,
+            self.entries.len() as u32,
+            entries_bytes_slice,
+        );
         let header = PoolHeader {
             magic: MAGIC,
             version: VERSION,
             entry_size: EXPERIENCE_SIZE as u32,
             capacity: new_capacity as u32,
             count: self.entries.len() as u32,
-            _pad: [0u8; 44],
+            checksum,
+            _pad: [0u8; 40],
         };
         unsafe {
             std::ptr::copy_nonoverlapping(

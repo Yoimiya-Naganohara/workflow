@@ -722,7 +722,7 @@ impl RuntimeEventLoop {
                         };
                         if agent.child_results.is_empty() {
                             format!(
-                                "⚠️ Aggregation synthesis failed: {}\n\nAll sub-tasks completed but no results were captured.",
+                                "Aggregation synthesis failed: {}\n\nAll sub-tasks completed but no results were captured.",
                                 e
                             )
                         } else {
@@ -732,7 +732,7 @@ impl RuntimeEventLoop {
                                 .map(|(_id, r)| r.clone())
                                 .collect();
                             format!(
-                                "⚠️ Aggregation synthesis failed ({}).  Raw sub-task results:\n\n---\n{}\n\n---\n*Degraded output*",
+                                "Aggregation synthesis failed ({}).  Raw sub-task results:\n\n---\n{}\n\n---\n*Degraded output*",
                                 e,
                                 parts.join("\n\n---\n\n")
                             )

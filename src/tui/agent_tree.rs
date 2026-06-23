@@ -25,11 +25,11 @@ pub struct TreeLine {
 fn status_tag(status: &AgentStatus) -> &'static str {
     match status {
         AgentStatus::Idle => "[Idle]",
-        AgentStatus::Planning => "[Planning] ⠋",
-        AgentStatus::AwaitingChildren => "[Awaiting] ⏸",
-        AgentStatus::Aggregating => "[Aggregating] ──",
-        AgentStatus::Completed => "[Completed] ✅",
-        AgentStatus::Failed => "[Failed] ❌",
+        AgentStatus::Planning => "[Planning]",
+        AgentStatus::AwaitingChildren => "[Awaiting]",
+        AgentStatus::Aggregating => "[Aggregating]",
+        AgentStatus::Completed => "[Completed]",
+        AgentStatus::Failed => "[Failed]",
     }
 }
 
@@ -51,10 +51,10 @@ fn build_diagnostic_tree(
 
     // Prefix construction
     let prefix = if depth == 0 {
-        "● ".to_string()
+        "* ".to_string()
     } else {
         let indent = "  ".repeat(depth.saturating_sub(1));
-        let branch = if is_last { "└─◆ " } else { "├─◆ " };
+        let branch = if is_last { "`-* " } else { "|-* " };
         format!("{}{}", indent, branch)
     };
 
@@ -178,7 +178,7 @@ mod tests {
     /// ```text
     /// ● planner (AwaitingChildren)
     ///   ├─◆ developer (Planning) ⠋
-    ///   └─◆ reviewer  (Completed) ✅
+    ///   └─◆ reviewer  (Completed)
     /// ```
     fn build_test_pool_with_hierarchy() -> (AgentPool, AgentId) {
         let mut pool = AgentPool::new();
@@ -230,7 +230,7 @@ mod tests {
 
         let lines = build_agent_tree_lines(&pool, &id);
         assert_eq!(lines.len(), 1);
-        assert!(lines[0].display_text.starts_with("● "));
+        assert!(lines[0].display_text.starts_with("* "));
         assert!(lines[0].display_text.contains("Completed"));
         assert_eq!(lines[0].agent_id, id);
     }
@@ -242,25 +242,25 @@ mod tests {
 
         assert_eq!(lines.len(), 3, "should have root + 2 children");
 
-        // Root: ● symbol
+        // Root: * symbol
         assert!(
-            lines[0].display_text.starts_with("● "),
+            lines[0].display_text.starts_with("* "),
             "root prefix: {:?}",
             lines[0].display_text
         );
         assert!(lines[0].display_text.contains("Awaiting"));
 
-        // First child: ├─◆
+        // First child: |-*
         assert!(
-            lines[1].display_text.starts_with("├─◆ "),
+            lines[1].display_text.starts_with("|-* "),
             "first child prefix: {:?}",
             lines[1].display_text
         );
         assert!(lines[1].display_text.contains("Planning"));
 
-        // Last child: └─◆
+        // Last child: `-*
         assert!(
-            lines[2].display_text.starts_with("└─◆ "),
+            lines[2].display_text.starts_with("`-* "),
             "last child prefix: {:?}",
             lines[2].display_text
         );
@@ -359,28 +359,28 @@ mod tests {
         let lines = build_agent_tree_lines(&pool, &root_id);
         assert_eq!(lines.len(), 4, "root + middle + leaf + sibling");
 
-        // Root: ●
+        // Root: *
         assert!(
-            lines[0].display_text.starts_with("● "),
+            lines[0].display_text.starts_with("* "),
             "root: {:?}",
             lines[0].display_text
         );
-        // Middle (first child of root, not last): ├─◆
+        // Middle (first child of root, not last): |-*
         assert!(
-            lines[1].display_text.starts_with("├─◆ "),
+            lines[1].display_text.starts_with("|-* "),
             "middle: {:?}",
             lines[1].display_text
         );
-        // Leaf (first child of middle, only child, thus last):   └─◆
+        // Leaf (first child of middle, only child, thus last):   `-*
         // Depth=2, indent is "  "
         assert!(
-            lines[2].display_text.starts_with("  └─◆ "),
+            lines[2].display_text.starts_with("  `-* "),
             "leaf prefix: {:?}",
             lines[2].display_text
         );
-        // Sibling (second child of root, last child, thus last): └─◆
+        // Sibling (second child of root, last child, thus last): `-*
         assert!(
-            lines[3].display_text.starts_with("└─◆ "),
+            lines[3].display_text.starts_with("`-* "),
             "sibling prefix: {:?}",
             lines[3].display_text
         );

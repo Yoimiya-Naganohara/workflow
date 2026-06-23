@@ -1,7 +1,7 @@
 #![allow(clippy::module_inception)]
 
-pub mod config;
 pub mod capability;
+pub mod config;
 pub mod decomposition;
 pub mod dispatch;
 pub mod embedding_analyzer;

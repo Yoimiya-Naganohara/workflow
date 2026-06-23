@@ -5,9 +5,11 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crossterm::event::{KeyCode, KeyModifiers};
-use crate::runtime::decomposition::{DefaultDecompositionEngine, DecompositionEngine, TensionThreshold};
+use crate::runtime::decomposition::{
+    DecompositionEngine, DefaultDecompositionEngine, TensionThreshold,
+};
 use crate::runtime::embedding_analyzer::{EmbeddingGoalAnalyzer, ReferenceEmbeddings};
+use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::Tui;
 use super::commands;
@@ -455,19 +457,42 @@ impl Tui {
     // ── Command Palette key handlers ──
 
     /// Handle keys for the command palette navigation.
+    /// Sync `ui.input` to reflect the current palette path + filter so that
+    /// typed characters are visible in the input area and the user sees what
+    /// they are typing.
+    fn sync_palette_input(ui: &mut crate::tui::state::UiState) {
+        let palette = &ui.command_palette;
+        let mut display = String::from("/");
+        for entry in &palette.path {
+            display.push_str(&entry.id);
+            display.push('/');
+        }
+        display.push_str(&palette.filter);
+        ui.input = display;
+        ui.input_cursor = ui.input.len();
+    }
+
     fn handle_palette_key(&self, state: &mut AppState, key: crossterm::event::KeyEvent) -> bool {
         let palette = &mut state.ui.command_palette;
 
         match key.code {
             KeyCode::Up => {
-                palette.selected = palette.selected.saturating_sub(1);
+                let count = palette.filtered_items().len();
+                if count > 0 {
+                    palette.selected = palette.selected.saturating_sub(1);
+                }
             }
             KeyCode::Down => {
-                palette.selected += 1;
+                let count = palette.filtered_items().len();
+                if count > 0 && palette.selected + 1 < count {
+                    palette.selected += 1;
+                }
             }
             KeyCode::Esc => {
                 state.popup_mode = PopupMode::None;
                 state.ui.command_palette = crate::tui::command_tree::CommandPalette::default();
+                state.ui.input.clear();
+                state.ui.input_cursor = 0;
             }
             KeyCode::Enter => {
                 self.handle_palette_enter(state);
@@ -476,6 +501,7 @@ impl Tui {
                 if !palette.filter.is_empty() {
                     palette.filter.pop();
                     palette.selected = 0;
+                    Self::sync_palette_input(&mut state.ui);
                 } else if !palette.path.is_empty() {
                     palette.path.pop();
                     let ctx = crate::tui::command_tree::CommandContext {
@@ -488,11 +514,20 @@ impl Tui {
                         &ctx,
                     );
                     palette.selected = 0;
+                    Self::sync_palette_input(&mut state.ui);
+                } else {
+                    // Both filter and path are empty — we're at the root
+                    // with just '/'.  Backspace closes the palette.
+                    state.popup_mode = PopupMode::None;
+                    state.ui.command_palette = crate::tui::command_tree::CommandPalette::default();
+                    state.ui.input.clear();
+                    state.ui.input_cursor = 0;
                 }
             }
             KeyCode::Char(c) => {
                 palette.filter.push(c);
                 palette.selected = 0;
+                Self::sync_palette_input(&mut state.ui);
             }
             _ => {}
         }
@@ -542,6 +577,9 @@ impl Tui {
                     palette.level = PaletteLevel::Dynamic(children);
                     palette.filter.clear();
                     palette.selected = 0;
+                    // Sync input to show the new path so typed characters after
+                    // navigating into a branch remain visible in the input area.
+                    Self::sync_palette_input(&mut state.ui);
                 }
                 NodeKind::Execute { .. } => {
                     // Phase 2b: use CommandRuntime::execute() with ParsedCommand
@@ -551,6 +589,10 @@ impl Tui {
                     let parsed = ParsedCommand { tokens };
                     let runtime = CommandRuntime;
                     runtime.execute(&parsed, state);
+                    // Clear the input after executing a palette command so the
+                    // input area doesn't show stale command display text.
+                    state.ui.input.clear();
+                    state.ui.input_cursor = 0;
                 }
             }
         }
@@ -677,7 +719,12 @@ impl Tui {
                 if let Some(rt) = &core.runtime {
                     if let Ok(r) = rt.try_read() {
                         let mut graph = r.task_graph.lock().unwrap_or_else(|e| e.into_inner());
-                        let needs_task = core.agent_pool.try_read().ok().map(|p| p.get_agent(&aid).and_then(|a| a.task_id).is_none()).unwrap_or(false);
+                        let needs_task = core
+                            .agent_pool
+                            .try_read()
+                            .ok()
+                            .map(|p| p.get_agent(&aid).and_then(|a| a.task_id).is_none())
+                            .unwrap_or(false);
 
                         if needs_task {
                             // Pass 1: Create root task node.
@@ -689,21 +736,24 @@ impl Tui {
                             let compile = core.runtime.as_ref().and_then(|rt| {
                                 let r = rt.try_read().ok()?;
                                 let embed = r.embedding_service();
-                                let refs = REF_EMBEDDINGS.get_or_init(|| {
-                                    Arc::new(tokio::task::block_in_place(|| {
-                                        tokio::runtime::Handle::current()
-                                            .block_on(ReferenceEmbeddings::compute(&*embed))
-                                    }))
-                                }).clone();
+                                let refs = REF_EMBEDDINGS
+                                    .get_or_init(|| {
+                                        Arc::new(tokio::task::block_in_place(|| {
+                                            tokio::runtime::Handle::current()
+                                                .block_on(ReferenceEmbeddings::compute(&*embed))
+                                        }))
+                                    })
+                                    .clone();
                                 let emb = tokio::task::block_in_place(|| {
-                                    tokio::runtime::Handle::current()
-                                        .block_on(embed.embed(&input))
-                                }).ok()?;
+                                    tokio::runtime::Handle::current().block_on(embed.embed(&input))
+                                })
+                                .ok()?;
                                 Some((refs, emb))
                             });
 
                             if let Some((refs, goal_emb)) = compile {
-                                let analyzer = EmbeddingGoalAnalyzer::with_goal((*refs).clone(), goal_emb);
+                                let analyzer =
+                                    EmbeddingGoalAnalyzer::with_goal((*refs).clone(), goal_emb);
                                 let engine = DefaultDecompositionEngine::new(
                                     TensionThreshold::default(),
                                     Arc::new(analyzer),
@@ -715,7 +765,8 @@ impl Tui {
                                     if let Ok(mut pool) = core.agent_pool.try_write() {
                                         if let Some(agent) = pool.get_agent_mut(&aid) {
                                             agent.task_id = Some(root_id);
-                                            if let Some(first_child) = graph.get(&root_id)
+                                            if let Some(first_child) = graph
+                                                .get(&root_id)
                                                 .and_then(|n| n.children.first())
                                                 .and_then(|cid| graph.get(cid))
                                             {
@@ -832,6 +883,15 @@ impl Tui {
                 runtime: core.runtime.clone(),
                 abort_registration,
                 reasoning_effort: ui.reasoning_effort.clone(),
+                reasoning_options: core
+                    .selected_models
+                    .first()
+                    .and_then(|sel| {
+                        core.models
+                            .get_model(&sel.provider_id, &sel.model_id)
+                            .map(|m| m.reasoning_options.clone())
+                    })
+                    .unwrap_or_default(),
             });
         } else {
             if let Some(msg) = core.messages.get_mut(response_index) {

@@ -1,7 +1,7 @@
 //! Status bar — clean, minimal design with model info, mode, and key metrics.
 //!
 //! Layout (left → right):
-//!   {Mode} • {Provider} • {Model} [{CapBadge}] ctx:{N}K • {Budget}  [{Spinner}]  ↑Xk ↓Xk  [⚠T]
+//!   {Mode} • {Provider} • {Model} [{CapBadge}] ctx:{N}K • {Budget}  [{Spinner}]  ↑Xk ↓Xk  [!T]
 
 use ratatui::{
     Frame,
@@ -125,16 +125,17 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
     let cache_write = state.ui.llm_cache_write;
     if cache_read > 0 || cache_write > 0 {
         let label = if cache_read > 0 && cache_write > 0 {
-            format!("  🗃️{:0.0}k↓{:0.0}k", cache_read as f64 / 1000.0, cache_write as f64 / 1000.0)
+            format!(
+                "  [CACHE]{:0.0}k↓{:0.0}k",
+                cache_read as f64 / 1000.0,
+                cache_write as f64 / 1000.0
+            )
         } else if cache_read > 0 {
-            format!("  🗃️{:0.0}k↓", cache_read as f64 / 1000.0)
+            format!("  [CACHE]{:0.0}k↓", cache_read as f64 / 1000.0)
         } else {
-            format!("  🗃️↑{:0.0}k", cache_write as f64 / 1000.0)
+            format!("  [CACHE]↑{:0.0}k", cache_write as f64 / 1000.0)
         };
-        spans.push(Span::styled(
-            label,
-            Style::default().fg(style::GREEN),
-        ));
+        spans.push(Span::styled(label, Style::default().fg(style::GREEN)));
     }
 
     // ── 9. Tokenizer uninitialised warning ──
@@ -142,7 +143,7 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         && !state.ui.tokenizer_initialized
         && (in_tokens > 0 || out_tokens > 0)
     {
-        spans.push(Span::styled(" ⚠T", Style::default().fg(style::WARNING)));
+        spans.push(Span::styled(" [!]T", Style::default().fg(style::WARNING)));
     }
 
     // ── 10. Think level badge ──
@@ -166,11 +167,11 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
     if total > 0 {
         let rate = cache.hit_rate();
         let (color, icon) = if rate >= 90.0 {
-            (style::GREEN, "📈")
+            (style::GREEN, "[^]")
         } else if rate >= 50.0 {
-            (style::YELLOW, "📈")
+            (style::YELLOW, "[^]")
         } else {
-            (style::WARNING, "📉")
+            (style::WARNING, "[v]")
         };
         spans.push(Span::styled(
             format!("  {}{:.0}%", icon, rate),
@@ -193,7 +194,7 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
         if fill_pct > 50.0 {
             spans.push(Span::styled("  ", Style::default()));
             spans.push(Span::styled(
-                format!("🧵{:0.0}%", fill_pct),
+                format!("P{:0.0}%", fill_pct),
                 Style::default().fg(style::WARNING),
             ));
         }

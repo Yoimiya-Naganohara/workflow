@@ -366,7 +366,7 @@ impl SandboxHandle {
 
         // 4. Compact handle — the LLM sees this instead of the raw bytes
         Ok(format!(
-            "[💾 资产已完成 SIMD 语义索引 | ID: {}]\n- 大小: {:.2} KB (共 {} 行)\n- 头部预览:\n  {}\n  ...\n💡 提示: 调用 search_asset(asset_id: \"{}\", query: \"...\") 可直接定向爆破相关错误栈。",
+            "[Asset indexed | ID: {}]\n- Size: {:.2} KB ({} lines)\n- Preview:\n  {}\n  ...\nTip: call search_asset(asset_id: \"{}\", query: \"...\") to search.",
             asset_id,
             size_kb,
             line_count,

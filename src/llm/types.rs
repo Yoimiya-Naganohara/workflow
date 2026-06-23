@@ -125,6 +125,17 @@ pub struct LlmResponse {
 
 pub type ChatStream = Pin<Box<dyn Stream<Item = Result<String>> + Send>>;
 
+/// Why a tool-enabled chat stream ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoneReason {
+    /// Normal stream completion: LLM produced a FinalResponse.
+    Normal,
+    /// Duplicate tool+args detected (3+ repeats) — forced termination.
+    LoopTerminated,
+    /// Stream produced an error — forced termination.
+    StreamError,
+}
+
 /// Event emitted during a tool-enabled chat stream.
 #[derive(Debug, Clone)]
 pub enum ToolEvent {
@@ -150,7 +161,9 @@ pub enum ToolEvent {
         /// Input tokens written to provider-managed cache.
         cache_creation_input: u32,
     },
-    Done,
+    Done {
+        reason: DoneReason,
+    },
 }
 
 pub type ToolChatStream = Pin<Box<dyn Stream<Item = ToolEvent> + Send>>;

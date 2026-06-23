@@ -69,8 +69,22 @@ pub const BUDGET_ANOMALY_RATIO: f64 = 0.8;
 /// Maximum responsibility chain length before flagging.
 pub const MAX_CHAIN_LENGTH: usize = 20;
 
-/// Default max tool-calling turns for MCP chat (10 = cost-bounded upper limit).
-pub const DEFAULT_MAX_TOOL_TURNS: usize = 10;
+/// Default max tool-calling turns for MCP chat (6 = cost-bounded upper limit).
+/// Higher values increase LLM "tool loops" where the model calls tools
+/// repeatedly instead of producing a final answer.
+pub const DEFAULT_MAX_TOOL_TURNS: usize = 6;
+
+/// Capacity for runtime event MPSC channels.
+pub const RUNTIME_CHANNEL_CAPACITY: usize = 256;
+
+/// Maximum characters for diff output before truncation.
+pub const DIFF_TRUNCATION_LIMIT: usize = 2000;
+
+/// Maximum length of a single memo value.
+pub const MEMO_MAX_LENGTH: usize = 8192;
+
+/// Seconds in one hour (used for TTL, age calculations).
+pub const SECONDS_PER_HOUR: u64 = 3600;
 
 /// Memo usage instructions appended to every role's system prompt.
 pub const MEMO_INSTRUCTIONS: &str = "Memos are persisted across sessions and shared among all agents of the same role. When the user says something important or when you discover a key insight, save it with `write_memo` so other agents (and future sessions) can benefit.";

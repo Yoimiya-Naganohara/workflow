@@ -156,7 +156,7 @@ impl Tool for WriteMemo {
         if args.key.is_empty() {
             return Err(ToolCallError("memo key cannot be empty".to_string()));
         }
-        if args.value.len() > 8192 {
+        if args.value.len() > crate::core::types::MEMO_MAX_LENGTH {
             return Err(ToolCallError("memo value too large (max 8KB)".to_string()));
         }
 
@@ -253,10 +253,10 @@ impl Tool for ReadMemo {
                 let age = now_secs().saturating_sub(entry.timestamp);
                 let age_str = if age < 60 {
                     format!("{}s ago", age)
-                } else if age < 3600 {
+                } else if age < crate::core::types::SECONDS_PER_HOUR as u64 {
                     format!("{}m ago", age / 60)
                 } else {
-                    format!("{}h ago", age / 3600)
+                    format!("{}h ago", age / crate::core::types::SECONDS_PER_HOUR as u64)
                 };
                 Ok(format!(
                     "Memo '{}' ({}):\n---\n{}\n---\n(written {})",
@@ -336,10 +336,10 @@ impl Tool for ListMemos {
             let age = now.saturating_sub(entry.timestamp);
             let age_str = if age < 60 {
                 format!("{}s", age)
-            } else if age < 3600 {
+            } else if age < crate::core::types::SECONDS_PER_HOUR as u64 {
                 format!("{}m", age / 60)
             } else {
-                format!("{}h", age / 3600)
+                format!("{}h", age / crate::core::types::SECONDS_PER_HOUR as u64)
             };
             let preview = if entry.value.len() > 60 {
                 let end = entry

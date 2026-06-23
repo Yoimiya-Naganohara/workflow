@@ -259,15 +259,28 @@ pub struct AntiCollapseConstraint {
 
 impl Default for AntiCollapseConstraint {
     fn default() -> Self {
-        Self { max_selection_share: 0.6, window_size: 50 }
+        Self {
+            max_selection_share: 0.6,
+            window_size: 50,
+        }
     }
 }
 
 impl AntiCollapseConstraint {
     /// Check if a strategy is over-selected in a cluster (approaching monopoly).
-    pub fn is_over_selected(&self, strategy_id: StrategyId, recent_selections: &[StrategyId]) -> bool {
-        if recent_selections.is_empty() { return false; }
-        let window: Vec<_> = recent_selections.iter().rev().take(self.window_size).collect();
+    pub fn is_over_selected(
+        &self,
+        strategy_id: StrategyId,
+        recent_selections: &[StrategyId],
+    ) -> bool {
+        if recent_selections.is_empty() {
+            return false;
+        }
+        let window: Vec<_> = recent_selections
+            .iter()
+            .rev()
+            .take(self.window_size)
+            .collect();
         let count = window.iter().filter(|&&s| *s == strategy_id).count();
         let share = count as f32 / window.len() as f32;
         share > self.max_selection_share
@@ -286,15 +299,27 @@ pub struct RegretTracker {
 }
 
 impl RegretTracker {
-    pub fn new() -> Self { Self { regret_map: HashMap::new() } }
+    pub fn new() -> Self {
+        Self {
+            regret_map: HashMap::new(),
+        }
+    }
 
     /// Record that `incumbent` was selected and `candidates` were not.
     /// Updates regret for each candidate.
-    pub fn record_selection(&mut self, cluster: ClusterId, incumbent: StrategyId, candidates: &[StrategyId], incumbent_won: bool) {
+    pub fn record_selection(
+        &mut self,
+        cluster: ClusterId,
+        incumbent: StrategyId,
+        candidates: &[StrategyId],
+        incumbent_won: bool,
+    ) {
         let sign: f32 = if incumbent_won { -1.0 } else { 1.0 };
         let map_len = self.regret_map.len();
         for &cid in candidates {
-            if cid == incumbent { continue; }
+            if cid == incumbent {
+                continue;
+            }
             let entry = self.regret_map.entry((cluster, cid)).or_insert(0.0);
             *entry += sign * (1.0 / (map_len as f32 + 1.0)).min(0.1);
         }
@@ -302,8 +327,17 @@ impl RegretTracker {
 
     /// Get the regret-adjusted win rate for a candidate.
     /// High regret = this candidate should have been selected earlier = boost.
-    pub fn adjusted_win_rate(&self, base_win_rate: f32, cluster: ClusterId, strategy: StrategyId) -> f32 {
-        let regret = self.regret_map.get(&(cluster, strategy)).copied().unwrap_or(0.0);
+    pub fn adjusted_win_rate(
+        &self,
+        base_win_rate: f32,
+        cluster: ClusterId,
+        strategy: StrategyId,
+    ) -> f32 {
+        let regret = self
+            .regret_map
+            .get(&(cluster, strategy))
+            .copied()
+            .unwrap_or(0.0);
         (base_win_rate + regret * 0.1).clamp(0.0, 1.0)
     }
 }
@@ -322,18 +356,27 @@ pub struct TimeDecayEvaluator {
 }
 
 impl Default for TimeDecayEvaluator {
-    fn default() -> Self { Self { half_life: 50, epoch: 0 } }
+    fn default() -> Self {
+        Self {
+            half_life: 50,
+            epoch: 0,
+        }
+    }
 }
 
 impl TimeDecayEvaluator {
     /// Advance one epoch.
-    pub fn tick(&mut self) { self.epoch += 1; }
+    pub fn tick(&mut self) {
+        self.epoch += 1;
+    }
 
     /// Weight for a trace from `trace_epoch`.  Returns 1.0 at current epoch,
     /// decays exponentially toward 0.0 as |epoch - trace_epoch| increases.
     pub fn trace_weight(&self, trace_epoch: u64) -> f32 {
         let age = self.epoch.saturating_sub(trace_epoch);
-        if age == 0 { return 1.0; }
+        if age == 0 {
+            return 1.0;
+        }
         // Exponential decay: weight = 0.5^(age / half_life)
         (0.5f32).powf(age as f32 / self.half_life as f32)
     }
@@ -344,11 +387,7 @@ impl TimeDecayEvaluator {
 // ============================================================================
 
 pub trait StrategySelector: Send + Sync {
-    fn select(
-        &self,
-        strategy_type: StrategyType,
-        task: &TaskSignature,
-    ) -> Option<StrategyId>;
+    fn select(&self, strategy_type: StrategyType, task: &TaskSignature) -> Option<StrategyId>;
     fn record_trace(&self, trace: StrategyExecutionTrace);
 }
 
@@ -377,9 +416,19 @@ impl Default for CompetitionProtocol {
 
 #[derive(Debug, Clone)]
 pub enum CompetitionAction {
-    Promote { strategy_id: StrategyId, cluster: ClusterId, win_rate: f32 },
-    Retire { strategy_id: StrategyId, cluster: ClusterId, win_rate: f32 },
-    NoAction { reason: String },
+    Promote {
+        strategy_id: StrategyId,
+        cluster: ClusterId,
+        win_rate: f32,
+    },
+    Retire {
+        strategy_id: StrategyId,
+        cluster: ClusterId,
+        win_rate: f32,
+    },
+    NoAction {
+        reason: String,
+    },
 }
 
 // ============================================================================
@@ -424,11 +473,27 @@ impl StrategyGraph {
     }
 
     /// Register a strategy variant with common defaults.
-    pub fn register_variant(&mut self, strategy_type: StrategyType, name: &str, config: serde_json::Value, version: u32) -> StrategyId {
+    pub fn register_variant(
+        &mut self,
+        strategy_type: StrategyType,
+        name: &str,
+        config: serde_json::Value,
+        version: u32,
+    ) -> StrategyId {
         self.register(StrategyNode {
-            id: 0, strategy_type, name: name.to_string(), config,
-            scope: StrategyScope { domain_keywords: vec![], min_complexity: 0.0, max_complexity: 1.0 },
-            version, active: true, momentum: 0, promoted_at_epoch: 0,
+            id: 0,
+            strategy_type,
+            name: name.to_string(),
+            config,
+            scope: StrategyScope {
+                domain_keywords: vec![],
+                min_complexity: 0.0,
+                max_complexity: 1.0,
+            },
+            version,
+            active: true,
+            momentum: 0,
+            promoted_at_epoch: 0,
         })
     }
 
@@ -438,10 +503,18 @@ impl StrategyGraph {
             serde_json::json!({"weight_domain":0.30,"weight_steps":0.20,"weight_depth":0.15,"weight_ambiguity":0.15,"weight_parallel":0.10,"weight_history":0.10}), 1);
         self.register_variant(StrategyType::Estimator, "estimator-domain-heavy",
             serde_json::json!({"weight_domain":0.50,"weight_steps":0.15,"weight_depth":0.05,"weight_ambiguity":0.10,"weight_parallel":0.10,"weight_history":0.10}), 1);
-        self.register_variant(StrategyType::Policy, "policy-conservative",
-            serde_json::json!({"max_score":0.7,"max_domains":3,"max_depth":2,"max_steps":5}), 1);
-        self.register_variant(StrategyType::Policy, "policy-aggressive",
-            serde_json::json!({"max_score":0.5,"max_domains":2,"max_depth":1,"max_steps":3}), 1);
+        self.register_variant(
+            StrategyType::Policy,
+            "policy-conservative",
+            serde_json::json!({"max_score":0.7,"max_domains":3,"max_depth":2,"max_steps":5}),
+            1,
+        );
+        self.register_variant(
+            StrategyType::Policy,
+            "policy-aggressive",
+            serde_json::json!({"max_score":0.5,"max_domains":2,"max_depth":1,"max_steps":3}),
+            1,
+        );
     }
 
     pub fn register(&mut self, mut node: StrategyNode) -> StrategyId {
@@ -489,14 +562,27 @@ impl StrategyGraph {
         }
 
         // Phase 5.1: Anti-collapse — exclude over-selected strategies.
-        let recent = self.recent_selections.get(&cluster).cloned().unwrap_or_default();
+        let recent = self
+            .recent_selections
+            .get(&cluster)
+            .cloned()
+            .unwrap_or_default();
         candidates.retain(|s| !self.anti_collapse.is_over_selected(s.id, &recent));
 
         // If all candidates were over-selected, reset and force explore.
         if candidates.is_empty() {
             let idx = rand::random::<u64>() as usize
-                % self.strategies.values().filter(|s| s.strategy_type == strategy_type && s.active).count().max(1);
-            let fallback: Vec<_> = self.strategies.values().filter(|s| s.strategy_type == strategy_type && s.active).collect();
+                % self
+                    .strategies
+                    .values()
+                    .filter(|s| s.strategy_type == strategy_type && s.active)
+                    .count()
+                    .max(1);
+            let fallback: Vec<_> = self
+                .strategies
+                .values()
+                .filter(|s| s.strategy_type == strategy_type && s.active)
+                .collect();
             let id = fallback[idx].id;
             self.record_selection(cluster, id, &[]);
             return Some(id);
@@ -517,16 +603,26 @@ impl StrategyGraph {
                 let base_score = self
                     .edges
                     .iter()
-                    .filter(|e| e.task_cluster == cluster && (e.strategy_a == s.id || e.strategy_b == s.id))
+                    .filter(|e| {
+                        e.task_cluster == cluster && (e.strategy_a == s.id || e.strategy_b == s.id)
+                    })
                     .map(|e| {
-                        let wr = if e.strategy_a == s.id { e.win_rate } else { 1.0 - e.win_rate };
+                        let wr = if e.strategy_a == s.id {
+                            e.win_rate
+                        } else {
+                            1.0 - e.win_rate
+                        };
                         // Apply time decay to edge confidence.
                         let decayed = self.time_decay.trace_weight(e.sample_count as u64); // approx; ideally per-edge epoch
                         wr * (0.5 + 0.5 * decayed)
                     })
                     .fold(0.5, |acc, wr| acc * 0.7 + wr * 0.3);
 
-                let bias = self.momentum.get(&s.id).map(|m| m.selection_bias()).unwrap_or(1.0);
+                let bias = self
+                    .momentum
+                    .get(&s.id)
+                    .map(|m| m.selection_bias())
+                    .unwrap_or(1.0);
                 let regret_adjusted = self.regret.adjusted_win_rate(base_score, cluster, s.id);
 
                 Some((s.id, regret_adjusted * bias))
@@ -543,14 +639,20 @@ impl StrategyGraph {
     }
 
     /// Record a selection for anti-collapse and regret tracking.
-    fn record_selection(&mut self, cluster: ClusterId, selected: StrategyId, all_candidates: &[StrategyId]) {
+    fn record_selection(
+        &mut self,
+        cluster: ClusterId,
+        selected: StrategyId,
+        all_candidates: &[StrategyId],
+    ) {
         let window = self.recent_selections.entry(cluster).or_default();
         window.push(selected);
         if window.len() > self.anti_collapse.window_size * 2 {
             window.remove(0);
         }
         // Regret tracking: candidates that were NOT selected.
-        self.regret.record_selection(cluster, selected, all_candidates, true);
+        self.regret
+            .record_selection(cluster, selected, all_candidates, true);
     }
 
     /// Run one offline competition cycle: aggregate traces by cluster,
@@ -577,8 +679,15 @@ impl StrategyGraph {
         let mut cluster_strategies: HashMap<ClusterId, Vec<StrategyId>> = HashMap::new();
         for (&cid, traces) in &cluster_traces {
             for t in traces {
-                if !cluster_strategies.entry(cid).or_default().contains(&t.strategy_id) {
-                    cluster_strategies.entry(cid).or_default().push(t.strategy_id);
+                if !cluster_strategies
+                    .entry(cid)
+                    .or_default()
+                    .contains(&t.strategy_id)
+                {
+                    cluster_strategies
+                        .entry(cid)
+                        .or_default()
+                        .push(t.strategy_id);
                 }
             }
         }
@@ -608,7 +717,10 @@ impl StrategyGraph {
 
                     if total < self.protocol.min_samples_per_edge {
                         actions.push(CompetitionAction::NoAction {
-                            reason: format!("cluster {}: not enough samples ({}/{})", cid, total, self.protocol.min_samples_per_edge),
+                            reason: format!(
+                                "cluster {}: not enough samples ({}/{})",
+                                cid, total, self.protocol.min_samples_per_edge
+                            ),
                         });
                         continue;
                     }
@@ -626,7 +738,9 @@ impl StrategyGraph {
                         Some(edge) => {
                             edge.win_rate = edge.win_rate * 0.7 + win_rate * 0.3;
                             edge.sample_count += total;
-                            edge.confidence = (edge.sample_count as f32 / (edge.sample_count as f32 + 10.0)).min(1.0);
+                            edge.confidence = (edge.sample_count as f32
+                                / (edge.sample_count as f32 + 10.0))
+                                .min(1.0);
                         }
                         None => {
                             self.edges.push(PerformanceEdge {
@@ -760,8 +874,18 @@ mod tests {
     #[test]
     fn test_strategy_graph_selects_with_exploration() {
         let mut graph = StrategyGraph::new(CompetitionProtocol::default());
-        graph.register(make_strategy(1, StrategyType::Estimator, "conservative", true));
-        graph.register(make_strategy(2, StrategyType::Estimator, "aggressive", true));
+        graph.register(make_strategy(
+            1,
+            StrategyType::Estimator,
+            "conservative",
+            true,
+        ));
+        graph.register(make_strategy(
+            2,
+            StrategyType::Estimator,
+            "aggressive",
+            true,
+        ));
 
         let sig = TaskSignature {
             goal_length_chars: 100,
@@ -790,6 +914,9 @@ mod tests {
         };
         detector.record(0, sig.clone());
         detector.record(0, sig);
-        assert!(!detector.is_drifting(0), "no drift with identical signatures");
+        assert!(
+            !detector.is_drifting(0),
+            "no drift with identical signatures"
+        );
     }
 }

@@ -1588,7 +1588,7 @@ impl Tool for LineEdit {
                     if args.dry_run {
                         preview_lines.push(format!("  {}. ERROR: {}", i + 1, e));
                         return Ok(format!(
-                            "⚠️ Dry-run: {} operation(s) would fail\n\n{}",
+                            "Dry-run: {} operation(s) would fail\n\n{}",
                             args.operations.len() - i,
                             preview_lines.join("\n")
                         ));
@@ -1613,7 +1613,7 @@ impl Tool for LineEdit {
         if args.dry_run {
             let preview_diff = generate_inline_diff(&content, &new_content);
             Ok(format!(
-                "✅ Dry-run: {} would apply.\n\nChange preview:\n{}\n\nSummary:\n{}",
+                "Dry-run: {} would apply.\n\nChange preview:\n{}\n\nSummary:\n{}",
                 if stats.total == 0 { "no changes" } else { "ok" },
                 preview_diff,
                 stats.summary()
@@ -1634,7 +1634,7 @@ impl Tool for LineEdit {
                 .map_err(|e| ToolCallError(format!("Failed to rename temp file: {}", e)))?;
 
             Ok(format!(
-                "✅ Applied {} operation(s) to '{}'.\n\nFile changed: {} lines → {} lines.\n\nPreview of changes:\n{}",
+                "Applied {} operation(s) to '{}'.\n\nFile changed: {} lines → {} lines.\n\nPreview of changes:\n{}",
                 stats.total,
                 args.path,
                 content.lines().count(),
@@ -1801,27 +1801,27 @@ fn generate_inline_diff(old: &str, new: &str) -> String {
     while i < old_lines.len() || j < new_lines.len() {
         if i < old_lines.len() && j < new_lines.len() && old_lines[i] == new_lines[j] {
             // Unchanged
-            if output.len() < 2000 {
+            if output.len() < crate::core::types::DIFF_TRUNCATION_LIMIT {
                 output.push_str(&format!("  {}\n", old_lines[i]));
             }
             i += 1;
             j += 1;
         } else if j < new_lines.len() && (i >= old_lines.len() || new_lines[j] != old_lines[i]) {
             // Added
-            if output.len() < 2000 {
+            if output.len() < crate::core::types::DIFF_TRUNCATION_LIMIT {
                 output.push_str(&format!("+ {}\n", new_lines[j]));
             }
             j += 1;
         } else if i < old_lines.len() {
             // Removed
-            if output.len() < 2000 {
+            if output.len() < crate::core::types::DIFF_TRUNCATION_LIMIT {
                 output.push_str(&format!("- {}\n", old_lines[i]));
             }
             i += 1;
         }
     }
 
-    if output.len() >= 2000 {
+    if output.len() >= crate::core::types::DIFF_TRUNCATION_LIMIT {
         output.push_str("... (diff truncated at 2000 chars)\n");
     }
     output

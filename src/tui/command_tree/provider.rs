@@ -98,6 +98,24 @@ pub fn think_provider(_ctx: &CommandContext) -> Vec<Node> {
             Execute(super::handlers::think_set)
         ),
         node!(
+            "low",
+            "low",
+            "Reasoning effort: low",
+            Execute(super::handlers::think_set)
+        ),
+        node!(
+            "medium",
+            "medium",
+            "Reasoning effort: medium",
+            Execute(super::handlers::think_set)
+        ),
+        node!(
+            "high",
+            "high",
+            "Reasoning effort: high",
+            Execute(super::handlers::think_set)
+        ),
+        node!(
             "status",
             "status",
             "Show current level",

@@ -281,20 +281,20 @@ macro_rules! node {
 pub static ROOT: &[Node] = &[
     node!(
         "role",
-        " role",
+        "role",
         "Role template management",
         Branch(provider::role_provider)
     ),
-    node!("help", "󰛨 help", "Show help", Execute(handlers::help)),
+    node!("help", "help", "Show help", Execute(handlers::help)),
     node!(
         "status",
-        " status",
+        "status",
         "Show system status",
         Execute(handlers::status)
     ),
     node!(
         "clear",
-        "󰩈 clear",
+        "clear",
         "Clear conversation",
         Execute(handlers::clear)
     ),
@@ -306,55 +306,55 @@ pub static ROOT: &[Node] = &[
     ),
     node!(
         "models",
-        " models",
+        "models",
         "Open model picker",
         Execute(handlers::models)
     ),
     node!(
         "connect",
-        "󱚤 connect",
+        "connect",
         "Configure a provider",
         Execute(handlers::connect)
     ),
     node!(
         "pool",
-        " pool",
+        "pool",
         "Experience pool management",
         Branch(provider::pool_provider)
     ),
     node!(
         "sessions",
-        " sessions",
+        "sessions",
         "Switch to a saved session",
         Branch(provider::sessions_provider)
     ),
     node!(
         "memo",
-        "󰊄 memo",
+        "memo",
         "Role memo management",
         Branch(provider::memo_provider)
     ),
     node!(
         "agent",
-        " agent",
+        "agent",
         "Agent management (list/inspect)",
         Branch(provider::agent_provider)
     ),
     node!(
         "reflect",
-        " reflect",
+        "reflect",
         "Reflection control",
         Branch(provider::reflect_provider)
     ),
     node!(
         "refresh",
-        "󰔄 refresh",
+        "refresh",
         "Clear system prompt cache",
         Execute(handlers::refresh)
     ),
     node!(
         "think",
-        " think",
+        "think",
         "Set reasoning display level",
         Branch(provider::think_provider)
     ),

@@ -100,10 +100,13 @@ impl TaskResourceState {
     }
 
     pub fn increment_depth(&self) -> Result<u32, u32> {
-        let max = self.max_dynamic_depth.load(Ordering::Acquire);
-        // CAS loop: atomically check depth and increment in one operation.
+        // Load max INSIDE the CAS closure so that the depth check and
+        // increment share the same atomic snapshot.  If max_dynamic_depth
+        // is changed by another thread between the load and the CAS,
+        // the closure re-executes with the latest value — no TOCTOU window.
         self.current_depth
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                let max = self.max_dynamic_depth.load(Ordering::Acquire);
                 if current >= max {
                     None // signal error
                 } else {
@@ -509,19 +512,17 @@ mod tests {
     }
 
     #[test]
-    fn test_depth_increment_toctou_race() {
-        // BUG: increment_depth uses fetch_update which IS atomic
-        // The race was mitigated — run many iterations to confirm
-        let mut race_detected = false;
-
-        for _ in 0..100 {
+    fn test_depth_increment_toctou_race_fixed() {
+        // Regression test: increment_depth loads max INSIDE the CAS closure,
+        // so concurrent increments can never exceed max_depth.
+        // 100 iterations × 20 threads × 10 loops per thread = 20,000 CAS attempts.
+        for iter in 0..100 {
             let state = TaskResourceState::new(1000, 2); // max_depth = 2
             let mut handles = vec![];
 
             for _ in 0..20 {
                 let s = state.clone();
                 handles.push(thread::spawn(move || {
-                    // Tight loop to increase race window
                     for _ in 0..10 {
                         let _ = s.increment_depth();
                     }
@@ -533,16 +534,13 @@ mod tests {
             }
 
             let final_depth = state.current_depth.load(Ordering::Relaxed);
-            if final_depth > 2 {
-                race_detected = true;
-                break;
-            }
+            assert!(
+                final_depth <= 2,
+                "iter {}: depth {} exceeds max_depth 2 (TOCTOU race not fixed)",
+                iter,
+                final_depth
+            );
         }
-
-        if race_detected {
-            println!("BUG CONFIRMED: TOCTOU race allows depth to exceed max_depth");
-        }
-        // Document the bug — race may or may not reproduce in this run
     }
 
     // ── L0CircuitBreaker tests ──

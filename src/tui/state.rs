@@ -527,8 +527,14 @@ impl AppState {
                 args,
                 timestamp: _,
             } => {
-                // Tool call: "name — args" format.
-                // Truncate long args at a safe char boundary (preserve original newlines).
+                // Tool call format:
+                //   <tool_name>
+                //   key=value
+                //   key=value
+                //   <blank line>
+                //
+                // Each arg line is truncated at 200 chars to prevent runaway
+                // content (e.g. embedded file contents passed as args).
                 let args_trunc = if args.len() > 200 {
                     let end = args
                         .char_indices()
@@ -539,11 +545,6 @@ impl AppState {
                 } else {
                     args
                 };
-                let line = if args_trunc.is_empty() {
-                    name.clone()
-                } else {
-                    format!("{} — {}", name, args_trunc)
-                };
 
                 if let Some(slot) =
                     find_streaming_slot_response(&self.core.messages, response_index)
@@ -552,12 +553,21 @@ impl AppState {
                         if !msg.content.is_empty() {
                             msg.content.push('\n');
                         }
-                        msg.content.push_str(&line);
+                        msg.content.push_str(&name);
+                        for arg_line in args_trunc.lines() {
+                            msg.content.push('\n');
+                            msg.content.push_str(arg_line);
+                        }
                     }
                 } else {
+                    let mut content = name;
+                    for arg_line in args_trunc.lines() {
+                        content.push('\n');
+                        content.push_str(arg_line);
+                    }
                     self.core.messages.push(ChatMessage {
                         role: MessageRole::Decision,
-                        content: line,
+                        content,
                         reasoning: String::new(),
                         timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                         status: MessageStatus::Completed,
@@ -588,7 +598,7 @@ impl AppState {
                 let max_attempts = self.core.reflection.max_attempts;
                 if attempt >= max_attempts {
                     self.core.messages.push(ChatMessage::system(format!(
-                        "⚠️ Reflection: max retries ({}) reached. Final result shown above.",
+                        "Reflection: max retries ({}) reached. Final result shown above.",
                         max_attempts
                     )));
                     self.core.last_chat_request_id = 0;
@@ -598,7 +608,7 @@ impl AppState {
                 let new_attempt = attempt + 1;
                 let now = chrono::Local::now().format("%H:%M:%S").to_string();
                 let feedback_msg = format!(
-                    "🔄 Reflection #{} — revisiting response\n\n{}",
+                    "Reflection #{} — revisiting response\n\n{}",
                     new_attempt, feedback
                 );
                 self.core.messages.push(ChatMessage {
@@ -647,6 +657,17 @@ impl AppState {
                     runtime,
                     abort_registration: new_abort_registration,
                     reasoning_effort: self.ui.reasoning_effort.clone(),
+                    reasoning_options: self
+                        .core
+                        .selected_models
+                        .first()
+                        .and_then(|sel| {
+                            self.core
+                                .models
+                                .get_model(&sel.provider_id, &sel.model_id)
+                                .map(|m| m.reasoning_options.clone())
+                        })
+                        .unwrap_or_default(),
                 });
             }
             AppEvent::SystemLog { content } => {
@@ -1024,7 +1045,7 @@ mod tests {
                 timestamp: "00:00:02".into(),
                 status: MessageStatus::Completed,
             },
-            ChatMessage::system("✅ Child agent completed."),
+            ChatMessage::system("Child agent completed."),
             ChatMessage {
                 role: MessageRole::User,
                 content: "New question".into(),
@@ -1040,7 +1061,7 @@ mod tests {
         let history = build_chat_history(&messages, 5);
 
         // Should contain: User("Hello"), Agent("Hi there")
-        // System messages "Welcome" and "✅ Child agent completed" must be absent.
+        // System messages "Welcome" and "Child agent completed" must be absent.
         // User("New question") is the current query, not in history.
         assert_eq!(
             history.len(),
@@ -1278,7 +1299,7 @@ mod tests {
         state
             .core
             .messages
-            .push(ChatMessage::system("✅ Sub-agent done."));
+            .push(ChatMessage::system("Sub-agent done."));
         state.core.messages.push(ChatMessage {
             role: MessageRole::User,
             content: "Add tests".into(),

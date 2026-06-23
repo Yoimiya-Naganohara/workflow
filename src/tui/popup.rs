@@ -113,9 +113,8 @@ fn render_command_palette_popup(f: &mut Frame, area: Rect, state: &AppState) {
         .iter()
         .map(|item| {
             // 用 path + id 作为过滤匹配，后续支持 highlight
-            let icon = if item.has_children { "▶" } else { " " };
             let display_text = if item.has_children {
-                format!("{} {}", icon, item.display)
+                format!("> {}", item.display)
             } else {
                 item.display.clone()
             };
@@ -512,25 +511,25 @@ fn render_agent_detail_popup(f: &mut Frame, area: Rect, state: &AppState, agent_
 /// Return a simple file icon based on file extension.
 fn file_icon(path: &str) -> &'static str {
     if path.ends_with(".rs") {
-        "\u{1f99b}" // 🦀 rust
+        "[rs]"
     } else if path.ends_with(".md") || path.ends_with(".txt") {
-        "\u{1f4c4}" // 📄 document
+        "[doc]"
     } else if path.ends_with(".toml")
         || path.ends_with(".json")
         || path.ends_with(".yaml")
         || path.ends_with(".yml")
     {
-        "\u{2699}" // ⚙ config
+        "[cfg]"
     } else if path.ends_with(".html")
         || path.ends_with(".css")
         || path.ends_with(".js")
         || path.ends_with(".ts")
     {
-        "\u{1f310}" // 🌐 web
+        "[web]"
     } else if path.ends_with(".py") {
-        "\u{1f40d}" // 🐍 python
+        "[py]"
     } else {
-        "\u{1f4c1}" // 📁 file
+        "[file]"
     }
 }
 

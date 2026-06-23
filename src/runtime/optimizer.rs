@@ -30,7 +30,7 @@ impl OptimizationTracker {
     pub fn new() -> Self {
         Self {
             last_optimized: HashMap::new(),
-            min_interval_secs: 3600,
+            min_interval_secs: crate::core::types::SECONDS_PER_HOUR,
             min_new_experiences: 3,
             experience_snapshot: HashMap::new(),
         }

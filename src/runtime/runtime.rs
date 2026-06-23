@@ -109,7 +109,7 @@ impl AgentRuntime {
             .plans(Box::new(PlanRegistryConcrete::new()))
             .build();
 
-        Self::from_pipeline(pipeline)
+        Self::from_pipeline_with_store(pipeline, config.role_template_path.clone())
     }
 
     /// Create a runtime from a pre-built [`DecisionPipeline`].
@@ -117,8 +117,18 @@ impl AgentRuntime {
     /// Use this when you want full control over every layer's
     /// implementation (mocking, custom audit engines, etc.).
     pub fn from_pipeline(pipeline: DecisionPipeline) -> Self {
+        Self::from_pipeline_with_store(pipeline, None)
+    }
+
+    /// Like [`from_pipeline`](Self::from_pipeline) but with a custom path
+    /// for the role template store.  Use a temp directory in tests to avoid
+    /// writing to the user's `~/.workflow/` directory.
+    pub fn from_pipeline_with_store(
+        pipeline: DecisionPipeline,
+        role_template_path: Option<std::path::PathBuf>,
+    ) -> Self {
         let pipeline = Arc::new(pipeline);
-        let store_path = Self::default_store_path();
+        let store_path = role_template_path.unwrap_or_else(Self::default_store_path);
         let store =
             RoleTemplateStore::open(&store_path).expect("Failed to open role template store");
 
@@ -1027,7 +1037,7 @@ impl AgentRuntime {
         let has_assets = all_summaries.iter().any(|s| s.contains("(asset:"));
         let asset_note = if has_assets {
             concat!(
-                "\n\n📌 Some sub-tasks produced large outputs that are stored as assets. ",
+                "\n\n(NOTE) Some sub-tasks produced large outputs that are stored as assets. ",
                 "If you need details, use `search_asset(asset_id, query)`. ",
                 "Your current context only contains compact summaries. ",
                 "Do not ask for the full raw output unless you truly need it."
@@ -1160,6 +1170,15 @@ impl AgentRuntime {
         };
         let memos = memo_block.as_deref().unwrap_or("");
 
+        // Read reasoning_effort + reasoning_options from pool (brief read lock).
+        let (reasoning_effort, reasoning_options) = {
+            let pool = agent_pool.read().await;
+            (
+                pool.reasoning_effort.clone(),
+                pool.reasoning_options.clone(),
+            )
+        };
+
         // Check for pending messages and inject notification into prompt.
         let inbox_hint = {
             let pool = agent_pool.read().await;
@@ -1168,7 +1187,7 @@ impl AgentRuntime {
                     let count = a.inbox.len();
                     if count > 0 {
                         format!(
-                            "\n\n⚠️ You have {} unread message(s) in your inbox. \
+                            "\n\nYou have {} unread message(s) in your inbox. \
 Use the `read_messages` tool to read them before proceeding. \
 Messages may contain important context from sibling agents.",
                             count
@@ -1189,7 +1208,7 @@ Messages may contain important context from sibling agents.",
             inbox_hint,
         );
         let leaf_goal = format!(
-            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.",
+            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\nTOOL DISCIPLINE: Only call tools when you truly need information you cannot infer. Prefer answering directly from your knowledge. You have up to 6 tool call rounds available. If you have called several tools and still cannot answer, summarize what you found and explain what is missing. Repeated calls to the same tool with the same arguments (3+ times) will be treated as a loop and terminated.",
             goal
         );
 
@@ -1199,6 +1218,9 @@ Messages may contain important context from sibling agents.",
             let mut tools_used: u64 = 0;
             let mut tokens_input: u32 = 0;
             let mut tokens_output: u32 = 0;
+            let additional_params = reasoning_effort
+                .as_ref()
+                .and_then(|effort| provider.reasoning_params(effort, &reasoning_options));
             let stream = match provider
                 .chat_with_tools_stream_mcp(
                     &config.model_id,
@@ -1206,7 +1228,7 @@ Messages may contain important context from sibling agents.",
                     &leaf_goal,
                     &[],
                     handle,
-                    None,
+                    additional_params.as_ref(),
                 )
                 .await
             {
@@ -1249,19 +1271,30 @@ Messages may contain important context from sibling agents.",
                                     status: crate::agent::ToolStatus::Success,
                                 });
                                 // Keep ring buffer bounded
-                                if agent.tool_trace.len() > 128 {
+                                if agent.tool_trace.len() > crate::agent::MAX_TOOL_TRACE {
                                     agent.tool_trace.pop_front();
                                 }
                             }
                         }
                     }
                     crate::llm::ToolEvent::TokenUsage { input, output, .. } => {
-                        // Track cumulative token usage for cost/consumption reporting.
-                        tokens_input = tokens_input.max(input);
-                        tokens_output = tokens_output.max(output);
+                        // Accumulate across all tool-calling turns for accurate
+                        // total cost/consumption reporting (not just last-turn max).
+                        tokens_input = tokens_input.saturating_add(input);
+                        tokens_output = tokens_output.saturating_add(output);
                     }
-                    crate::llm::ToolEvent::Done => {
+                    crate::llm::ToolEvent::Done { reason } => {
                         done_received = true;
+                        if reason == crate::llm::DoneReason::LoopTerminated {
+                            let mut pool = agent_pool.write().await;
+                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                                agent.status = AgentStatus::Failed;
+                                agent.result = Some(text.clone());
+                                pool.release_budget_guard(&agent_id);
+                                pool.notify_completed(&agent_id);
+                            }
+                            return (text, AgentStatus::Failed);
+                        }
                         break;
                     }
                 }
@@ -1425,8 +1458,18 @@ Messages may contain important context from sibling agents.",
             crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
             memos,
         );
+
+        // Read reasoning_effort + reasoning_options from pool (brief read lock).
+        let (reasoning_effort, reasoning_options) = {
+            let pool = agent_pool.read().await;
+            (
+                pool.reasoning_effort.clone(),
+                pool.reasoning_options.clone(),
+            )
+        };
+
         let leaf_goal = format!(
-            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.",
+            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\nTOOL DISCIPLINE: Only call tools when you truly need information you cannot infer. Prefer answering directly from your knowledge. You have up to 6 tool call rounds available. If you have called several tools and still cannot answer, summarize what you found and explain what is missing. Repeated calls to the same tool with the same arguments (3+ times) will be treated as a loop and terminated.",
             goal
         );
 
@@ -1435,6 +1478,9 @@ Messages may contain important context from sibling agents.",
             let mut tools_used: u64 = 0;
             let mut tokens_input: u32 = 0;
             let mut tokens_output: u32 = 0;
+            let additional_params = reasoning_effort
+                .as_ref()
+                .and_then(|effort| provider.reasoning_params(effort, &reasoning_options));
             let stream = match provider
                 .chat_with_tools_stream_mcp(
                     &config.model_id,
@@ -1442,7 +1488,7 @@ Messages may contain important context from sibling agents.",
                     &leaf_goal,
                     &[],
                     handle,
-                    None,
+                    additional_params.as_ref(),
                 )
                 .await
             {
@@ -1460,6 +1506,7 @@ Messages may contain important context from sibling agents.",
             };
             use futures::StreamExt;
             futures::pin_mut!(stream);
+            let mut tool_call_count = 0usize;
             let mut done_received = false;
             while let Some(event) = stream.next().await {
                 match event {
@@ -1468,6 +1515,7 @@ Messages may contain important context from sibling agents.",
                         // Agent execution — reasoning is informational only.
                     }
                     crate::llm::ToolEvent::ToolCall { name, args, .. } => {
+                        tool_call_count += 1;
                         tools_used |= Self::tool_bit(&name);
                         // Record tool call trace (ring buffer, bounded).
                         let args_preview = serde_json::to_string(&args).unwrap_or_default();
@@ -1490,11 +1538,21 @@ Messages may contain important context from sibling agents.",
                         } // try_write drops here — minimal lock duration
                     }
                     crate::llm::ToolEvent::TokenUsage { input, output, .. } => {
-                        tokens_input = tokens_input.max(input);
-                        tokens_output = tokens_output.max(output);
+                        tokens_input = tokens_input.saturating_add(input);
+                        tokens_output = tokens_output.saturating_add(output);
                     }
-                    crate::llm::ToolEvent::Done => {
+                    crate::llm::ToolEvent::Done { reason } => {
                         done_received = true;
+                        if reason == crate::llm::DoneReason::LoopTerminated {
+                            let mut pool = agent_pool.write().await;
+                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                                agent.status = AgentStatus::Failed;
+                                agent.result = Some(text.clone());
+                                pool.release_budget_guard(&agent_id);
+                                pool.notify_completed(&agent_id);
+                            }
+                            return (text, AgentStatus::Failed);
+                        }
                         break;
                     }
                 }
@@ -1516,6 +1574,15 @@ Messages may contain important context from sibling agents.",
                         &text[..text.len().min(80)]
                     ),
                     AgentStatus::Failed,
+                );
+            }
+            // If the LLM hit max turns without producing a final message,
+            // generate a concise summary so the user sees completion feedback.
+            if text.trim().is_empty() && tool_call_count > 0 {
+                text = format!(
+                    "Completed after {} tool call{}.",
+                    tool_call_count,
+                    if tool_call_count == 1 { "" } else { "s" }
                 );
             }
             (text, tools_used)
@@ -1639,9 +1706,20 @@ mod tests {
         Arc::new(MockEmbedding)
     }
 
+    /// Create an [`AgentRuntimeConfig`] with temp directories so tests
+    /// never write to the real `~/.workflow/` directory.
+    fn test_config() -> AgentRuntimeConfig {
+        let dir = std::env::temp_dir().join(format!("workflow_test_{}", rand::random::<u64>()));
+        AgentRuntimeConfig {
+            bedrock_path: Some(dir.join("experience_a.bin")),
+            role_template_path: Some(dir.join("role_templates.json")),
+            ..Default::default()
+        }
+    }
+
     #[tokio::test]
     async fn test_basic_spawn() {
-        let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), dummy_embedding());
+        let runtime = AgentRuntime::new(test_config(), dummy_embedding());
 
         // Seed an experience so L1 doesn't reject empty pool.
         let mut emb = [0.0f32; EMBEDDING_DIM];
@@ -1679,7 +1757,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_budget_exhaustion() {
-        let runtime = AgentRuntime::new(AgentRuntimeConfig::default(), dummy_embedding());
+        let runtime = AgentRuntime::new(test_config(), dummy_embedding());
 
         // Try to spend more than available budget
         let task = "A task";
@@ -1706,7 +1784,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_spawn_sequential() {
-        let rt = AgentRuntime::new(AgentRuntimeConfig::default(), dummy_embedding());
+        let rt = AgentRuntime::new(test_config(), dummy_embedding());
 
         let mut emb = [0.0f32; EMBEDDING_DIM];
         emb[0] = 1.0;
@@ -1764,7 +1842,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_role_template_clears_embedding_on_prompt_change() {
-        let rt = AgentRuntime::new(AgentRuntimeConfig::default(), dummy_embedding());
+        let rt = AgentRuntime::new(test_config(), dummy_embedding());
 
         // Use a non-seeded role to avoid background embedding race.
         // The seeded templates have background compute_role_embeddings_async running.

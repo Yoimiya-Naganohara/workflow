@@ -241,7 +241,7 @@ impl ClientPool {
 
 impl Default for ClientPool {
     fn default() -> Self {
-        Self::new(Duration::from_secs(3600))
+        Self::new(Duration::from_secs(crate::core::types::SECONDS_PER_HOUR))
     }
 }
 

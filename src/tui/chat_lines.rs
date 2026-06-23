@@ -50,6 +50,33 @@ impl ChatRenderOutput {
         self.rendered.len()
     }
 
+    /// Compute the scroll position for the last `visible_height` physical rows,
+    /// accounting for word wrapping and multi-row tables.
+    ///
+    /// Returns the logical line index such that rendering from there fills
+    /// at most `visible_height` terminal rows.  This is the correct `max_scroll`
+    /// for auto-scroll and scroll clamping — unlike `total - visible_height`
+    /// which mixes logical and physical units.
+    pub(crate) fn max_scroll_for_height(&self, visible_height: usize, avail: usize) -> usize {
+        if self.rendered.is_empty() || visible_height == 0 {
+            return 0;
+        }
+        let mut phys = 0usize;
+        for i in (0..self.rendered.len()).rev() {
+            let h = if let Some(ref td) = self.rendered[i].table {
+                compute_table_height(td)
+            } else {
+                let w = self.rendered[i].line.width();
+                if w == 0 { 1 } else { w.div_ceil(avail) }
+            };
+            phys += h;
+            if phys > visible_height {
+                return i;
+            }
+        }
+        0
+    }
+
     /// Build a ratatui Table widget for a given table definition.
     /// Cell content is pre-wrapped to column widths so that long text flows
     /// onto multiple lines inside the table.
@@ -404,7 +431,7 @@ fn tool_call_lines(
 ) {
     let content = &message.content;
 
-    // ── Parse content into tool-call groups ──
+    // Format: <name>\nkey=value\nkey=value\n\n<name>\n...
     struct Call {
         name: String,
         args: Vec<String>,
@@ -414,69 +441,42 @@ fn tool_call_lines(
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            if let Some(last) = calls.last_mut() {
-                last.args.push(String::new());
-            }
             continue;
         }
 
-        if let Some(pos) = trimmed.find(" — ") {
+        // Lines containing '=' are arg key=value pairs; otherwise tool name.
+        if !trimmed.contains('=') {
             calls.push(Call {
-                name: trimmed[..pos].trim().to_string(),
-                args: vec![trimmed[pos + 5..].to_string()],
+                name: trimmed.to_string(),
+                args: Vec::new(),
             });
         } else if let Some(last) = calls.last_mut() {
             last.args.push(trimmed.to_string());
         }
     }
 
-    // ── Emit lines for each call, separated by blank lines ──
+    // ── Emit one compact line per call ──
     for call in calls.iter() {
-        // Blank separator before first call or between calls
-        // Don't double-up if the previous emission already added a blank.
-        let last_blank = lines
-            .last()
-            .map(|l| l.line.to_string().trim().is_empty())
-            .unwrap_or(true);
-        if !last_blank {
-            lines.push(RenderedLine {
-                line: Line::from(Span::raw("")),
-                table: None,
-            });
-        }
-
-        // Tool name (purple bold)
-        lines.push(RenderedLine {
-            line: Line::from(Span::styled(
+        let mut spans: Vec<Span<'static>> = vec![
+            Span::styled("> ", Style::default().fg(style::TEXT_MUTED)),
+            Span::styled(
                 call.name.clone(),
                 Style::default()
                     .fg(style::PURPLE)
-                    .add_modifier(ratatui::style::Modifier::BOLD),
-            )),
-            table: None,
-        });
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ];
 
-        // Args (gray, indented)
         for arg_line in &call.args {
-            if arg_line.is_empty() {
-                lines.push(RenderedLine {
-                    line: Line::from(Span::raw("")),
-                    table: None,
-                });
-            } else {
-                lines.push(RenderedLine {
-                    line: Line::from(Span::styled(
-                        format!("  {}", arg_line),
-                        Style::default().fg(style::TEXT_MUTED),
-                    )),
-                    table: None,
-                });
-            }
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                arg_line.clone(),
+                Style::default().fg(style::TEXT_MUTED),
+            ));
         }
 
-        // Blank line after each call
         lines.push(RenderedLine {
-            line: Line::from(Span::raw("")),
+            line: Line::from(spans),
             table: None,
         });
     }

@@ -163,14 +163,18 @@ fn render_chat_content(
     area: Rect,
     output: &ChatRenderOutput,
     scroll: usize,
-    visible_height: usize,
+    _visible_height: usize,
 ) {
     let max_line = output.rendered.len();
     if max_line == 0 {
         return;
     }
 
-    let end = (scroll + visible_height).min(max_line);
+    // Use max_line, not scroll + visible_height, so the physical limit
+    // (y < area.bottom()) is the only early-exit condition.  The old
+    // formula mixed logical lines with physical rows and caused the
+    // bottom of the chat to be truncated when lines wrapped.
+    let end = max_line;
     let mut y = area.y;
     let mut i = scroll;
     let avail = area.width.max(1) as usize;

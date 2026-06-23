@@ -5,9 +5,9 @@
 //! Phase 4C: WorkflowTemplate + TemplateRegistry + TemplateMatcher + Instantiation
 //! Phase 4D: TemplateEvolution (evaluate + compete + retire)
 
-use std::collections::HashMap;
 use crate::core::types::TaskId;
 use crate::runtime::task_graph::{TaskGraph, TaskStatus};
+use std::collections::HashMap;
 
 // ============================================================================
 //  GraphMetrics
@@ -49,9 +49,17 @@ impl GraphMetrics {
         Self {
             root_count: roots.len(),
             node_count: nodes.len(),
-            avg_depth: if depth_samples > 0 { total_depth as f32 / depth_samples as f32 } else { 0.0 },
+            avg_depth: if depth_samples > 0 {
+                total_depth as f32 / depth_samples as f32
+            } else {
+                0.0
+            },
             max_depth,
-            avg_width: if width_samples > 0 { total_width / width_samples as f32 } else { 0.0 },
+            avg_width: if width_samples > 0 {
+                total_width / width_samples as f32
+            } else {
+                0.0
+            },
             max_width,
             leaf_count: nodes.iter().filter(|n| n.children.is_empty()).count(),
             status_counts: graph.status_counts(None),
@@ -65,7 +73,11 @@ impl GraphMetrics {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DependencyShape {
-    Chain, FanOut, FanIn, Dag, Atomic,
+    Chain,
+    FanOut,
+    FanIn,
+    Dag,
+    Atomic,
 }
 
 #[derive(Debug, Clone)]
@@ -89,26 +101,50 @@ impl WorkflowSignature {
         }
         let mut roles_sorted: Vec<_> = roles_map.into_iter().collect();
         roles_sorted.sort_by(|a, b| b.1.cmp(&a.1));
-        let shape = if nodes.len() <= 1 { DependencyShape::Atomic }
-        else if non_root.iter().all(|n| n.dependencies.is_empty()) { DependencyShape::FanOut }
-        else if non_root.iter().any(|n| n.dependencies.len() >= 2) { DependencyShape::FanIn }
-        else if non_root.len() == nodes.len().saturating_sub(1) { DependencyShape::Chain }
-        else { DependencyShape::Dag };
-        let depth = nodes.iter().map(|n| graph.ancestor_chain(n.id).len().saturating_sub(1)).max().unwrap_or(0);
-        let cp = graph.topological_sort().map(|sorted| {
-            let mut dist: HashMap<TaskId, usize> = HashMap::new();
-            let mut max_d = 0usize;
-            for id in &sorted {
-                let d = dist.get(id).copied().unwrap_or(0);
-                max_d = max_d.max(d);
-                if let Some(node) = graph.get(id) {
-                    for c in &node.children { *dist.entry(*c).or_insert(0) = (*dist.get(c).unwrap_or(&0)).max(d + 1); }
-                    for d2 in &node.dependencies { *dist.entry(*d2).or_insert(0) = (*dist.get(d2).unwrap_or(&0)).max(d + 1); }
+        let shape = if nodes.len() <= 1 {
+            DependencyShape::Atomic
+        } else if non_root.iter().all(|n| n.dependencies.is_empty()) {
+            DependencyShape::FanOut
+        } else if non_root.iter().any(|n| n.dependencies.len() >= 2) {
+            DependencyShape::FanIn
+        } else if non_root.len() == nodes.len().saturating_sub(1) {
+            DependencyShape::Chain
+        } else {
+            DependencyShape::Dag
+        };
+        let depth = nodes
+            .iter()
+            .map(|n| graph.ancestor_chain(n.id).len().saturating_sub(1))
+            .max()
+            .unwrap_or(0);
+        let cp = graph
+            .topological_sort()
+            .map(|sorted| {
+                let mut dist: HashMap<TaskId, usize> = HashMap::new();
+                let mut max_d = 0usize;
+                for id in &sorted {
+                    let d = dist.get(id).copied().unwrap_or(0);
+                    max_d = max_d.max(d);
+                    if let Some(node) = graph.get(id) {
+                        for c in &node.children {
+                            *dist.entry(*c).or_insert(0) = (*dist.get(c).unwrap_or(&0)).max(d + 1);
+                        }
+                        for d2 in &node.dependencies {
+                            *dist.entry(*d2).or_insert(0) =
+                                (*dist.get(d2).unwrap_or(&0)).max(d + 1);
+                        }
+                    }
                 }
-            }
-            max_d
-        }).unwrap_or(0);
-        WorkflowSignature { shape, role_count: roles_sorted.len(), roles_used: roles_sorted.into_iter().map(|(r,_)| r).collect(), depth, critical_path_length: cp }
+                max_d
+            })
+            .unwrap_or(0);
+        WorkflowSignature {
+            shape,
+            role_count: roles_sorted.len(),
+            roles_used: roles_sorted.into_iter().map(|(r, _)| r).collect(),
+            depth,
+            critical_path_length: cp,
+        }
     }
 }
 
@@ -140,23 +176,34 @@ pub struct PatternDiscovery;
 
 impl PatternDiscovery {
     pub fn discover(executions: &[ExecutionRecord]) -> Vec<DiscoveredPattern> {
-        if executions.is_empty() { return Vec::new(); }
+        if executions.is_empty() {
+            return Vec::new();
+        }
         let mut clusters: Vec<Vec<&ExecutionRecord>> = Vec::new();
         let mut assigned = vec![false; executions.len()];
         for i in 0..executions.len() {
-            if assigned[i] { continue; }
+            if assigned[i] {
+                continue;
+            }
             let mut cluster = vec![&executions[i]];
             assigned[i] = true;
-            for j in (i+1)..executions.len() {
-                if assigned[j] { continue; }
+            for j in (i + 1)..executions.len() {
+                if assigned[j] {
+                    continue;
+                }
                 if Self::goal_similarity(&executions[i].goal, &executions[j].goal) > 0.3 {
                     cluster.push(&executions[j]);
                     assigned[j] = true;
                 }
             }
-            if cluster.len() >= 2 { clusters.push(cluster); }
+            if cluster.len() >= 2 {
+                clusters.push(cluster);
+            }
         }
-        let mut patterns: Vec<DiscoveredPattern> = clusters.iter().map(|c| Self::pattern_from_cluster(c)).collect();
+        let mut patterns: Vec<DiscoveredPattern> = clusters
+            .iter()
+            .map(|c| Self::pattern_from_cluster(c))
+            .collect();
         patterns.sort_by(|a, b| b.sample_count.cmp(&a.sample_count));
         patterns
     }
@@ -168,7 +215,11 @@ impl PatternDiscovery {
         let words_b: std::collections::HashSet<&str> = b_lower.split_whitespace().collect();
         let intersection = words_a.intersection(&words_b).count();
         let union = words_a.union(&words_b).count();
-        if union == 0 { 0.0 } else { intersection as f32 / union as f32 }
+        if union == 0 {
+            0.0
+        } else {
+            intersection as f32 / union as f32
+        }
     }
 
     fn pattern_from_cluster(cluster: &[&ExecutionRecord]) -> DiscoveredPattern {
@@ -177,22 +228,46 @@ impl PatternDiscovery {
         let mut total_success = 0usize;
         let mut total_lat = 0.0f64;
         for e in cluster {
-            for w in e.goal.to_lowercase().split_whitespace() { if w.len() > 2 { *kw_freq.entry(w.to_string()).or_insert(0) += 1; } }
+            for w in e.goal.to_lowercase().split_whitespace() {
+                if w.len() > 2 {
+                    *kw_freq.entry(w.to_string()).or_insert(0) += 1;
+                }
+            }
             *shape_counts.entry(e.signature.shape.clone()).or_insert(0) += 1;
-            if e.success { total_success += 1; }
+            if e.success {
+                total_success += 1;
+            }
             total_lat += e.latency_ms;
         }
         let threshold = (cluster.len() / 2).max(1);
-        let mut gs: Vec<String> = kw_freq.into_iter().filter(|(_,c)| *c >= threshold).map(|(w,_)| w).collect();
+        let mut gs: Vec<String> = kw_freq
+            .into_iter()
+            .filter(|(_, c)| *c >= threshold)
+            .map(|(w, _)| w)
+            .collect();
         gs.sort();
-        let dom_shape = shape_counts.into_iter().max_by_key(|(_,c)| *c).map(|(s,_)| s).unwrap_or(DependencyShape::Atomic);
+        let dom_shape = shape_counts
+            .into_iter()
+            .max_by_key(|(_, c)| *c)
+            .map(|(s, _)| s)
+            .unwrap_or(DependencyShape::Atomic);
         let mut roles = std::collections::BTreeSet::new();
-        for e in cluster { for r in &e.signature.roles_used { roles.insert(r.clone()); } }
+        for e in cluster {
+            for r in &e.signature.roles_used {
+                roles.insert(r.clone());
+            }
+        }
         DiscoveredPattern {
-            goal_signature: gs, shape: dom_shape, roles_used: roles.into_iter().collect(),
+            goal_signature: gs,
+            shape: dom_shape,
+            roles_used: roles.into_iter().collect(),
             success_rate: total_success as f32 / cluster.len() as f32,
             sample_count: cluster.len(),
-            avg_completion_time_ms: if cluster.is_empty() { 0.0 } else { total_lat / cluster.len() as f64 },
+            avg_completion_time_ms: if cluster.is_empty() {
+                0.0
+            } else {
+                total_lat / cluster.len() as f64
+            },
             is_template: false,
         }
     }
@@ -236,52 +311,123 @@ pub struct TemplateRegistry {
 }
 
 impl TemplateRegistry {
-    pub fn new() -> Self { Self { templates: Vec::new(), next_id: 0 } }
-    pub fn insert(&mut self, mut t: WorkflowTemplate) -> TemplateId { let id = self.next_id; self.next_id += 1; t.id = id; self.templates.push(t); id }
-    pub fn get(&self, id: TemplateId) -> Option<&WorkflowTemplate> { self.templates.iter().find(|t| t.id == id) }
-    pub fn all(&self) -> &[WorkflowTemplate] { &self.templates }
+    pub fn new() -> Self {
+        Self {
+            templates: Vec::new(),
+            next_id: 0,
+        }
+    }
+    pub fn insert(&mut self, mut t: WorkflowTemplate) -> TemplateId {
+        let id = self.next_id;
+        self.next_id += 1;
+        t.id = id;
+        self.templates.push(t);
+        id
+    }
+    pub fn get(&self, id: TemplateId) -> Option<&WorkflowTemplate> {
+        self.templates.iter().find(|t| t.id == id)
+    }
+    pub fn all(&self) -> &[WorkflowTemplate] {
+        &self.templates
+    }
     pub fn promote(&mut self, pattern: &DiscoveredPattern) -> Option<TemplateId> {
-        if !pattern.ready_for_promotion() { return None; }
-        let roles: Vec<TemplateRole> = pattern.roles_used.iter().map(|r| TemplateRole { role_name: r.clone(), goal_fragment: r.clone() }).collect();
-        let deps: Vec<(usize,usize)> = (1..roles.len()).map(|i| (i-1,i)).collect();
-        let name = pattern.goal_signature.first().cloned().unwrap_or_else(|| "pattern".to_string());
-        let id = self.next_id; self.next_id += 1;
+        if !pattern.ready_for_promotion() {
+            return None;
+        }
+        let roles: Vec<TemplateRole> = pattern
+            .roles_used
+            .iter()
+            .map(|r| TemplateRole {
+                role_name: r.clone(),
+                goal_fragment: r.clone(),
+            })
+            .collect();
+        let deps: Vec<(usize, usize)> = (1..roles.len()).map(|i| (i - 1, i)).collect();
+        let name = pattern
+            .goal_signature
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "pattern".to_string());
+        let id = self.next_id;
+        self.next_id += 1;
         self.templates.push(WorkflowTemplate {
-            id, name: format!("tpl-{}-{}", name, id),
-            signature: WorkflowSignature { shape: pattern.shape.clone(), role_count: roles.len(), roles_used: pattern.roles_used.clone(), depth: 2, critical_path_length: roles.len() },
-            roles, dependency_edges: deps, success_rate: pattern.success_rate, sample_count: pattern.sample_count as u32,
+            id,
+            name: format!("tpl-{}-{}", name, id),
+            signature: WorkflowSignature {
+                shape: pattern.shape.clone(),
+                role_count: roles.len(),
+                roles_used: pattern.roles_used.clone(),
+                depth: 2,
+                critical_path_length: roles.len(),
+            },
+            roles,
+            dependency_edges: deps,
+            success_rate: pattern.success_rate,
+            sample_count: pattern.sample_count as u32,
             goal_keywords: pattern.goal_signature.clone(),
         });
         Some(id)
     }
 }
 
-pub struct TemplateMatcher { threshold: f32 }
-impl Default for TemplateMatcher { fn default() -> Self { Self { threshold: 0.3 } } }
+pub struct TemplateMatcher {
+    threshold: f32,
+}
+impl Default for TemplateMatcher {
+    fn default() -> Self {
+        Self { threshold: 0.3 }
+    }
+}
 impl TemplateMatcher {
-    pub fn match_goal<'a>(&self, goal: &str, templates: &'a [WorkflowTemplate]) -> Option<&'a WorkflowTemplate> {
+    pub fn match_goal<'a>(
+        &self,
+        goal: &str,
+        templates: &'a [WorkflowTemplate],
+    ) -> Option<&'a WorkflowTemplate> {
         let g = goal.to_lowercase();
         let gw: std::collections::HashSet<&str> = g.split_whitespace().collect();
         let (mut best_score, mut best_idx) = (0.0f32, None);
         for (i, t) in templates.iter().enumerate() {
-            let tw: std::collections::HashSet<&str> = t.goal_keywords.iter().map(|s| s.as_str()).collect();
+            let tw: std::collections::HashSet<&str> =
+                t.goal_keywords.iter().map(|s| s.as_str()).collect();
             let inter = gw.intersection(&tw).count();
             let union = gw.union(&tw).count();
-            let score = if union == 0 { 0.0 } else { inter as f32 / union as f32 };
-            if score > best_score { best_score = score; best_idx = Some(i); }
+            let score = if union == 0 {
+                0.0
+            } else {
+                inter as f32 / union as f32
+            };
+            if score > best_score {
+                best_score = score;
+                best_idx = Some(i);
+            }
         }
-        if best_score >= self.threshold { best_idx.map(|i| &templates[i]) } else { None }
+        if best_score >= self.threshold {
+            best_idx.map(|i| &templates[i])
+        } else {
+            None
+        }
     }
 }
 
 pub struct TemplateInstantiation;
 impl TemplateInstantiation {
-    pub fn instantiate(template: &WorkflowTemplate, parent_id: TaskId, graph: &mut TaskGraph) -> Vec<TaskId> {
+    pub fn instantiate(
+        template: &WorkflowTemplate,
+        parent_id: TaskId,
+        graph: &mut TaskGraph,
+    ) -> Vec<TaskId> {
         let mut child_ids = Vec::new();
         for r in &template.roles {
-            let g = if r.goal_fragment.is_empty() { format!("{} task from template", r.role_name) } else { r.goal_fragment.clone() };
+            let g = if r.goal_fragment.is_empty() {
+                format!("{} task from template", r.role_name)
+            } else {
+                r.goal_fragment.clone()
+            };
             if let Some(cid) = graph.spawn_child(parent_id, &g) {
-                if let Some(node) = graph.get_mut(&cid) { node.role = Some(r.role_name.clone()); }
+                if let Some(node) = graph.get_mut(&cid) {
+                    node.role = Some(r.role_name.clone());
+                }
                 child_ids.push(cid);
             }
         }
@@ -318,14 +464,27 @@ impl TemplateEvaluator for DefaultTemplateEvaluator {
     fn evaluate(&self, goal: &str, template: &WorkflowTemplate) -> TemplateScore {
         let g = goal.to_lowercase();
         let gw: std::collections::HashSet<&str> = g.split_whitespace().collect();
-        let tw: std::collections::HashSet<&str> = template.goal_keywords.iter().map(|s| s.as_str()).collect();
+        let tw: std::collections::HashSet<&str> =
+            template.goal_keywords.iter().map(|s| s.as_str()).collect();
         let inter = gw.intersection(&tw).count();
         let union = gw.union(&tw).count();
-        let goal_sim = if union == 0 { 0.0 } else { inter as f32 / union as f32 };
+        let goal_sim = if union == 0 {
+            0.0
+        } else {
+            inter as f32 / union as f32
+        };
         let sample_rel = template.sample_count as f32 / (template.sample_count as f32 + 10.0);
         let recency = (template.id as f32 / 100.0).min(1.0);
-        let total = 0.40 * goal_sim + 0.30 * template.success_rate + 0.20 * sample_rel + 0.10 * recency;
-        TemplateScore { template_id: template.id, total, goal_similarity: goal_sim, success_rate: template.success_rate, recency, sample_reliability: sample_rel }
+        let total =
+            0.40 * goal_sim + 0.30 * template.success_rate + 0.20 * sample_rel + 0.10 * recency;
+        TemplateScore {
+            template_id: template.id,
+            total,
+            goal_similarity: goal_sim,
+            success_rate: template.success_rate,
+            recency,
+            sample_reliability: sample_rel,
+        }
     }
 }
 
@@ -334,26 +493,44 @@ pub struct TemplateEvolution {
     pub min_samples_for_stability: u32,
 }
 impl Default for TemplateEvolution {
-    fn default() -> Self { Self { min_success_rate: 0.3, min_samples_for_stability: 10 } }
+    fn default() -> Self {
+        Self {
+            min_success_rate: 0.3,
+            min_samples_for_stability: 10,
+        }
+    }
 }
 impl TemplateEvolution {
     pub fn record_outcome(&self, template: &mut WorkflowTemplate, success: bool) {
         let total = template.sample_count + 1;
-        template.success_rate = ((template.success_rate * template.sample_count as f32) + if success { 1.0 } else { 0.0 }) / total as f32;
+        template.success_rate = ((template.success_rate * template.sample_count as f32)
+            + if success { 1.0 } else { 0.0 })
+            / total as f32;
         template.sample_count = total;
     }
     pub fn should_retire(&self, template: &WorkflowTemplate) -> bool {
-        template.sample_count >= self.min_samples_for_stability && template.success_rate < self.min_success_rate
+        template.sample_count >= self.min_samples_for_stability
+            && template.success_rate < self.min_success_rate
     }
-    pub fn select_best<'a>(&self, goal: &str, templates: &'a [WorkflowTemplate], evaluator: &dyn TemplateEvaluator, min_score: f32) -> Option<&'a WorkflowTemplate> {
+    pub fn select_best<'a>(
+        &self,
+        goal: &str,
+        templates: &'a [WorkflowTemplate],
+        evaluator: &dyn TemplateEvaluator,
+        min_score: f32,
+    ) -> Option<&'a WorkflowTemplate> {
         let mut best: Option<(&WorkflowTemplate, f32)> = None;
         for t in templates {
             let s = evaluator.evaluate(goal, t);
             if s.total >= min_score {
-                match best { Some((_, bs)) if s.total > bs => best = Some((t, s.total)), None => best = Some((t, s.total)), _ => {} }
+                match best {
+                    Some((_, bs)) if s.total > bs => best = Some((t, s.total)),
+                    None => best = Some((t, s.total)),
+                    _ => {}
+                }
             }
         }
-        best.map(|(t,_)| t)
+        best.map(|(t, _)| t)
     }
 }
 
@@ -390,11 +567,22 @@ mod tests {
     fn test_template_evaluator_scores() {
         let e = DefaultTemplateEvaluator;
         let t = WorkflowTemplate {
-            id: 1, name: "t".into(), signature: WorkflowSignature {
-                shape: DependencyShape::FanOut, role_count: 1, roles_used: vec!["dev".into()], depth: 1, critical_path_length: 1
+            id: 1,
+            name: "t".into(),
+            signature: WorkflowSignature {
+                shape: DependencyShape::FanOut,
+                role_count: 1,
+                roles_used: vec!["dev".into()],
+                depth: 1,
+                critical_path_length: 1,
             },
-            roles: vec![TemplateRole { role_name: "dev".into(), goal_fragment: "build".into() }],
-            dependency_edges: vec![], success_rate: 0.8, sample_count: 20,
+            roles: vec![TemplateRole {
+                role_name: "dev".into(),
+                goal_fragment: "build".into(),
+            }],
+            dependency_edges: vec![],
+            success_rate: 0.8,
+            sample_count: 20,
             goal_keywords: vec!["build".into(), "api".into()],
         };
         let s = e.evaluate("build api", &t);
@@ -405,11 +593,21 @@ mod tests {
     fn test_pattern_discovery() {
         let rec = ExecutionRecord {
             goal: "build api".into(),
-            signature: WorkflowSignature { shape: DependencyShape::FanOut, role_count: 2, roles_used: vec!["dev".into(), "test".into()], depth: 2, critical_path_length: 2 },
-            success: true, latency_ms: 100.0,
+            signature: WorkflowSignature {
+                shape: DependencyShape::FanOut,
+                role_count: 2,
+                roles_used: vec!["dev".into(), "test".into()],
+                depth: 2,
+                critical_path_length: 2,
+            },
+            success: true,
+            latency_ms: 100.0,
         };
         let patterns = PatternDiscovery::discover(&[rec]);
-        assert!(patterns.is_empty(), "single execution should not form a pattern");
+        assert!(
+            patterns.is_empty(),
+            "single execution should not form a pattern"
+        );
     }
 
     #[test]
@@ -419,8 +617,10 @@ mod tests {
             goal_signature: vec!["build".into(), "api".into()],
             shape: DependencyShape::FanOut,
             roles_used: vec!["dev".into()],
-            success_rate: 0.85, sample_count: 6,
-            avg_completion_time_ms: 1000.0, is_template: false,
+            success_rate: 0.85,
+            sample_count: 6,
+            avg_completion_time_ms: 1000.0,
+            is_template: false,
         };
         reg.promote(&pat);
         let matcher = TemplateMatcher::default();
