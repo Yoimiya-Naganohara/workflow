@@ -12,6 +12,7 @@ pub mod runtime_loop;
 pub mod scheduler;
 pub mod strategy_graph;
 pub mod task_graph;
+pub mod validation;
 
 pub use config::{AgentRuntimeConfig, RoleTemplate};
 pub use event::RuntimeEvent;
