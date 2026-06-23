@@ -6,7 +6,9 @@ use tokio::sync::{RwLock, mpsc};
 use crate::agent::{Agent, AgentConfig, AgentPool, AgentStatus};
 use crate::core::types::AgentId;
 use crate::runtime::AgentRuntime;
-use crate::runtime::decomposition::{CapabilityRegistry, DecompositionEngine, EscalationPolicy, RoleSelector, TaskOutcome, TaskOutcomeStore};
+use crate::runtime::capability::{CapabilityRegistry, RoleSelector, TaskOutcome, TaskOutcomeStore};
+use crate::runtime::decomposition::DecompositionEngine;
+use crate::runtime::escalation::EscalationPolicy;
 use crate::runtime::strategy_graph::{StrategyGraph, StrategyId, StrategyType, TaskSignature};
 use crate::runtime::dispatch::{DispatchDecider, DispatchDecision};
 use crate::runtime::event::RuntimeEvent;
@@ -128,7 +130,7 @@ impl TaskScheduler {
             let routing = {
                 let rt = self.runtime.read().await;
                 let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
-                match g.get(&task_id) { Some(node) => selector.select(node, &candidates), None => crate::runtime::decomposition::RoutingDecision { role: role.to_string(), confidence: 0.5, capability_score: 0.0, skill_match: 0.5 } }
+                match g.get(&task_id) { Some(node) => selector.select(node, &candidates), None => crate::runtime::capability::RoutingDecision { role: role.to_string(), confidence: 0.5, capability_score: 0.0, skill_match: 0.5 } }
             };
             if routing.confidence < 0.3 { tracing::warn!("routing: task {:02x}.. low confidence ({:.2})", task_id[0], routing.confidence); }
             routing.role

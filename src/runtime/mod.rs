@@ -1,8 +1,11 @@
 #![allow(clippy::module_inception)]
 
 pub mod config;
+pub mod capability;
 pub mod decomposition;
 pub mod dispatch;
+pub mod embedding_analyzer;
+pub mod escalation;
 pub mod event;
 pub mod graph_analytics;
 pub mod optimizer;

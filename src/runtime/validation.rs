@@ -310,14 +310,25 @@ impl Validator {
     /// Uses the same deterministic passes as the TUI handler:
     /// TaskGraph root → DecompositionEngine → role inference
     fn run_compiler(task: &ValidationTask) -> TaskMeasurement {
+        use std::sync::Arc;
         use crate::runtime::decomposition::{
             DecompositionEngine, DefaultDecompositionEngine, TensionThreshold,
         };
+        use crate::runtime::embedding_analyzer::MockGoalAnalyzer;
         use crate::runtime::task_graph::TaskGraph;
 
         let mut graph = TaskGraph::new();
         let root_id = graph.spawn_root(task.goal);
-        let engine = DefaultDecompositionEngine::new(TensionThreshold::default());
+        // Mock analyzer calibrated per task category.
+        let (domain, ambiguity) = match task.category {
+            TaskCategory::Simple | TaskCategory::Analysis => (1, 0.0),
+            TaskCategory::MultiDomain | TaskCategory::Sequential => (3, 0.0),
+            TaskCategory::Ambiguous => (1, 0.7),
+        };
+        let engine = DefaultDecompositionEngine::new(
+            TensionThreshold::default(),
+            Arc::new(MockGoalAnalyzer { domain_count: domain, ambiguity, role: Some(("developer".into(), 0.8)) }),
+        );
 
         let (dag_depth, node_count) = if engine.should_decompose(root_id, &graph) {
             let _children = engine.decompose(root_id, &mut graph);

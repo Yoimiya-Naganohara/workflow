@@ -3,10 +3,11 @@
 //! Handles all key events including popup navigation.
 //! Business logic delegated to [`crate::tui::controller`] and [`commands`].
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use crate::runtime::decomposition::DecompositionEngine;
+use crate::runtime::decomposition::{DefaultDecompositionEngine, DecompositionEngine, TensionThreshold};
+use crate::runtime::embedding_analyzer::{EmbeddingGoalAnalyzer, ReferenceEmbeddings};
 
 use super::Tui;
 use super::commands;
@@ -14,6 +15,10 @@ use super::keymap::Action;
 use super::state::{AppState, ChatMessage, Focus, MessageRole, MessageStatus, PopupMode};
 use crate::tui::chat_lines::char_idx_to_byte_idx;
 use crate::tui::effect::Effect;
+
+/// Cached reference embeddings for embedding-based goal analysis.
+/// Initialized on first compiler pass via `block_on` (tokio main runtime).
+static REF_EMBEDDINGS: OnceLock<Arc<ReferenceEmbeddings>> = OnceLock::new();
 
 impl Tui {
     /// Handle a key event. Returns `true` to continue, `false` to quit.
@@ -678,33 +683,54 @@ impl Tui {
                             // Pass 1: Create root task node.
                             let root_id = graph.spawn_root(&input);
 
-                            // Pass 2: Decomposition pass.
-                            // Heuristic, deterministic — no LLM needed.
-                            let engine = crate::runtime::decomposition::DefaultDecompositionEngine::new(
-                                crate::runtime::decomposition::TensionThreshold::default()
-                            );
-                            let should_split = engine.should_decompose(root_id, &graph);
+                            // Pass 2: Embedding-based decomposition.
+                            // The embedding call blocks briefly (fastembed ONNX, ~5-50ms).
+                            // This is acceptable because the TUI is already single-threaded.
+                            let compile = core.runtime.as_ref().and_then(|rt| {
+                                let r = rt.try_read().ok()?;
+                                let embed = r.embedding_service();
+                                let refs = REF_EMBEDDINGS.get_or_init(|| {
+                                    Arc::new(tokio::task::block_in_place(|| {
+                                        tokio::runtime::Handle::current()
+                                            .block_on(ReferenceEmbeddings::compute(&*embed))
+                                    }))
+                                }).clone();
+                                let emb = tokio::task::block_in_place(|| {
+                                    tokio::runtime::Handle::current()
+                                        .block_on(embed.embed(&input))
+                                }).ok()?;
+                                Some((refs, emb))
+                            });
 
-                            if should_split {
-                                // Decompose: creates sub-DAG with roles + dependencies.
-                                let _children = engine.decompose(root_id, &mut graph);
-                                // Update agent role to match first subtask if available.
-                                if let Ok(mut pool) = core.agent_pool.try_write() {
-                                    if let Some(agent) = pool.get_agent_mut(&aid) {
-                                        agent.task_id = Some(root_id);
-                                        if let Some(first_child) = graph.get(&root_id).and_then(|n| n.children.first()).and_then(|cid| graph.get(cid)) {
-                                            if let Some(ref role) = first_child.role {
-                                                agent.role = role.clone();
+                            if let Some((refs, goal_emb)) = compile {
+                                let analyzer = EmbeddingGoalAnalyzer::with_goal((*refs).clone(), goal_emb);
+                                let engine = DefaultDecompositionEngine::new(
+                                    TensionThreshold::default(),
+                                    Arc::new(analyzer),
+                                );
+                                let should_split = engine.should_decompose(root_id, &graph);
+
+                                if should_split {
+                                    let _children = engine.decompose(root_id, &mut graph);
+                                    if let Ok(mut pool) = core.agent_pool.try_write() {
+                                        if let Some(agent) = pool.get_agent_mut(&aid) {
+                                            agent.task_id = Some(root_id);
+                                            if let Some(first_child) = graph.get(&root_id)
+                                                .and_then(|n| n.children.first())
+                                                .and_then(|cid| graph.get(cid))
+                                            {
+                                                if let Some(ref role) = first_child.role {
+                                                    agent.role = role.clone();
+                                                }
                                             }
                                         }
                                     }
-                                }
-                            } else {
-                                // No decomposition: single atomic task, default planner role.
-                                if let Ok(mut pool) = core.agent_pool.try_write() {
-                                    if let Some(agent) = pool.get_agent_mut(&aid) {
-                                        agent.task_id = Some(root_id);
-                                        agent.role = "planner".to_string();
+                                } else {
+                                    if let Ok(mut pool) = core.agent_pool.try_write() {
+                                        if let Some(agent) = pool.get_agent_mut(&aid) {
+                                            agent.task_id = Some(root_id);
+                                            agent.role = "planner".to_string();
+                                        }
                                     }
                                 }
                             }
