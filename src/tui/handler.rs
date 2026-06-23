@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers};
+use crate::runtime::decomposition::DecompositionEngine;
 
 use super::Tui;
 use super::commands;
@@ -664,19 +665,47 @@ impl Tui {
 
             let agent_id = crate::tui::controller::ensure_initial_agent_sync(core, &input);
 
-            // ── Compiler pass: root task creation ──
-            // Ensure every agent has a corresponding TaskGraph node.
+            // ── Compiler pipeline: Phase 1-5 passes ──
+            // The Graph Compiler runs before the LLM, determining structure.
+            // LLM is demoted from 'planner' to 'leaf executor'.
             if let Some(aid) = agent_id {
                 if let Some(rt) = &core.runtime {
                     if let Ok(r) = rt.try_read() {
                         let mut graph = r.task_graph.lock().unwrap_or_else(|e| e.into_inner());
                         let needs_task = core.agent_pool.try_read().ok().map(|p| p.get_agent(&aid).and_then(|a| a.task_id).is_none()).unwrap_or(false);
+
                         if needs_task {
-                            let tid = graph.spawn_root(&input);
-                            graph.mark_decomposed(tid).ok();
-                            if let Ok(mut pool) = core.agent_pool.try_write() {
-                                if let Some(agent) = pool.get_agent_mut(&aid) {
-                                    agent.task_id = Some(tid);
+                            // Pass 1: Create root task node.
+                            let root_id = graph.spawn_root(&input);
+
+                            // Pass 2: Decomposition pass.
+                            // Heuristic, deterministic — no LLM needed.
+                            let engine = crate::runtime::decomposition::DefaultDecompositionEngine::new(
+                                crate::runtime::decomposition::TensionThreshold::default()
+                            );
+                            let should_split = engine.should_decompose(root_id, &graph);
+
+                            if should_split {
+                                // Decompose: creates sub-DAG with roles + dependencies.
+                                let _children = engine.decompose(root_id, &mut graph);
+                                // Update agent role to match first subtask if available.
+                                if let Ok(mut pool) = core.agent_pool.try_write() {
+                                    if let Some(agent) = pool.get_agent_mut(&aid) {
+                                        agent.task_id = Some(root_id);
+                                        if let Some(first_child) = graph.get(&root_id).and_then(|n| n.children.first()).and_then(|cid| graph.get(cid)) {
+                                            if let Some(ref role) = first_child.role {
+                                                agent.role = role.clone();
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                // No decomposition: single atomic task, default planner role.
+                                if let Ok(mut pool) = core.agent_pool.try_write() {
+                                    if let Some(agent) = pool.get_agent_mut(&aid) {
+                                        agent.task_id = Some(root_id);
+                                        agent.role = "planner".to_string();
+                                    }
                                 }
                             }
                         }
