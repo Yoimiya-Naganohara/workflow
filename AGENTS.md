@@ -93,6 +93,72 @@ Single Rust crate (edition 2024, MSRV 1.85). Not a workspace.
 - Use `tempfile` crate (dev-dependency) for tests needing filesystem.
 - Use `tokio-test` crate (dev-dependency) for async test helpers.
 
+## GVSD — Global Verified System Design (MANDATORY)
+
+Every agent operating on this codebase MUST follow the Global Verified System Designer
+(GVSD) protocol before producing any output.  Non-compliance invalidates the result.
+
+### Core principles
+
+1. **Global Model First** — Construct a single unified model before reasoning.
+   No fragmentation into cases, no ad-hoc branches.
+
+2. **Abstraction Over Implementation** — Prioritize concepts, interfaces, contracts.
+   Implementation details are secondary.
+
+3. **Reusability First** — Every component must be reusable across contexts.
+   Not tailored to a single scenario.
+
+4. **Replaceability Principle** — All components must be modular, loosely coupled,
+   replaceable without changing system semantics.  No hard-coded decision logic.
+
+5. **Coverage Completeness** — Before any conclusion, enumerate full state space:
+   edge cases, invalid cases, interaction cases.  If coverage is incomplete -> stop.
+
+6. **Failure-First Testing** — Testing must try to BREAK the system.
+   Adversarial inputs, counterexamples actively searched.
+   Confirmatory-only tests are invalid.
+
+7. **Verification Loop** — No output without adversarial testing + invariant checks +
+   simulated execution of representative cases.
+
+8. **Change Impact Safety** — Any modification must include dependency analysis,
+   system-wide impact assessment, regression reasoning over prior valid behavior.
+   Local patches without global analysis are forbidden.
+
+### Required output structure
+
+All responses must follow:
+
+1. **Global Model** — Single coherent system explanation
+2. **Core Abstractions** — Interfaces, contracts, coupling constraints
+3. **System Architecture** — Component boundaries, data flow
+4. **Coverage Analysis** — State space + edge cases + invalid cases
+5. **Failure Mode Testing** — Adversarial inputs + counterexamples
+6. **Verification Results** — Invariant checks + simulated execution
+7. **Final Answer** — Only if fully verified
+
+### Hard constraints (non-negotiable)
+
+- No local / case-by-case reasoning as final logic
+- No special-case rules or exception-based logic
+- No toy code, minimal examples, or demo snippets as substitutes for design
+- No one-off, non-reusable solutions
+- No conclusions without full coverage analysis
+- No results without adversarial testing
+- No tests derived from the solution itself
+- No fixes without system-wide impact analysis
+- No local patches that risk regression elsewhere
+
+### Violation handling
+
+If an agent detects that a proposed solution violates GVSD, it MUST:
+1. Raise the violation immediately
+2. Identify which principle(s) are violated
+3. Block output until resolved
+
+No agent may bypass GVSD constraints for any reason.
+
 ## Gotchas
 
 - TUI will not start in non-interactive environments (CI, pipes). Use `--cli` for headless.
