@@ -41,7 +41,8 @@
 //! It calls `TaskGraph::spawn_child()` directly because graph mutation
 //! is its sole responsibility.
 
-use crate::core::types::TaskId;
+use crate::core::simd::cosine_similarity_384;
+use crate::core::types::{TaskId, EMBEDDING_DIM};
 use crate::runtime::task_graph::{TaskGraph, TaskNode};
 use std::collections::HashMap;
 
@@ -213,11 +214,72 @@ pub trait DecompositionEngine: Send + Sync {
 /// independently tunable knobs.
 pub struct DefaultDecompositionEngine {
     threshold: TensionThreshold,
+    /// Pre-computed goal embedding for semantic estimation.
+    goal_embedding: Option<[f32; EMBEDDING_DIM]>,
+    /// Role prototype embeddings loaded from CapabilityRegistry.
+    /// Maps role_name → embedding vector for cosine similarity comparison.
+    role_prototypes: HashMap<String, [f32; EMBEDDING_DIM]>,
 }
 
 impl DefaultDecompositionEngine {
     pub fn new(threshold: TensionThreshold) -> Self {
-        Self { threshold }
+        Self { threshold, goal_embedding: None, role_prototypes: HashMap::new() }
+    }
+
+
+
+    /// Construct with embedding + full role prototype set (from CapabilityRegistry).
+    ///
+    /// This is the full embedding path: the goal embedding is compared against
+    /// each role prototype via cosine_similarity_384().  The best match is used
+    /// for role inference.
+    pub fn with_prototypes(
+        threshold: TensionThreshold,
+        goal_embedding: [f32; EMBEDDING_DIM],
+        role_prototypes: HashMap<String, [f32; EMBEDDING_DIM]>,
+    ) -> Self {
+        Self { threshold, goal_embedding: Some(goal_embedding), role_prototypes }
+    }
+
+    /// Embedding-based role inference.
+    ///
+    /// Compares the goal embedding against each role prototype using
+    /// cosine similarity (AVX2-accelerated via cosine_similarity_384).
+    /// Returns the role with the highest similarity above a minimum
+    /// threshold (0.3), or falls back to keywords if no prototype matches.
+    fn infer_role_embedding(
+        goal_emb: &[f32; EMBEDDING_DIM],
+        prototypes: &HashMap<String, [f32; EMBEDDING_DIM]>,
+        goal: &str,
+    ) -> Option<String> {
+        let mut best_role: Option<String> = None;
+        let mut best_score: f32 = 0.3;
+
+        for (role, prot_emb) in prototypes {
+            let sim = cosine_similarity_384(goal_emb, prot_emb);
+            if sim > best_score {
+                best_score = sim;
+                best_role = Some(role.clone());
+            }
+        }
+        // Fall back to keywords if no prototype matched well enough.
+        best_role.or_else(|| Self::infer_role_fallback(goal))
+    }
+
+    /// Keyword-based role inference (fallback).
+    fn infer_role_fallback(goal: &str) -> Option<String> {
+        let g = goal.to_lowercase();
+        if g.contains("security")||g.contains("audit")||g.contains("threat")
+            ||(g.contains("auth")&&g.contains("permission")) {return Some("security_auditor".to_string())}
+        if g.contains("test")||g.contains("verify")||g.contains("qa") {return Some("tester".to_string())}
+        if g.contains("deploy")||g.contains("infra")||g.contains("ci")||g.contains("docker") {return Some("devops".to_string())}
+        if g.contains("plan")||g.contains("design")||g.contains("architecture") {return Some("planner".to_string())}
+        if g.contains("research")||g.contains("analyze")||g.contains("investigate") {return Some("researcher".to_string())}
+        if g.contains("review")||g.contains("inspect") {return Some("reviewer".to_string())}
+        if g.contains("backend")||g.contains("api")||g.contains("server")||g.contains("database")
+            ||g.contains("frontend")||g.contains("ui")||g.contains("client")||g.contains("dashboard") {return Some("developer".to_string())}
+        if g.contains("improve")||g.contains("better")||g.contains("optimize")||g.contains("refactor") {return Some("planner".to_string())}
+        None
     }
 
     /// Log the tension vector for debugging / observability.
@@ -231,6 +293,20 @@ impl DefaultDecompositionEngine {
             tension.role_diversity,
             if decision { "DECOMPOSE" } else { "execute" }
         );
+    }
+
+    /// Infer a role for a subtask goal.
+    ///
+    /// When BOTH the goal embedding AND role prototype embeddings are
+    /// available, uses cosine similarity for semantic role matching.
+    /// Otherwise falls back to keyword heuristics.
+    fn infer_role_for_goal(&self, goal: &str) -> Option<String> {
+        if let Some(ref goal_emb) = self.goal_embedding {
+            if !self.role_prototypes.is_empty() {
+                return Self::infer_role_embedding(goal_emb, &self.role_prototypes, goal);
+            }
+        }
+        Self::infer_role_fallback(goal)
     }
 }
 
@@ -287,10 +363,17 @@ impl DecompositionEngine for DefaultDecompositionEngine {
             }
         }
 
-        // Create subtasks.
+        // Create subtasks with role inference.
         let mut children = Vec::new();
         for sg in &subtask_goals {
             if let Some(cid) = graph.spawn_child(task_id, sg) {
+                // Infer role for each subtask using embedding (if available)
+                // or keyword heuristic (fallback).
+                if let Some(role) = self.infer_role_for_goal(sg) {
+                    if let Some(child) = graph.get_mut(&cid) {
+                        child.role = Some(role);
+                    }
+                }
                 children.push(cid);
             }
         }
@@ -383,6 +466,8 @@ pub struct CapabilityProfile {
     pub avg_token_cost: u32,
     pub completed_tasks: u64,
     pub failed_tasks: u64,
+    /// Role prototype embedding for similarity-based role inference.
+    pub embedding: Option<[f32; EMBEDDING_DIM]>,
 }
 
 pub struct CapabilityRegistry {
@@ -393,10 +478,18 @@ impl CapabilityRegistry {
     pub fn new() -> Self { Self { profiles: HashMap::new() } }
     pub fn get(&self, role: &str) -> Option<&CapabilityProfile> { self.profiles.get(role) }
     pub fn all(&self) -> Vec<CapabilityProfile> { self.profiles.values().cloned().collect() }
+    pub fn get_mut(&mut self, role: &str) -> Option<&mut CapabilityProfile> { self.profiles.get_mut(role) }
+    /// Extract role → embedding map for the decomposition engine.
+    pub fn role_prototypes(&self) -> HashMap<String, [f32; EMBEDDING_DIM]> {
+        self.profiles.iter().filter_map(|(role, profile)| {
+            profile.embedding.map(|emb| (role.clone(), emb))
+        }).collect()
+    }
+
     pub fn record_outcome(&mut self, outcome: &TaskOutcome) {
         let entry = self.profiles.entry(outcome.role.clone()).or_insert(CapabilityProfile {
             role: outcome.role.clone(), success_rate: 0.0, avg_latency_ms: 0, avg_token_cost: 0,
-            completed_tasks: 0, failed_tasks: 0,
+            completed_tasks: 0, failed_tasks: 0, embedding: None,
         });
         let total = entry.completed_tasks + entry.failed_tasks + 1;
         entry.avg_latency_ms = ((entry.avg_latency_ms as u64 * (total - 1).max(1) as u64) + outcome.latency_ms) / total as u64;
