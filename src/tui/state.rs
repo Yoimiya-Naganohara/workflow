@@ -558,6 +558,9 @@ impl AppState {
                             msg.content.push('\n');
                             msg.content.push_str(arg_line);
                         }
+                        // Trailing blank line to visually separate tool calls
+                        // from subsequent text or next tool call.
+                        msg.content.push('\n');
                     }
                 } else {
                     let mut content = name;
@@ -565,6 +568,8 @@ impl AppState {
                         content.push('\n');
                         content.push_str(arg_line);
                     }
+                    // Trailing blank line to visually separate tool calls.
+                    content.push('\n');
                     self.core.messages.push(ChatMessage {
                         role: MessageRole::Decision,
                         content,
