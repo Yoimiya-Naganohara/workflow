@@ -363,9 +363,29 @@ impl AgentRuntime {
             snapshot.task_graph.len(),
         );
 
-        // Restore agent pool.
+        // Restore agent pool — preserve non-serialized config from existing pool.
         {
-            let rehydrated = Checkpoint::rehydrate_pool(&snapshot);
+            // Save config from the existing pool before overwriting.
+            let config = {
+                let p = agent_pool.read().await;
+                (
+                    p.max_retries,
+                    p.checkpoint_interval,
+                    p.ttl_secs,
+                    p.max_agents,
+                    p.reasoning_effort.clone(),
+                    p.reasoning_options.clone(),
+                )
+            };
+            let mut rehydrated = Checkpoint::rehydrate_pool(&snapshot);
+            // Restore config values that were set by runtime configuration
+            // (not serialized in snapshot).
+            rehydrated.max_retries = config.0;
+            rehydrated.checkpoint_interval = config.1;
+            rehydrated.ttl_secs = config.2;
+            rehydrated.max_agents = config.3;
+            rehydrated.reasoning_effort = config.4;
+            rehydrated.reasoning_options = config.5;
             let mut p = agent_pool.write().await;
             *p = rehydrated;
         }
@@ -722,6 +742,7 @@ impl AgentRuntime {
             task_id: Some(root_task_id),
             sandbox,
             retry_count: 0,
+            reasoning: String::new(),
         };
         agent_pool.add_agent(agent);
         agent_id
@@ -812,6 +833,7 @@ impl AgentRuntime {
                     sandbox: sandbox.clone(),
                     task_id: None,
                     retry_count: 0,
+                    reasoning: String::new(),
                 };
                 agent_pool.add_agent(agent);
                 Ok(agent_id)
@@ -926,6 +948,7 @@ impl AgentRuntime {
                     task_id: None,
                     sandbox: sandbox.clone(),
                     retry_count: 0,
+                    reasoning: String::new(),
                 };
                 agent_pool.add_agent(agent);
                 // Register plan entity
@@ -1339,8 +1362,13 @@ Messages may contain important context from sibling agents.",
             while let Some(event) = stream.next().await {
                 match event {
                     crate::llm::ToolEvent::Text(t) => text.push_str(&t),
-                    crate::llm::ToolEvent::Reasoning(_t) => {
-                        // Agent execution — reasoning is informational only.
+                    crate::llm::ToolEvent::Reasoning(t) => {
+                        // Accumulate reasoning on the agent for TUI display.
+                        if let Ok(mut pool) = agent_pool.try_write() {
+                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                                agent.reasoning.push_str(&t);
+                            }
+                        }
                     }
                     crate::llm::ToolEvent::ToolCall { name, args, .. } => {
                         tool_call_count += 1;
@@ -1376,36 +1404,28 @@ Messages may contain important context from sibling agents.",
                         if reason == crate::llm::DoneReason::LoopTerminated
                             || reason == crate::llm::DoneReason::StreamError
                         {
-                            let mut pool = agent_pool.write().await;
-                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                                agent.status = AgentStatus::Failed;
-                                agent.result = Some(text.clone());
-                                pool.release_budget_guard(&agent_id);
-                                pool.notify_completed(&agent_id);
-                            }
-                            return (text, AgentStatus::Failed);
+                            // Not a failure — continue with accumulated text.
+                            tracing::info!(
+                                "Agent {:02x}.. completed with {} ({} bytes)",
+                                agent_id[0],
+                                if reason == crate::llm::DoneReason::LoopTerminated {
+                                    "loop termination"
+                                } else {
+                                    "stream error"
+                                },
+                                text.len(),
+                            );
                         }
                         break;
                     }
                 }
             }
             if !done_received {
-                let mut pool = agent_pool.write().await;
-                if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                    agent.status = AgentStatus::Failed;
-                    agent.result = Some(format!(
-                        "Stream ended without Done event (text: {})…",
-                        &text[..text.len().min(80)]
-                    ));
-                    pool.release_budget_guard(&agent_id);
-                    pool.notify_completed(&agent_id);
-                }
-                return (
-                    format!(
-                        "Stream ended without Done event (text: {})…",
-                        &text[..text.len().min(80)]
-                    ),
-                    AgentStatus::Failed,
+                // Stream ended without Done — complete with what we have.
+                tracing::warn!(
+                    "Agent {:02x}.. stream ended without Done event ({} bytes)",
+                    agent_id[0],
+                    text.len(),
                 );
             }
             // If the LLM hit max turns without producing a final message,
@@ -1443,9 +1463,20 @@ Messages may contain important context from sibling agents.",
                     "No such file",
                     "StatusCode:",
                     "exit code:",
+                    "ToolNotFound",
+                    "ToolCallError",
+                    "RuntimeError",
+                    "Tool execution failed",
+                    "cannot read",
+                    "Cannot read",
+                    "is a directory",
+                    "Is a directory",
+                    "No such device",
+                    "permission",
                 ];
                 let has_error = error_keywords.iter().any(|pat| text.contains(pat));
                 if has_error {
+                    // Mark the most recent tool calls as errored.
                     if let Ok(mut pool) = agent_pool.try_write() {
                         if let Some(agent) = pool.get_agent_mut(&agent_id) {
                             for record in agent.tool_trace.iter_mut().rev().take(2) {
@@ -1642,8 +1673,13 @@ Messages may contain important context from sibling agents.",
             while let Some(event) = stream.next().await {
                 match event {
                     crate::llm::ToolEvent::Text(t) => text.push_str(&t),
-                    crate::llm::ToolEvent::Reasoning(_t) => {
-                        // Agent execution — reasoning is informational only.
+                    crate::llm::ToolEvent::Reasoning(t) => {
+                        // Accumulate reasoning on the agent for TUI display.
+                        if let Ok(mut pool) = agent_pool.try_write() {
+                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                                agent.reasoning.push_str(&t);
+                            }
+                        }
                     }
                     crate::llm::ToolEvent::ToolCall { name, args, .. } => {
                         tool_call_count += 1;
@@ -1677,36 +1713,28 @@ Messages may contain important context from sibling agents.",
                         if reason == crate::llm::DoneReason::LoopTerminated
                             || reason == crate::llm::DoneReason::StreamError
                         {
-                            let mut pool = agent_pool.write().await;
-                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                                agent.status = AgentStatus::Failed;
-                                agent.result = Some(text.clone());
-                                pool.release_budget_guard(&agent_id);
-                                pool.notify_completed(&agent_id);
-                            }
-                            return (text, AgentStatus::Failed);
+                            // Not a failure — continue with accumulated text.
+                            tracing::info!(
+                                "Agent {:02x}.. completed with {} ({} bytes)",
+                                agent_id[0],
+                                if reason == crate::llm::DoneReason::LoopTerminated {
+                                    "loop termination"
+                                } else {
+                                    "stream error"
+                                },
+                                text.len(),
+                            );
                         }
                         break;
                     }
                 }
             }
             if !done_received {
-                let mut pool = agent_pool.write().await;
-                if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                    agent.status = AgentStatus::Failed;
-                    agent.result = Some(format!(
-                        "Stream ended without Done event (text: {})…",
-                        &text[..text.len().min(80)]
-                    ));
-                    pool.release_budget_guard(&agent_id);
-                    pool.notify_completed(&agent_id);
-                }
-                return (
-                    format!(
-                        "Stream ended without Done event (text: {})…",
-                        &text[..text.len().min(80)]
-                    ),
-                    AgentStatus::Failed,
+                // Stream ended without Done — complete with what we have.
+                tracing::warn!(
+                    "Agent {:02x}.. stream ended without Done event ({} bytes)",
+                    agent_id[0],
+                    text.len(),
                 );
             }
             // If the LLM hit max turns without producing a final message,
@@ -1744,9 +1772,20 @@ Messages may contain important context from sibling agents.",
                     "No such file",
                     "StatusCode:",
                     "exit code:",
+                    "ToolNotFound",
+                    "ToolCallError",
+                    "RuntimeError",
+                    "Tool execution failed",
+                    "cannot read",
+                    "Cannot read",
+                    "is a directory",
+                    "Is a directory",
+                    "No such device",
+                    "permission",
                 ];
                 let has_error = error_keywords.iter().any(|pat| text.contains(pat));
                 if has_error {
+                    // Mark the most recent tool calls as errored.
                     if let Ok(mut pool) = agent_pool.try_write() {
                         if let Some(agent) = pool.get_agent_mut(&agent_id) {
                             for record in agent.tool_trace.iter_mut().rev().take(2) {
@@ -1824,7 +1863,23 @@ Messages may contain important context from sibling agents.",
         };
 
         if let Some(notify) = notify {
-            notify.notified().await;
+            // Loop: Notify may fire early when the agent is retried.
+            // `notify_completed` is called inside `execute_agent_detached` on
+            // every failure, even transient ones (retry).  After retry, the
+            // agent status is reset to Idle.  Wait for the true terminal state.
+            loop {
+                notify.notified().await;
+                let pool = agent_pool.read().await;
+                let is_terminal = pool.get_agent(&agent_id).map_or(true, |a| {
+                    matches!(
+                        a.status,
+                        crate::agent::AgentStatus::Completed | crate::agent::AgentStatus::Failed
+                    )
+                });
+                if is_terminal {
+                    break;
+                }
+            }
         }
 
         let pool = agent_pool.read().await;

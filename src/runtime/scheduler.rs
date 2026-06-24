@@ -311,6 +311,7 @@ impl TaskScheduler {
             task_id: Some(task_id),
             sandbox,
             retry_count: 0,
+            reasoning: String::new(),
         };
         {
             let rt = self.runtime.read().await;

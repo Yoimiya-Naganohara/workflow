@@ -471,6 +471,7 @@ impl Plan {
                     task_id: None,
                     sandbox: None,
                     retry_count: 0,
+                    reasoning: String::new(),
                 };
                 let agent_id = agent.id;
                 pool.add_agent(agent);

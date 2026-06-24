@@ -167,6 +167,10 @@ pub struct Agent {
     /// Reset to 0 on successful completion.
     #[serde(default)]
     pub retry_count: u32,
+    /// Accumulated reasoning/chain-of-thought from the LLM during execution.
+    /// Displayed in the agent detail popup; not sent to the parent agent.
+    #[serde(default)]
+    pub reasoning: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -693,6 +697,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            reasoning: String::new(),
         };
         let id = pool.add_agent(agent);
         assert_eq!(pool.agents().len(), 1);
@@ -724,6 +729,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            reasoning: String::new(),
         };
         pool.add_agent(agent);
         let summary = pool.summary();

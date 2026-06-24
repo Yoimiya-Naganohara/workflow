@@ -906,6 +906,7 @@ mod tests {
                 task_id: None,
                 sandbox: None,
                 retry_count: 0,
+                reasoning: String::new(),
             });
         }
 
@@ -1078,6 +1079,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            reasoning: String::new(),
         });
 
         let mut state = crate::tui::state::AppState::default();

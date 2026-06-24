@@ -112,9 +112,36 @@ impl Checkpoint {
     }
 
     /// Save a full snapshot (agent pool + task graph) atomically.
+    ///
+    /// Holds serialization locks for the duration of both serialization AND
+    /// file I/O.  Prefer two-phase save via [`serialize_snapshot`] + [`write_snapshot`]
+    /// when the caller holds runtime locks that should not be held across I/O.
     pub fn save_snapshot(&self, pool: &AgentPool, graph: &TaskGraph) -> Result<()> {
         self.save_pool(pool)?;
         self.save_graph(graph)?;
+        Ok(())
+    }
+
+    /// Phase 1: serialize pool and graph into bytes (fast, in-memory only).
+    ///
+    /// Call this while holding the runtime read lock.  After dropping all
+    /// locks, pass the returned bytes to [`write_snapshot`].
+    pub fn serialize_snapshot(
+        &self,
+        pool: &AgentPool,
+        graph: &TaskGraph,
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        let pool_bytes = bincode::serialize(pool)?;
+        let graph_bytes = bincode::serialize(graph)?;
+        Ok((pool_bytes, graph_bytes))
+    }
+
+    /// Phase 2: write pre-serialized bytes to disk.
+    ///
+    /// No locks held.  Does file I/O which may block.
+    pub fn write_snapshot(&self, pool_bytes: &[u8], graph_bytes: &[u8]) -> Result<()> {
+        crate::persistence::write_binary(&self.pool_path, pool_bytes)?;
+        crate::persistence::write_binary(&self.graph_path, graph_bytes)?;
         Ok(())
     }
 
@@ -229,6 +256,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            reasoning: String::new(),
         }
     }
 

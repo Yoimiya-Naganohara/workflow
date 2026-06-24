@@ -100,18 +100,32 @@ impl RuntimeEventLoop {
                 }
             }
             // Periodic checkpoint: save pool + graph at configured interval.
+            // Two-phase: serialize under brief lock, write outside lock.
             if eviction_tick % 10 == 0 {
-                // Checkpoint at a finer granularity than eviction.
                 let cp_interval = {
                     let p = self.pool.read().await;
                     p.checkpoint_interval
                 };
                 if cp_interval > 0 && self.checkpoint_tick % cp_interval == 0 {
-                    let p = self.pool.read().await;
-                    let rt = self.runtime.read().await;
-                    let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
-                    if let Err(e) = self.checkpoint.save_snapshot(&p, &g) {
-                        tracing::warn!("Checkpoint save failed: {}", e);
+                    // Phase 1: serialize under lock (fast, in-memory).
+                    let serialized = {
+                        let p = self.pool.read().await;
+                        let rt = self.runtime.read().await;
+                        let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                        self.checkpoint.serialize_snapshot(&p, &g)
+                    };
+                    // Phase 2: write to disk outside lock (slow I/O).
+                    match serialized {
+                        Ok((pool_bytes, graph_bytes)) => {
+                            if let Err(e) =
+                                self.checkpoint.write_snapshot(&pool_bytes, &graph_bytes)
+                            {
+                                tracing::warn!("Checkpoint write failed: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Checkpoint serialize failed: {}", e);
+                        }
                     }
                 }
                 self.checkpoint_tick += 1;
@@ -458,21 +472,48 @@ impl RuntimeEventLoop {
             };
             if should_retry {
                 // Increment retry count, reset status, and re-activate.
-                {
+                let (task_id, _max_retries) = {
+                    // Read max_retries before the mutable borrow.
+                    let max_retries = pool.read().await.max_retries;
                     let mut p = pool.write().await;
                     if let Some(agent) = p.get_agent_mut(&agent_id) {
                         agent.retry_count += 1;
                         // Reset to Idle so the scheduler picks it up.
                         agent.status = AgentStatus::Idle;
+                        // Clear stale result from previous failed attempt.
+                        agent.result = None;
                         agent.last_active_at = crate::agent::now_secs();
                         let rc = agent.retry_count;
-                        let mr = p.max_retries;
                         tracing::info!(
                             "Agent {:02x}.. retry {}/{} — re-activating through pipeline",
                             agent_id[0],
                             rc,
-                            mr,
+                            max_retries,
                         );
+                        (agent.task_id, max_retries)
+                    } else {
+                        (None, max_retries)
+                    }
+                };
+                // Also reset the task in the task graph from Running back to
+                // Created so the scheduler can re-dispatch it.
+                if let Some(tid) = task_id {
+                    let rt = runtime.read().await;
+                    if let Ok(mut g) = rt.task_graph.lock() {
+                        let prev = g.get(&tid).map(|n| n.status);
+                        match prev {
+                            Some(crate::runtime::task_graph::TaskStatus::Running) => {
+                                let _ = g.mark_created(tid);
+                                tracing::info!(
+                                    "Retry: task {:02x}.. reset from Running to Created",
+                                    tid[0],
+                                );
+                            }
+                            Some(crate::runtime::task_graph::TaskStatus::Dispatching) => {
+                                let _ = g.mark_created(tid);
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 // Emit ActivateAgent so the scheduler re-processes this agent.
@@ -863,6 +904,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            reasoning: String::new(),
         }
     }
 

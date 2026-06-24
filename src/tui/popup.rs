@@ -432,24 +432,26 @@ fn render_file_popup(f: &mut Frame, area: Rect, state: &AppState) {
 
 fn render_agent_detail_popup(f: &mut Frame, area: Rect, state: &AppState, agent_id: &AgentId) {
     // Read agent data from pool (try_read — never block the render thread).
-    let (name, role, status, depth, goal, result, trace) = match state.core.agent_pool.try_read() {
-        Ok(pool) => {
-            let Some(agent) = pool.agents().iter().find(|a| a.id == *agent_id) else {
-                return;
-            };
-            let trace = build_tool_trace_preview(&pool, agent_id);
-            (
-                agent.name.clone(),
-                agent.role.clone(),
-                agent.status.clone(),
-                agent.depth,
-                agent.goal.clone(),
-                agent.result.clone().unwrap_or_default(),
-                trace,
-            )
-        }
-        Err(_) => return,
-    };
+    let (name, role, status, depth, goal, result, trace, reasoning) =
+        match state.core.agent_pool.try_read() {
+            Ok(pool) => {
+                let Some(agent) = pool.agents().iter().find(|a| a.id == *agent_id) else {
+                    return;
+                };
+                let trace = build_tool_trace_preview(&pool, agent_id);
+                (
+                    agent.name.clone(),
+                    agent.role.clone(),
+                    agent.status.clone(),
+                    agent.depth,
+                    agent.goal.clone(),
+                    agent.result.clone().unwrap_or_default(),
+                    trace,
+                    agent.reasoning.clone(),
+                )
+            }
+            Err(_) => return,
+        };
 
     let status_str = match status {
         AgentStatus::Idle => "Idle",
@@ -489,6 +491,20 @@ fn render_agent_detail_popup(f: &mut Frame, area: Rect, state: &AppState, agent_
     if !trace.is_empty() {
         lines.push(" Tools:".to_string());
         lines.extend(trace);
+    }
+
+    if !reasoning.is_empty() {
+        lines.push(String::new());
+        lines.push(" Reasoning:".to_string());
+        // Show first 200 chars of reasoning (think level 1)
+        let display = if reasoning.chars().count() > 200 {
+            format!("{}…", reasoning.chars().take(200).collect::<String>())
+        } else {
+            reasoning
+        };
+        for line in display.lines() {
+            lines.push(format!("  {}", line));
+        }
     }
 
     lines.push(String::new());
@@ -694,6 +710,7 @@ mod tests {
                 task_id: None,
                 sandbox: None,
                 retry_count: 0,
+                reasoning: String::new(),
             });
         }
 
@@ -748,6 +765,7 @@ mod tests {
                 task_id: None,
                 sandbox: None,
                 retry_count: 0,
+                reasoning: String::new(),
             });
         }
 
