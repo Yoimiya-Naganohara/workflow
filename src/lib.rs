@@ -1,5 +1,6 @@
 pub mod admission;
 pub mod agent;
+pub mod checkpoint;
 pub mod config;
 pub mod core;
 pub mod experience;

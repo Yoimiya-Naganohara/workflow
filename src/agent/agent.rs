@@ -163,6 +163,10 @@ pub struct Agent {
     /// Created on spawn, cleaned up on eviction.
     #[serde(skip)]
     pub sandbox: Option<Arc<SandboxHandle>>,
+    /// Number of times this agent has been retried after transient failure.
+    /// Reset to 0 on successful completion.
+    #[serde(default)]
+    pub retry_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -175,15 +179,19 @@ pub enum AgentStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentPool {
     agents: Vec<Agent>,
+    #[serde(skip)]
     pub(crate) provider: Option<Arc<crate::llm::LlmProvider>>,
+    #[serde(skip)]
     completions: HashMap<AgentId, Arc<Notify>>,
     /// Active budget guards keyed by agent ID.
     /// Guards are dropped (releasing budget) when agents complete or fail.
+    #[serde(skip)]
     budget_guards: HashMap<AgentId, BudgetGuard>,
     /// Role-scoped memos — shared by all agents with the same role.
-    role_memos: HashMap<String, Vec<MemoEntry>>,
+    pub role_memos: HashMap<String, Vec<MemoEntry>>,
     /// Siblings that this agent depends on for coordination.
     /// Only populated when an agent explicitly declares a dependency
     /// via the `await_sibling` tool.  Cleared after the dependency
@@ -200,6 +208,13 @@ pub struct AgentPool {
     /// Reasoning options parsed from `api.json` for the current model.
     /// Used to build provider-specific reasoning parameters dynamically.
     pub reasoning_options: Vec<crate::models::ReasoningOption>,
+    /// Maximum number of retries per agent after transient failures.
+    #[serde(default)]
+    pub max_retries: u32,
+    /// Checkpoint save interval in events.
+    /// Every N events, the pool is persisted to disk.
+    #[serde(default)]
+    pub checkpoint_interval: u64,
 }
 
 impl Default for AgentPool {
@@ -221,6 +236,8 @@ impl AgentPool {
             max_agents: crate::core::constants::DEFAULT_MAX_AGENTS,
             reasoning_effort: None,
             reasoning_options: vec![],
+            max_retries: 3,
+            checkpoint_interval: 50,
         }
     }
 
@@ -675,6 +692,7 @@ mod tests {
             inbox: VecDeque::new(),
             task_id: None,
             sandbox: None,
+            retry_count: 0,
         };
         let id = pool.add_agent(agent);
         assert_eq!(pool.agents().len(), 1);
@@ -705,6 +723,7 @@ mod tests {
             inbox: VecDeque::new(),
             task_id: None,
             sandbox: None,
+            retry_count: 0,
         };
         pool.add_agent(agent);
         let summary = pool.summary();

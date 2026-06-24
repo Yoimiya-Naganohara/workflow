@@ -310,6 +310,7 @@ impl TaskScheduler {
             inbox: std::collections::VecDeque::new(),
             task_id: Some(task_id),
             sandbox,
+            retry_count: 0,
         };
         {
             let rt = self.runtime.read().await;

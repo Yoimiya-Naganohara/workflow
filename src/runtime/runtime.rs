@@ -18,6 +18,7 @@ use crate::experience::RoleTemplateStore;
 use crate::l0::BudgetGuard;
 use crate::llm::EmbeddingService;
 use crate::llm::LlmProvider;
+use crate::runtime::task_graph::TaskGraph;
 
 // ============================================================================
 //  AgentRuntime — Composes decision pipeline + agent lifecycle
@@ -320,6 +321,90 @@ impl AgentRuntime {
         std::path::PathBuf::from(home)
             .join(".workflow")
             .join("role_templates.json")
+    }
+
+    // ── Checkpoint recovery ──
+
+    /// Restore an agent pool and task graph from the last checkpoint.
+    ///
+    /// Returns `true` if a checkpoint was found and restored, `false` if
+    /// no checkpoint exists (first run).  The restored pool is written into
+    /// `agent_pool` and the task graph into `self.task_graph`.
+    ///
+    /// # Non-serializable fields
+    ///
+    /// After restoration, `agent_pool` will have:
+    /// - No `provider` — caller must set it via `agent_pool.set_provider()`
+    /// - Re-created `Notify` handles for each agent
+    /// - No budget guards — budget resets on restart
+    /// - No sandbox handles — sandboxes are re-created on activation
+    pub async fn restore_checkpoint(
+        agent_pool: &Arc<RwLock<AgentPool>>,
+        task_graph: &std::sync::Arc<std::sync::Mutex<TaskGraph>>,
+    ) -> bool {
+        use crate::checkpoint::Checkpoint;
+
+        let cp = Checkpoint::new();
+        let snapshot = match cp.restore_snapshot() {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                tracing::info!("No checkpoint found — starting fresh");
+                return false;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load checkpoint: {} — starting fresh", e);
+                return false;
+            }
+        };
+
+        tracing::info!(
+            "Restored {} agents and {} tasks from checkpoint",
+            snapshot.agents.len(),
+            snapshot.task_graph.len(),
+        );
+
+        // Restore agent pool.
+        {
+            let rehydrated = Checkpoint::rehydrate_pool(&snapshot);
+            let mut p = agent_pool.write().await;
+            *p = rehydrated;
+        }
+
+        // Restore task graph — reset non-terminal tasks so they can be re-scheduled.
+        {
+            let mut g = task_graph
+                .lock()
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+            *g = snapshot.task_graph;
+            // Reset Running/Dispatching tasks to their pre-execution state.
+            // Agents that were running have lost their in-flight LLM call.
+            let reset_ids: Vec<crate::core::types::TaskId> = g
+                .all_nodes()
+                .filter(|n| {
+                    matches!(
+                        n.status,
+                        crate::runtime::task_graph::TaskStatus::Running
+                            | crate::runtime::task_graph::TaskStatus::Dispatching
+                    )
+                })
+                .map(|n| n.id)
+                .collect();
+            for tid in reset_ids {
+                // Running → Ready (can be re-assigned); Dispatching → Created (re-dispatch).
+                let prev = g.get(&tid).map(|n| n.status);
+                match prev {
+                    Some(crate::runtime::task_graph::TaskStatus::Running) => {
+                        let _ = g.mark_ready(tid);
+                    }
+                    Some(crate::runtime::task_graph::TaskStatus::Dispatching) => {
+                        let _ = g.mark_created(tid);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        true
     }
 
     // ── Pipeline delegation ──
@@ -636,6 +721,7 @@ impl AgentRuntime {
             inbox: std::collections::VecDeque::new(),
             task_id: Some(root_task_id),
             sandbox,
+            retry_count: 0,
         };
         agent_pool.add_agent(agent);
         agent_id
@@ -725,6 +811,7 @@ impl AgentRuntime {
                     inbox: std::collections::VecDeque::new(),
                     sandbox: sandbox.clone(),
                     task_id: None,
+                    retry_count: 0,
                 };
                 agent_pool.add_agent(agent);
                 Ok(agent_id)
@@ -838,6 +925,7 @@ impl AgentRuntime {
                     inbox: std::collections::VecDeque::new(),
                     task_id: None,
                     sandbox: sandbox.clone(),
+                    retry_count: 0,
                 };
                 agent_pool.add_agent(agent);
                 // Register plan entity
@@ -1208,7 +1296,7 @@ Messages may contain important context from sibling agents.",
             inbox_hint,
         );
         let leaf_goal = format!(
-            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\nTOOL DISCIPLINE: Only call tools when you truly need information you cannot infer. Prefer answering directly from your knowledge. You have up to 6 tool call rounds available. If you have called several tools and still cannot answer, summarize what you found and explain what is missing. Repeated calls to the same tool with the same arguments (3+ times) will be treated as a loop and terminated.",
+            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\nTOOL DISCIPLINE: Only call tools when you truly need information you cannot infer. Prefer answering directly from your knowledge. You have up to 6 tool call rounds available, with a maximum of 12 total tool calls per session. No single tool may be called more than 6 times. If you have called several tools and still cannot answer, summarize what you found and explain what is missing. Repeated calls to the same tool with the same arguments (3+ times) will be treated as a loop and terminated.",
             goal
         );
 
@@ -1469,7 +1557,7 @@ Messages may contain important context from sibling agents.",
         };
 
         let leaf_goal = format!(
-            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\nTOOL DISCIPLINE: Only call tools when you truly need information you cannot infer. Prefer answering directly from your knowledge. You have up to 6 tool call rounds available. If you have called several tools and still cannot answer, summarize what you found and explain what is missing. Repeated calls to the same tool with the same arguments (3+ times) will be treated as a loop and terminated.",
+            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\nTOOL DISCIPLINE: Only call tools when you truly need information you cannot infer. Prefer answering directly from your knowledge. You have up to 6 tool call rounds available, with a maximum of 12 total tool calls per session. No single tool may be called more than 6 times. If you have called several tools and still cannot answer, summarize what you found and explain what is missing. Repeated calls to the same tool with the same arguments (3+ times) will be treated as a loop and terminated.",
             goal
         );
 

@@ -470,6 +470,7 @@ impl Plan {
                     inbox: std::collections::VecDeque::new(),
                     task_id: None,
                     sandbox: None,
+                    retry_count: 0,
                 };
                 let agent_id = agent.id;
                 pool.add_agent(agent);

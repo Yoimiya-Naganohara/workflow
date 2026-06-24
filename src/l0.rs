@@ -129,6 +129,7 @@ impl TaskResourceState {
 //  BudgetGuard — RAII resource guard
 // ============================================================================
 
+#[derive(Debug, Clone)]
 pub struct BudgetGuard {
     root_task_id: TaskId,
     amount: u64,

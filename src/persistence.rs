@@ -406,6 +406,25 @@ pub fn load_provider_cache() -> Option<ModelRegistry> {
     serde_json::from_str(&text).ok()
 }
 
+/// Write binary data atomically using a temporary file + rename.
+pub fn write_binary(path: &Path, contents: &[u8]) -> Result<()> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("data.bin");
+    let temp_path = path.with_file_name(format!("{}.tmp-{}", file_name, uuid::Uuid::new_v4()));
+
+    std::fs::write(&temp_path, contents)?;
+
+    match std::fs::rename(&temp_path, path) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let _ = std::fs::remove_file(&temp_path);
+            Err(err.into())
+        }
+    }
+}
+
 fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     let file_name = path
         .file_name()

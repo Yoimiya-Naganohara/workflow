@@ -45,6 +45,10 @@ pub struct RuntimeEventLoop {
     state: Option<std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>>,
     /// Phase 2B: extracted scheduler — graph query + pipeline + agent spawn.
     scheduler: TaskScheduler,
+    /// Checkpoint manager for durable agent/task state.
+    checkpoint: crate::checkpoint::Checkpoint,
+    /// Event counter for periodic checkpoint saves.
+    checkpoint_tick: u64,
 }
 
 impl RuntimeEventLoop {
@@ -60,6 +64,7 @@ impl RuntimeEventLoop {
         let decider = Box::new(PipelineDispatchDecider::new(runtime.clone()));
         let scheduler =
             TaskScheduler::new(runtime.clone(), pool.clone(), broker_tx.clone(), decider);
+        let checkpoint = crate::checkpoint::Checkpoint::new();
         Self {
             runtime,
             pool,
@@ -68,6 +73,8 @@ impl RuntimeEventLoop {
             tool_server,
             state,
             scheduler,
+            checkpoint,
+            checkpoint_tick: 0,
         }
     }
 
@@ -92,6 +99,24 @@ impl RuntimeEventLoop {
                     );
                 }
             }
+            // Periodic checkpoint: save pool + graph at configured interval.
+            if eviction_tick % 10 == 0 {
+                // Checkpoint at a finer granularity than eviction.
+                let cp_interval = {
+                    let p = self.pool.read().await;
+                    p.checkpoint_interval
+                };
+                if cp_interval > 0 && self.checkpoint_tick % cp_interval == 0 {
+                    let p = self.pool.read().await;
+                    let rt = self.runtime.read().await;
+                    let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Err(e) = self.checkpoint.save_snapshot(&p, &g) {
+                        tracing::warn!("Checkpoint save failed: {}", e);
+                    }
+                }
+                self.checkpoint_tick += 1;
+            }
+
             // Yield to the async runtime so other tasks
             // (spawned agents, lock holders) can make progress.
             tokio::task::yield_now().await;
@@ -410,9 +435,7 @@ impl RuntimeEventLoop {
             _ => tool_server.clone(),
         };
 
-        // Execute the agent (LLM call + tools) without holding the runtime
-        // read lock.  This allows other tasks (e.g. pool consolidation) to
-        // acquire a write lock while the LLM request is in-flight.
+        // Execute the agent (LLM call + tools).
         let (result, status) = AgentRuntime::execute_agent_detached(
             runtime.clone(),
             agent_id,
@@ -420,6 +443,56 @@ impl RuntimeEventLoop {
             Some(tool_handle),
         )
         .await;
+
+        // ── Phase 0: Auto-retry on transient failure ──
+        // If the agent failed but has retries left, re-activate it through the
+        // event loop.  This ensures the request goes through the full pipeline
+        // (L0/L1/L2) again and gets a fresh budget allocation.
+        if status == AgentStatus::Failed {
+            let should_retry = {
+                let p = pool.read().await;
+                let max_retries = p.max_retries;
+                p.get_agent(&agent_id)
+                    .map(|a| a.retry_count < max_retries)
+                    .unwrap_or(false)
+            };
+            if should_retry {
+                // Increment retry count, reset status, and re-activate.
+                {
+                    let mut p = pool.write().await;
+                    if let Some(agent) = p.get_agent_mut(&agent_id) {
+                        agent.retry_count += 1;
+                        // Reset to Idle so the scheduler picks it up.
+                        agent.status = AgentStatus::Idle;
+                        agent.last_active_at = crate::agent::now_secs();
+                        let rc = agent.retry_count;
+                        let mr = p.max_retries;
+                        tracing::info!(
+                            "Agent {:02x}.. retry {}/{} — re-activating through pipeline",
+                            agent_id[0],
+                            rc,
+                            mr,
+                        );
+                    }
+                }
+                // Emit ActivateAgent so the scheduler re-processes this agent.
+                // This goes through the pipeline (L0/L1/L2) and gets a fresh budget.
+                if let Some(ref st) = state {
+                    if let Ok(s) = st.try_read() {
+                        if let Some(tx) = &s.core.runtime_event_tx {
+                            tx.send(RuntimeEvent::ActivateAgent {
+                                agent_id,
+                                parent_id,
+                            })
+                            .await
+                            .ok();
+                        }
+                    }
+                }
+                // Do NOT emit AgentFailed/TaskFailed — the retry will handle it.
+                return;
+            }
+        }
 
         // Report completion with structured handoff.
         match status {
@@ -789,6 +862,7 @@ mod tests {
             inbox: std::collections::VecDeque::new(),
             task_id: None,
             sandbox: None,
+            retry_count: 0,
         }
     }
 

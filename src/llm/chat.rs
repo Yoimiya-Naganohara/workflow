@@ -299,11 +299,29 @@ impl LlmProvider {
     {
         let stream = stream! {
             let mut stream = stream;
-            // Track tool calls for duplicate detection.
+            // ── Duplicate detection: same tool + same args ──
             // Key = "tool_name:args_json", value = count of repeats.
             // Detects when the LLM calls the exact same tool with the exact
             // same arguments 3+ times — a reliable indicator of a tool loop.
             let mut dup_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            // ── Per-tool call count (regardless of args) ──
+            // Key = tool_name, value = total calls to this tool.
+            let mut per_tool_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            // ── Total tool calls in this stream ──
+            let mut total_tool_calls: usize = 0;
+
+            // Build a human-readable tool call summary from the counters.
+            let tool_summary = |total: usize, per_tool: &std::collections::HashMap<String, usize>| -> String {
+                if total == 0 {
+                    return "(none)".to_string();
+                }
+                let mut tools: Vec<(&String, &usize)> = per_tool.iter().collect();
+                tools.sort_by(|a, b| b.1.cmp(a.1));
+                let detail: Vec<String> = tools.iter().map(|(name, count)| {
+                    format!("{}×{}", name, count)
+                }).collect();
+                format!("{} call(s) — {}", total, detail.join(", "))
+            };
 
             while let Some(item) = stream.next().await {
 
@@ -322,20 +340,68 @@ impl LlmProvider {
                         let tool_name = tool_call.function.name.clone();
                         let args = tool_call.function.arguments.clone();
 
+                        // ── Bounding check 1: absolute total tool calls ──
+                        total_tool_calls += 1;
+                        if total_tool_calls > crate::core::constants::MAX_TOOL_CALLS_PER_STREAM {
+                            let summary = tool_summary(total_tool_calls, &per_tool_count);
+                            tracing::warn!(
+                                "Tool loop closed: {} total calls (limit {}): {}",
+                                total_tool_calls,
+                                crate::core::constants::MAX_TOOL_CALLS_PER_STREAM,
+                                summary,
+                            );
+                            yield ToolEvent::Text(format!(
+                                "\n\n<system>Tool call limit reached: {}. The assistant cannot make further tool calls. Summarize what you have found so far.</system>\n",
+                                summary,
+                            ));
+                            yield ToolEvent::Done {
+                                reason: DoneReason::LoopTerminated,
+                            };
+                            break;
+                        }
+
+                        // ── Bounding check 2: same tool too many times ──
+                        // Compute summary BEFORE mutable borrow of per_tool_count.
+                        let (next_count, summary) = {
+                            let next = per_tool_count.get(&tool_name).copied().unwrap_or(0) + 1;
+                            let s = tool_summary(total_tool_calls, &per_tool_count);
+                            (next, s)
+                        };
+                        *per_tool_count.entry(tool_name.clone()).or_insert(0) += 1;
+                        if next_count > crate::core::constants::MAX_CALLS_PER_TOOL {
+                            tracing::warn!(
+                                "Tool loop closed: '{}' called {} times (limit {}): {}",
+                                tool_name,
+                                next_count,
+                                crate::core::constants::MAX_CALLS_PER_TOOL,
+                                summary,
+                            );
+                            yield ToolEvent::Text(format!(
+                                "\n\n<system>Tool loop detected: '{}' called {} times (max {}). Tool calls stopped. Tool summary — {}. Summarize what you have found so far.</system>\n",
+                                tool_name, next_count, crate::core::constants::MAX_CALLS_PER_TOOL, summary,
+                            ));
+                            yield ToolEvent::Done {
+                                reason: DoneReason::LoopTerminated,
+                            };
+                            break;
+                        }
+
                         // ── Duplicate detection: same tool + same args ──
                         let call_key = format!("{}:{}", tool_name, args);
                         let count = dup_count.entry(call_key).or_insert(0);
                         *count += 1;
 
                         if *count >= 3 {
+                            let summary = tool_summary(total_tool_calls, &per_tool_count);
                             tracing::warn!(
-                                "Forcing tool loop close: '{}' called {} times with same args",
+                                "Tool loop closed: '{}' called {} times with same args: {}",
                                 tool_name,
-                                count
+                                count,
+                                summary,
                             );
                             yield ToolEvent::Text(format!(
-                                "\n\n[Tool loop detected: '{}' repeated {} times. Generating summary.]\n",
-                                tool_name, count
+                                "\n\n<system>Tool loop detected: '{}' called {} times with identical arguments. Tool calls stopped. Tool summary — {}. Summarize what you have found so far.</system>\n",
+                                tool_name, count, summary,
                             ));
                             yield ToolEvent::Done {
                                 reason: DoneReason::LoopTerminated,

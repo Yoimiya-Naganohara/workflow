@@ -170,6 +170,7 @@ mod tests {
             inbox: std::collections::VecDeque::new(),
             task_id: None,
             sandbox: None,
+            retry_count: 0,
         }
     }
 

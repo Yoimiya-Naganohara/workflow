@@ -74,6 +74,16 @@ pub const MAX_CHAIN_LENGTH: usize = 20;
 /// repeatedly instead of producing a final answer.
 pub const DEFAULT_MAX_TOOL_TURNS: usize = 6;
 
+/// Maximum total tool calls allowed in a single stream before force-termination.
+/// Independent of `DEFAULT_MAX_TOOL_TURNS` (which limits rig multi-turn rounds).
+/// Each round may contain multiple tool calls; this caps the absolute count.
+pub const MAX_TOOL_CALLS_PER_STREAM: usize = 12;
+
+/// Maximum times the same tool (by name) can be called in a single stream,
+/// regardless of argument variation.  Catches patterns like "read_file with
+/// different paths" called 8+ times instead of using a bulk tool.
+pub const MAX_CALLS_PER_TOOL: usize = 6;
+
 /// Capacity for runtime event MPSC channels.
 pub const RUNTIME_CHANNEL_CAPACITY: usize = 256;
 
