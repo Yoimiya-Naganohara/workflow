@@ -237,9 +237,16 @@ pub(crate) fn build_chat_content(
             }
         }
 
-        // User or Agent message
+        // User or Agent message — determine bar color based on role and status
         let is_user = matches!(message.role, MessageRole::User);
-        let bar_color = if is_user { style::GREEN } else { style::BLUE };
+        let bar_color = if message.status == crate::tui::state::MessageStatus::Error {
+            // Red bar for error messages (tool errors, agent failures, LLM errors)
+            style::RED
+        } else if is_user {
+            style::GREEN
+        } else {
+            style::BLUE
+        };
         let bar_char = "┃";
 
         let result = render_md(&message.content, body_width);

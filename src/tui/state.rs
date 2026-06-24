@@ -452,6 +452,16 @@ impl AppState {
                         msg.content = error;
                         msg.status = MessageStatus::Error;
                     }
+                } else {
+                    // No streaming slot — push a standalone error message
+                    // so the user can see it (instead of silently dropping).
+                    self.core.messages.push(ChatMessage {
+                        role: MessageRole::Agent,
+                        content: error,
+                        reasoning: String::new(),
+                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                        status: MessageStatus::Error,
+                    });
                 }
                 self.ui.active_chat_requests = 0;
                 self.ui.active_chat_abort = None;

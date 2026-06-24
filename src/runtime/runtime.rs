@@ -1373,7 +1373,9 @@ Messages may contain important context from sibling agents.",
                     }
                     crate::llm::ToolEvent::Done { reason } => {
                         done_received = true;
-                        if reason == crate::llm::DoneReason::LoopTerminated {
+                        if reason == crate::llm::DoneReason::LoopTerminated
+                            || reason == crate::llm::DoneReason::StreamError
+                        {
                             let mut pool = agent_pool.write().await;
                             if let Some(agent) = pool.get_agent_mut(&agent_id) {
                                 agent.status = AgentStatus::Failed;
@@ -1414,6 +1416,47 @@ Messages may contain important context from sibling agents.",
                     tool_call_count,
                     if tool_call_count == 1 { "" } else { "s" }
                 );
+            }
+
+            // -- Heuristic tool error detection --
+            // Scan the LLM's accumulated output for error indicators.
+            // If found, mark the most recent tool call(s) as Error.
+            if !text.is_empty() {
+                let error_keywords = [
+                    "error:",
+                    "Error:",
+                    "ERROR:",
+                    "failed:",
+                    "Failed:",
+                    "FAILED:",
+                    "not found",
+                    "Not Found",
+                    "permission denied",
+                    "Permission denied",
+                    "timed out",
+                    "Timed Out",
+                    "timeout",
+                    "Tool execution error",
+                    "connection refused",
+                    "Connection refused",
+                    "no such file",
+                    "No such file",
+                    "StatusCode:",
+                    "exit code:",
+                ];
+                let has_error = error_keywords.iter().any(|pat| text.contains(pat));
+                if has_error {
+                    if let Ok(mut pool) = agent_pool.try_write() {
+                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                            for record in agent.tool_trace.iter_mut().rev().take(2) {
+                                if record.status == crate::agent::ToolStatus::Success {
+                                    record.status = crate::agent::ToolStatus::Error;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             (text, tools_used)
         } else {
@@ -1631,7 +1674,9 @@ Messages may contain important context from sibling agents.",
                     }
                     crate::llm::ToolEvent::Done { reason } => {
                         done_received = true;
-                        if reason == crate::llm::DoneReason::LoopTerminated {
+                        if reason == crate::llm::DoneReason::LoopTerminated
+                            || reason == crate::llm::DoneReason::StreamError
+                        {
                             let mut pool = agent_pool.write().await;
                             if let Some(agent) = pool.get_agent_mut(&agent_id) {
                                 agent.status = AgentStatus::Failed;
@@ -1672,6 +1717,47 @@ Messages may contain important context from sibling agents.",
                     tool_call_count,
                     if tool_call_count == 1 { "" } else { "s" }
                 );
+            }
+
+            // -- Heuristic tool error detection --
+            // Scan the LLM's accumulated output for error indicators.
+            // If found, mark the most recent tool call(s) as Error.
+            if !text.is_empty() {
+                let error_keywords = [
+                    "error:",
+                    "Error:",
+                    "ERROR:",
+                    "failed:",
+                    "Failed:",
+                    "FAILED:",
+                    "not found",
+                    "Not Found",
+                    "permission denied",
+                    "Permission denied",
+                    "timed out",
+                    "Timed Out",
+                    "timeout",
+                    "Tool execution error",
+                    "connection refused",
+                    "Connection refused",
+                    "no such file",
+                    "No such file",
+                    "StatusCode:",
+                    "exit code:",
+                ];
+                let has_error = error_keywords.iter().any(|pat| text.contains(pat));
+                if has_error {
+                    if let Ok(mut pool) = agent_pool.try_write() {
+                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                            for record in agent.tool_trace.iter_mut().rev().take(2) {
+                                if record.status == crate::agent::ToolStatus::Success {
+                                    record.status = crate::agent::ToolStatus::Error;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             (text, tools_used)
         } else {

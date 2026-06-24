@@ -424,7 +424,20 @@ impl LlmProvider {
                             }
                         }
                     }
-                    Ok(MultiTurnStreamItem::CompletionCall(_call)) => {}
+                    Ok(MultiTurnStreamItem::CompletionCall(call)) => {
+                        // Emit per-turn token usage for intermediate tool-calling
+                        // completions, not just the final response.
+                        if let Some(usage) = call.usage {
+                            if usage.input_tokens > 0 || usage.output_tokens > 0 {
+                                yield ToolEvent::TokenUsage {
+                                    input: usage.input_tokens as u32,
+                                    output: usage.output_tokens as u32,
+                                    cached_input: usage.cached_input_tokens as u32,
+                                    cache_creation_input: usage.cache_creation_input_tokens as u32,
+                                };
+                            }
+                        }
+                    }
                     Ok(MultiTurnStreamItem::FinalResponse(response)) => {
                         let usage = response.usage();
                         if usage.input_tokens > 0 || usage.output_tokens > 0 {

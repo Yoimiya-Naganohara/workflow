@@ -141,6 +141,19 @@ async fn run_tui() -> Result<()> {
             state.core.tool_server = tool_server;
         }
 
+        // Try to restore agent pool + task graph from last checkpoint.
+        // If successful, the agents and task DAG survive restarts.
+        {
+            let state = state.read().await;
+            if let Some(rt) = &state.core.runtime {
+                let pool = state.core.agent_pool.clone();
+                let tg = rt.read().await.task_graph.clone();
+                // Drop the read lock before awaiting (restore_checkpoint is async).
+                drop(state);
+                workflow::runtime::AgentRuntime::restore_checkpoint(&pool, &tg).await;
+            }
+        }
+
         // Load persisted role memos into the agent pool
         {
             let state = state.write().await;
