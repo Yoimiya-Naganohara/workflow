@@ -2,10 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
-use crate::agent::{Agent, AgentConfig, AgentPool, AgentStatus};
 use crate::core::types::AgentId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -426,108 +423,6 @@ impl Plan {
     pub fn is_executable(&self) -> bool {
         self.status == PlanStatus::Approved
             && self.tasks.iter().any(|t| t.status == TaskStatus::Pending)
-    }
-
-    /// Execute a plan by creating an agent for each task and running it.
-    ///
-    /// NOTE: This function is preserved for future use but is NOT currently
-    /// called from anywhere in the codebase. When wired up, a `model_id`
-    /// must be provided — `AgentConfig::default()` has an empty `model_id`.
-    pub async fn execute_plan(
-        plan: &mut Plan,
-        model_id: &str,
-        agent_pool: &Arc<RwLock<AgentPool>>,
-    ) -> Result<()> {
-        plan.status = PlanStatus::Executing;
-
-        while let Some(task) = plan.next_task() {
-            let task_clone = task.clone();
-            let config = AgentConfig {
-                model_id: model_id.to_string(),
-                ..Default::default()
-            };
-
-            let (agent_id, provider) = {
-                let mut pool = agent_pool.write().await;
-                let agent = Agent {
-                    id: rand::random(),
-                    name: format!("Worker-{:04x}", rand::random::<u16>()),
-                    role: "worker".to_string(),
-                    role_template_id: None,
-                    parent_id: None,
-                    children: Vec::new(),
-                    depth: 0,
-                    goal: task_clone.description.clone(),
-                    config: config.clone(),
-                    status: AgentStatus::Planning,
-                    result: None,
-                    child_results: Vec::new(),
-                    context: Vec::new(),
-                    last_active_at: crate::agent::now_secs(),
-                    tokens_input: 0,
-                    tokens_output: 0,
-                    tool_trace: std::collections::VecDeque::new(),
-                    inbox: std::collections::VecDeque::new(),
-                    task_id: None,
-                    sandbox: None,
-                    retry_count: 0,
-                    reasoning: String::new(),
-                };
-                let agent_id = agent.id;
-                pool.add_agent(agent);
-                (agent_id, pool.provider.clone())
-            };
-
-            plan.mark_task_running(task_clone.id);
-
-            let system_prompt = "You are a worker. Execute the given task.".to_string();
-            let result: Result<String> = if let Some(provider) = provider {
-                provider
-                    .chat(&config.model_id, &system_prompt, &task_clone.description)
-                    .await
-            } else {
-                Err(anyhow::anyhow!("No provider configured"))
-            };
-
-            {
-                let mut pool = agent_pool.write().await;
-                match &result {
-                    Ok(response) => {
-                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                            agent.status = AgentStatus::Completed;
-                            agent.result = Some(response.clone());
-                        }
-                    }
-                    Err(e) => {
-                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                            agent.status = AgentStatus::Failed;
-                            agent.result = Some(e.to_string());
-                        }
-                    }
-                }
-            }
-
-            match result {
-                Ok(response) => {
-                    plan.mark_task_completed(task_clone.id, response);
-                }
-                Err(e) => {
-                    plan.mark_task_failed(task_clone.id, e.to_string());
-                    break;
-                }
-            }
-        }
-
-        // Return the last error if any task failed.
-        if plan
-            .tasks
-            .iter()
-            .any(|t| t.status == crate::agent::plan::TaskStatus::Failed)
-        {
-            Err(anyhow::anyhow!("One or more plan tasks failed"))
-        } else {
-            Ok(())
-        }
     }
 
     pub fn summary(&self) -> String {

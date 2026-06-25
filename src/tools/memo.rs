@@ -253,10 +253,10 @@ impl Tool for ReadMemo {
                 let age = now_secs().saturating_sub(entry.timestamp);
                 let age_str = if age < 60 {
                     format!("{}s ago", age)
-                } else if age < crate::core::types::SECONDS_PER_HOUR as u64 {
+                } else if age < crate::core::types::SECONDS_PER_HOUR {
                     format!("{}m ago", age / 60)
                 } else {
-                    format!("{}h ago", age / crate::core::types::SECONDS_PER_HOUR as u64)
+                    format!("{}h ago", age / crate::core::types::SECONDS_PER_HOUR)
                 };
                 Ok(format!(
                     "Memo '{}' ({}):\n---\n{}\n---\n(written {})",
@@ -336,10 +336,10 @@ impl Tool for ListMemos {
             let age = now.saturating_sub(entry.timestamp);
             let age_str = if age < 60 {
                 format!("{}s", age)
-            } else if age < crate::core::types::SECONDS_PER_HOUR as u64 {
+            } else if age < crate::core::types::SECONDS_PER_HOUR {
                 format!("{}m", age / 60)
             } else {
-                format!("{}h", age / crate::core::types::SECONDS_PER_HOUR as u64)
+                format!("{}h", age / crate::core::types::SECONDS_PER_HOUR)
             };
             let preview = if entry.value.len() > 60 {
                 let end = entry

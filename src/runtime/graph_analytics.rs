@@ -317,6 +317,15 @@ impl TemplateRegistry {
             next_id: 0,
         }
     }
+}
+
+impl Default for TemplateRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TemplateRegistry {
     pub fn insert(&mut self, mut t: WorkflowTemplate) -> TemplateId {
         let id = self.next_id;
         self.next_id += 1;
@@ -541,8 +550,6 @@ impl TemplateEvolution {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::TaskId;
-
     fn make_graph() -> TaskGraph {
         let mut g = TaskGraph::new();
         let root = g.spawn_root("goal");

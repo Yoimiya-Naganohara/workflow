@@ -21,3 +21,5 @@ pub mod validation;
 pub use config::{AgentRuntimeConfig, RoleTemplate};
 pub use event::RuntimeEvent;
 pub use runtime::AgentRuntime;
+pub mod agent_exec;
+pub mod agent_stream;

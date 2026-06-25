@@ -776,12 +776,10 @@ impl Tui {
                                             }
                                         }
                                     }
-                                } else {
-                                    if let Ok(mut pool) = core.agent_pool.try_write() {
-                                        if let Some(agent) = pool.get_agent_mut(&aid) {
-                                            agent.task_id = Some(root_id);
-                                            agent.role = "planner".to_string();
-                                        }
+                                } else if let Ok(mut pool) = core.agent_pool.try_write() {
+                                    if let Some(agent) = pool.get_agent_mut(&aid) {
+                                        agent.task_id = Some(root_id);
+                                        agent.role = "planner".to_string();
                                     }
                                 }
                             }

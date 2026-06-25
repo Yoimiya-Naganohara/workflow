@@ -131,7 +131,15 @@ impl StrategyMomentum {
             ema_alpha: 0.3,
         }
     }
+}
 
+impl Default for StrategyMomentum {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StrategyMomentum {
     /// Record an outcome and update momentum.
     pub fn record(&mut self, success: bool) {
         if success {
@@ -304,7 +312,15 @@ impl RegretTracker {
             regret_map: HashMap::new(),
         }
     }
+}
 
+impl Default for RegretTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RegretTracker {
     /// Record that `incumbent` was selected and `candidates` were not.
     /// Updates regret for each candidate.
     pub fn record_selection(
@@ -599,7 +615,7 @@ impl StrategyGraph {
         // Exploitation: score each candidate with regret + momentum + time decay.
         let mut scored: Vec<(StrategyId, f32)> = candidates
             .iter()
-            .filter_map(|s| {
+            .map(|s| {
                 let base_score = self
                     .edges
                     .iter()
@@ -625,7 +641,7 @@ impl StrategyGraph {
                     .unwrap_or(1.0);
                 let regret_adjusted = self.regret.adjusted_win_rate(base_score, cluster, s.id);
 
-                Some((s.id, regret_adjusted * bias))
+                (s.id, regret_adjusted * bias)
             })
             .collect();
 
@@ -887,7 +903,7 @@ mod tests {
             true,
         ));
 
-        let sig = TaskSignature {
+        let _sig = TaskSignature {
             goal_length_chars: 100,
             domain_count: 3,
             estimated_complexity: 0.7,

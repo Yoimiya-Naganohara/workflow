@@ -657,7 +657,7 @@ pub fn agent_inspect(inv: &CommandInvocation, state: &mut AppState) -> CommandRe
     };
     let agent = pool.agents().iter().find(|a| {
         let full = crate::agent::AgentPool::agent_id_str(&a.id);
-        full.starts_with(&id_str) || full == id_str
+        full.starts_with(id_str) || full == id_str
     });
     match agent {
         Some(a) => {

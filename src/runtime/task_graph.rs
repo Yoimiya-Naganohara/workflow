@@ -1357,7 +1357,7 @@ mod tests {
     #[test]
     fn test_set_parent_works_without_cycle() {
         let mut graph = TaskGraph::new();
-        let a = graph.spawn_root("A");
+        let _a = graph.spawn_root("A");
         let b = graph.spawn_root("B");
         let c = graph.spawn_root("C");
 

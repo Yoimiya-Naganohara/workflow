@@ -320,19 +320,19 @@ impl AgentRuntime {
 
     // ── Checkpoint recovery ──
 
-    /// Restore an agent pool and task graph from the last checkpoint.
-    ///
-    /// Returns `true` if a checkpoint was found and restored, `false` if
-    /// no checkpoint exists (first run).  The restored pool is written into
-    /// `agent_pool` and the task graph into `self.task_graph`.
-    ///
-    /// # Non-serializable fields
-    ///
-    /// After restoration, `agent_pool` will have:
-    /// - No `provider` — caller must set it via `agent_pool.set_provider()`
-    /// - Re-created `Notify` handles for each agent
-    /// - No budget guards — budget resets on restart
-    /// - No sandbox handles — sandboxes are re-created on activation
+    // /// Restore an agent pool and task graph from the last checkpoint.
+    // ///
+    // /// Returns `true` if a checkpoint was found and restored, `false` if
+    // /// no checkpoint exists (first run).  The restored pool is written into
+    // /// `agent_pool` and the task graph into `self.task_graph`.
+    // ///
+    // /// # Non-serializable fields
+    // ///
+    // /// After restoration, `agent_pool` will have:
+    // /// - No `provider` — caller must set it via `agent_pool.set_provider()`
+    // /// - Re-created `Notify` handles for each agent
+    // /// - No budget guards — budget resets on restart
+    // /// - No sandbox handles — sandboxes are re-created on activation
     // ── Pipeline delegation ──
 
     /// Run a [`SpawnRequest`] through the decision pipeline.

@@ -69,8 +69,6 @@ impl EscalationPolicy for DefaultEscalationPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::TaskId;
-
     fn make_outcome(success: bool, latency_ms: u64) -> TaskOutcome {
         TaskOutcome {
             task_id: [0u8; 16],

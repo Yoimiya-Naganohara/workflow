@@ -27,6 +27,15 @@ impl TaskOutcomeStore {
             by_role: HashMap::new(),
         }
     }
+}
+
+impl Default for TaskOutcomeStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TaskOutcomeStore {
     pub fn record(&mut self, o: TaskOutcome) {
         let idx = self.outcomes.len();
         let role = o.role.clone();
@@ -81,6 +90,15 @@ impl CapabilityRegistry {
             profiles: HashMap::new(),
         }
     }
+}
+
+impl Default for CapabilityRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CapabilityRegistry {
     pub fn get(&self, role: &str) -> Option<&CapabilityProfile> {
         self.profiles.get(role)
     }
@@ -110,13 +128,13 @@ impl CapabilityRegistry {
                 embedding: None,
             });
         let total = entry.completed_tasks + entry.failed_tasks + 1;
-        entry.avg_latency_ms = ((entry.avg_latency_ms as u64 * (total - 1).max(1) as u64)
-            + outcome.latency_ms)
-            / total as u64;
-        entry.avg_token_cost = ((entry.avg_token_cost as u32 * (total - 1).max(1) as u32)
+        let total_u32 = total as u32;
+        entry.avg_latency_ms =
+            ((entry.avg_latency_ms * (total - 1).max(1)) + outcome.latency_ms) / total;
+        entry.avg_token_cost = ((entry.avg_token_cost * (total_u32 - 1).max(1))
             + outcome.tokens_input
             + outcome.tokens_output)
-            / total as u32;
+            / total_u32;
         if outcome.success {
             entry.completed_tasks += 1;
         } else {

@@ -669,7 +669,7 @@ fn format_tool_args(args: &serde_json::Value) -> String {
             let mut parts: Vec<String> = Vec::new();
             for (key, val) in map {
                 let val_str = match val {
-                    serde_json::Value::String(s) => format!("{}", s),
+                    serde_json::Value::String(s) => s.to_string(),
                     serde_json::Value::Number(n) => format!("{}", n),
                     serde_json::Value::Bool(b) => format!("{}", b),
                     serde_json::Value::Null => String::new(),
