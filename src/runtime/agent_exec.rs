@@ -203,3 +203,120 @@ Messages may contain important context from sibling agents.",
         (response, AgentStatus::Completed)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::AgentRuntimeConfig;
+
+    /// A mock embedding service that returns fixed embeddings.
+    struct MockEmbed;
+    #[async_trait::async_trait]
+    impl crate::llm::EmbeddingService for MockEmbed {
+        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; 384]> {
+            let mut e = [0.0f32; 384];
+            e[0] = 1.0;
+            Ok(e)
+        }
+        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; 384]>> {
+            Ok(texts.iter().map(|_| {
+                let mut e = [0.0f32; 384];
+                e[0] = 1.0;
+                e
+            }).collect())
+        }
+        fn similarity(&self, a: &[f32; 384], b: &[f32; 384]) -> f32 {
+            crate::core::simd::cosine_similarity_384(a, b)
+        }
+        fn cache_size(&self) -> usize { 0 }
+        fn clear_cache(&self) {}
+        fn cache_hits(&self) -> u64 { 0 }
+        fn cache_misses(&self) -> u64 { 0 }
+    }
+
+    fn test_config() -> AgentRuntimeConfig {
+        let dir = std::env::temp_dir().join(format!(
+            "workflow_exec_test_{}",
+            rand::random::<u64>()
+        ));
+        AgentRuntimeConfig {
+            bedrock_path: Some(dir.join("experience_a.bin")),
+            role_template_path: Some(dir.join("role_templates.json")),
+            ..Default::default()
+        }
+    }
+
+    /// Create a pool with one agent, returning (pool, agent_id).
+    fn pool_with_agent() -> (Arc<RwLock<AgentPool>>, AgentId) {
+        let mut pool = AgentPool::new();
+        let agent = crate::agent::Agent {
+            id: rand::random(),
+            name: "exec-test-agent".to_string(),
+            role: "developer".to_string(),
+            role_template_id: None,
+            parent_id: None,
+            children: Vec::new(),
+            depth: 0,
+            goal: "test goal".to_string(),
+            config: crate::agent::AgentConfig::default(),
+            status: crate::agent::AgentStatus::Idle,
+            result: None,
+            child_results: Vec::new(),
+            context: Vec::new(),
+            last_active_at: 0,
+            tokens_input: 0,
+            tokens_output: 0,
+            tool_trace: std::collections::VecDeque::new(),
+            inbox: std::collections::VecDeque::new(),
+            task_id: None,
+            sandbox: None,
+            retry_count: 0,
+            reasoning: String::new(),
+        };
+        let id = agent.id;
+        pool.add_agent(agent);
+        (Arc::new(RwLock::new(pool)), id)
+    }
+
+    #[tokio::test]
+    async fn test_agent_not_found_returns_failed() {
+        let runtime = Arc::new(RwLock::new(AgentRuntime::new(
+            test_config(),
+            Arc::new(MockEmbed),
+        )));
+        let (pool, _aid) = pool_with_agent();
+        let unknown_id: AgentId = rand::random();
+        let (result, status) = AgentRuntime::execute_agent_detached(
+            runtime, unknown_id, pool, None,
+        )
+        .await;
+        assert_eq!(status, AgentStatus::Failed);
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_no_provider_returns_error() {
+        let runtime = Arc::new(RwLock::new(AgentRuntime::new(
+            test_config(),
+            Arc::new(MockEmbed),
+        )));
+        let (pool, aid) = pool_with_agent();
+        // Provider is None by default — execute_agent_detached should
+        // mark the agent as failed and release budget guard.
+        let (result, status) = AgentRuntime::execute_agent_detached(
+            runtime, aid, pool.clone(), None,
+        )
+        .await;
+        assert_eq!(status, AgentStatus::Failed);
+        assert!(
+            result.contains("No LLM provider configured"),
+            "expected 'No LLM provider configured', got: {}",
+            result
+        );
+        // Agent should be marked as Failed in the pool
+        let pool_r = pool.read().await;
+        let agent = pool_r.get_agent(&aid).unwrap();
+        assert_eq!(agent.status, crate::agent::AgentStatus::Failed);
+        assert!(agent.result.as_deref().unwrap_or("").contains("No LLM provider"));
+    }
+}
