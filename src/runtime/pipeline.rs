@@ -134,7 +134,7 @@ pub struct DecisionPipeline {
 }
 
 impl DecisionPipeline {
-    /// Run a [`SpawnRequest`] through the full pipeline.
+    /// Run a `SpawnRequest` through the full pipeline.
     pub async fn process_request(
         &self,
         request: SpawnRequest,

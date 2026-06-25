@@ -8,7 +8,7 @@
 //!   └── src -> /real-project/  ◄── read‑only symlink to project root
 //! ```
 //!
-//! Every built-in tool that touches the filesystem calls [`resolve_path`]
+//! Every built-in tool that touches the filesystem calls `resolve_path`
 //! before operating.  The resolver enforces a **copy-on-write** model:
 //!
 //! - **Writes** land in `work/` — the real source tree is never modified.
@@ -131,7 +131,7 @@ pub struct SandboxHandle {
     /// Source tree root (canonical, follows symlink).
     pub source_root: PathBuf,
     /// Local embedding engine for on-demand asset indexing.
-    /// Injected at runtime via [`attach_embedder`]; absent = no indexing.
+    /// Injected at runtime via `attach_embedder`; absent = no indexing.
     pub embedder: RwLock<Option<Arc<dyn EmbeddingService>>>,
     /// In-memory semantic asset indices keyed by `asset_id`.
     pub asset_indices: RwLock<HashMap<String, AssetIndex>>,
@@ -271,7 +271,7 @@ impl SandboxHandle {
 
     /// Resolve a path for **write** operations.
     ///
-    /// Same as [`resolve_path`] but with an additional safety check:
+    /// Same as `resolve_path` but with an additional safety check:
     /// the resolved path must land in the **writable workdir**, not the
     /// read-only source tree.  This prevents a hallucinating agent from
     /// overwriting project source files via absolute paths that resolve

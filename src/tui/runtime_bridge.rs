@@ -2,13 +2,13 @@
 //! [`AppEvent`](crate::tui::effect::AppEvent) (presentation layer).
 //!
 //! This module is the **single directional insulation valve**: it reads
-//! events from the background [`RuntimeEventLoop`] and translates them
+//! events from the background `RuntimeEventLoop` and translates them
 //! into UI‑visible state changes.
 //!
 //! # Contract
 //!
 //! - **Read‑only on shared state** — the bridge never writes to the
-//!   [`AgentPool`].  Data mutations happen inside the event loop under
+//!   `AgentPool`.  Data mutations happen inside the event loop under
 //!   its own write locks.
 //! - **Bumps the dirty flag** — `agent_tree_version` is incremented on
 //!   every event, so Phase 1's diagnostic tree cache is invalidated and

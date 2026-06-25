@@ -1,14 +1,14 @@
 //! Effect system — explicit, traceable async operations.
 //!
 //! The handler never spawns tasks directly.  Instead it pushes
-//! [`Effect`] values onto a queue in [`AppState`].  The event loop
+//! [`Effect`] values onto a queue in `AppState`.  The event loop
 //! drains the queue and delegates execution to [`execute_effect`],
 //! which is a **stateless** async function — it takes an `Effect`,
 //! produces zero or more [`AppEvent`] values, and never touches
-//! [`AppState`] directly.
+//! `AppState` directly.
 //!
 //! Results arrive through an `mpsc` channel and are applied by
-//! [`AppState::handle_event`].
+//! `AppState::handle_event`.
 
 use futures::{StreamExt, future::Abortable};
 use tokio::sync::mpsc;

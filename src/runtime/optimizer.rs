@@ -2,7 +2,7 @@
 //!
 //! # Flow
 //!
-//! 1. Collect all experiences for a role via [`get_experiences_by_role`].
+//! 1. Collect all experiences for a role via `get_experiences_by_role`.
 //! 2. Analyze: successful patterns (weight ≥ 0.7) vs low-quality patterns (weight < 0.7).
 //! 3. Build an LLM prompt that asks the model to synthesize an improved system prompt.
 //! 4. Return the improved prompt for user review.

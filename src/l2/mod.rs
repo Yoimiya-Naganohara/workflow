@@ -146,7 +146,7 @@ pub trait AuditEngine: Send + Sync {
     ) -> crate::core::conflict::L2AuditResult;
     fn reset(&mut self);
 
-    /// Screen a [`SpawnRequest`] for risk *before* final approval.
+    /// Screen a `SpawnRequest` for risk *before* final approval.
     ///
     /// This method is **synchronous** so callers can hold a `std::sync::Mutex`
     /// lock.  Implementations that need async I/O should spawn their own task.

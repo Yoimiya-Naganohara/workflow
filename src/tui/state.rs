@@ -142,7 +142,7 @@ pub struct CoreState {
     pub reflection: ReflectionConfig,
     /// Track the last chat context for retry.
     pub last_chat_request_id: u64,
-    /// Channel sender to the background [`RuntimeEventLoop`].
+    /// Channel sender to the background `RuntimeEventLoop`.
     /// Tools use this to dispatch async work without blocking the LLM stream.
     pub runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
 }

@@ -1,7 +1,7 @@
 //! Chat area rendering — message list + popup + borderless input.
 //!
 //! The chat area renders both text lines (via Paragraph) and markdown
-//! tables (via ratatui Table widget). The [`ChatRenderOutput`] passed to
+//! tables (via ratatui Table widget). The `ChatRenderOutput` passed to
 //! this module contains both types, with table regions referenced by
 //! line index into the text buffer.
 

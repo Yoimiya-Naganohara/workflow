@@ -498,7 +498,7 @@ impl Plan {
 //  GraphPlan — DAG-backed plan using TaskGraph
 // ============================================================================
 
-/// A plan backed by a [`TaskGraph`] instead of a flat `Vec<Task>`.
+/// A plan backed by a `TaskGraph` instead of a flat `Vec<Task>`.
 ///
 /// This is the Phase 1 replacement for the linear `Plan` struct.
 /// It provides:

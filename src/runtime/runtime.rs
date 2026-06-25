@@ -335,7 +335,7 @@ impl AgentRuntime {
     // /// - No sandbox handles — sandboxes are re-created on activation
     // ── Pipeline delegation ──
 
-    /// Run a [`SpawnRequest`] through the decision pipeline.
+    /// Run a `SpawnRequest` through the decision pipeline.
     pub async fn process_request(
         &self,
         request: SpawnRequest,

@@ -1,8 +1,8 @@
-//! Agent diagnostic tree — read-only projection from [`AgentPool`].
+//! Agent diagnostic tree — read-only projection from `AgentPool`.
 //!
 //! This module builds a flat, indented line representation of the agent
 //! delegation hierarchy.  It is designed to be called from the TUI render
-//! loop with a [`try_read`] guard so it never blocks the UI thread.
+//! loop with a `try_read` guard so it never blocks the UI thread.
 //!
 //! # Phase 1 contract
 //!
@@ -86,7 +86,7 @@ fn build_diagnostic_tree(
 
 /// Build the diagnostic tree lines for a pool, rooted at `root_id`.
 ///
-/// Uses [`try_read`](std::sync::TryLockError) internally — if the pool
+/// Uses `try_read`(std::sync::TryLockError) internally — if the pool
 /// lock is contended the function returns an empty vec and the caller
 /// should retry on the next frame.
 pub fn build_agent_tree_lines(pool: &AgentPool, root_id: &AgentId) -> Vec<TreeLine> {
