@@ -534,3 +534,256 @@ impl AgentRuntime {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── tool_bit ──
+
+    #[test]
+    fn test_tool_bit_read_file() {
+        assert_eq!(AgentRuntime::tool_bit("read_file"), 1 << 0);
+    }
+
+    #[test]
+    fn test_tool_bit_write_file() {
+        assert_eq!(AgentRuntime::tool_bit("write_file"), 1 << 1);
+    }
+
+    #[test]
+    fn test_tool_bit_sh() {
+        assert_eq!(AgentRuntime::tool_bit("sh"), 1 << 2);
+    }
+
+    #[test]
+    fn test_tool_bit_list_dir() {
+        assert_eq!(AgentRuntime::tool_bit("list_dir"), 1 << 3);
+    }
+
+    #[test]
+    fn test_tool_bit_grep() {
+        assert_eq!(AgentRuntime::tool_bit("grep"), 1 << 4);
+    }
+
+    #[test]
+    fn test_tool_bit_find_files() {
+        assert_eq!(AgentRuntime::tool_bit("find_files"), 1 << 5);
+    }
+
+    #[test]
+    fn test_tool_bit_move_file() {
+        assert_eq!(AgentRuntime::tool_bit("move_file"), 1 << 6);
+    }
+
+    #[test]
+    fn test_tool_bit_copy_file() {
+        assert_eq!(AgentRuntime::tool_bit("copy_file"), 1 << 7);
+    }
+
+    #[test]
+    fn test_tool_bit_delete_file() {
+        assert_eq!(AgentRuntime::tool_bit("delete_file"), 1 << 8);
+    }
+
+    #[test]
+    fn test_tool_bit_append_file() {
+        assert_eq!(AgentRuntime::tool_bit("append_file"), 1 << 9);
+    }
+
+    #[test]
+    fn test_tool_bit_patch_file() {
+        assert_eq!(AgentRuntime::tool_bit("patch_file"), 1 << 10);
+    }
+
+    #[test]
+    fn test_tool_bit_glob() {
+        assert_eq!(AgentRuntime::tool_bit("glob"), 1 << 11);
+    }
+
+    #[test]
+    fn test_tool_bit_spawn_agent() {
+        assert_eq!(AgentRuntime::tool_bit("spawn_agent"), 1 << 12);
+    }
+
+    #[test]
+    fn test_tool_bit_read_memo() {
+        assert_eq!(AgentRuntime::tool_bit("read_memo"), 1 << 13);
+    }
+
+    #[test]
+    fn test_tool_bit_write_memo() {
+        assert_eq!(AgentRuntime::tool_bit("write_memo"), 1 << 14);
+    }
+
+    #[test]
+    fn test_tool_bit_delete_memo() {
+        assert_eq!(AgentRuntime::tool_bit("delete_memo"), 1 << 15);
+    }
+
+    #[test]
+    fn test_tool_bit_list_memos() {
+        assert_eq!(AgentRuntime::tool_bit("list_memos"), 1 << 16);
+    }
+
+    #[test]
+    fn test_tool_bit_call_agent() {
+        assert_eq!(AgentRuntime::tool_bit("call_agent"), 1 << 17);
+    }
+
+    #[test]
+    fn test_tool_bit_list_agents() {
+        assert_eq!(AgentRuntime::tool_bit("list_agents"), 1 << 18);
+    }
+
+    #[test]
+    fn test_tool_bit_send_message() {
+        assert_eq!(AgentRuntime::tool_bit("send_message"), 1 << 19);
+    }
+
+    #[test]
+    fn test_tool_bit_read_messages() {
+        assert_eq!(AgentRuntime::tool_bit("read_messages"), 1 << 20);
+    }
+
+    // Combined bitmap from multiple tools
+    #[test]
+    fn test_tool_bit_combined_or() {
+        let bits = AgentRuntime::tool_bit("read_file")
+            | AgentRuntime::tool_bit("sh")
+            | AgentRuntime::tool_bit("glob");
+        assert!(bits & (1 << 0) != 0, "read_file");
+        assert!(bits & (1 << 2) != 0, "sh");
+        assert!(bits & (1 << 11) != 0, "glob");
+        assert_eq!(bits.count_ones(), 3);
+    }
+
+    #[test]
+    fn test_tool_bit_unknown_returns_zero() {
+        assert_eq!(AgentRuntime::tool_bit("nonexistent_tool"), 0);
+        assert_eq!(AgentRuntime::tool_bit(""), 0);
+    }
+
+    #[test]
+    fn test_tool_bit_no_overlap() {
+        // Every defined tool bit must be unique — no two tools share a bit.
+        let tool_names = [
+            "read_file", "write_file", "sh", "list_dir", "grep",
+            "find_files", "move_file", "copy_file", "delete_file",
+            "append_file", "patch_file", "glob", "spawn_agent",
+            "read_memo", "write_memo", "delete_memo", "list_memos",
+            "call_agent", "list_agents", "send_message", "read_messages",
+        ];
+        let bits: Vec<u64> = tool_names.iter().map(|n| AgentRuntime::tool_bit(n)).collect();
+        for (i, &a) in bits.iter().enumerate() {
+            for (j, &b) in bits.iter().enumerate() {
+                if i != j {
+                    assert_eq!(a & b, 0, "bit {} ({}: bit {}) and bit {} ({}: bit {}) overlap at mask {}",
+                        i, tool_names[i], a, j, tool_names[j], b, a & b);
+                }
+            }
+        }
+    }
+
+    // ── bootstrap_root_agent (requires tokio runtime for AgentRuntime::new) ──
+
+    /// Mock embedding service returning normalized unit vectors.
+    struct MockEmbed;
+    #[async_trait::async_trait]
+    impl crate::llm::EmbeddingService for MockEmbed {
+        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; 384]> {
+            let mut e = [0.0f32; 384];
+            e[0] = 1.0;
+            Ok(e)
+        }
+        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; 384]>> {
+            Ok(texts.iter().map(|_| {
+                let mut e = [0.0f32; 384]; e[0] = 1.0; e
+            }).collect())
+        }
+        fn similarity(&self, a: &[f32; 384], b: &[f32; 384]) -> f32 {
+            crate::core::simd::cosine_similarity_384(a, b)
+        }
+        fn cache_size(&self) -> usize { 0 }
+        fn clear_cache(&self) {}
+        fn cache_hits(&self) -> u64 { 0 }
+        fn cache_misses(&self) -> u64 { 0 }
+    }
+
+    fn test_config() -> crate::runtime::AgentRuntimeConfig {
+        let dir = std::env::temp_dir().join(format!(
+            "workflow_lifecycle_test_{}",
+            rand::random::<u64>()
+        ));
+        crate::runtime::AgentRuntimeConfig {
+            bedrock_path: Some(dir.join("experience_a.bin")),
+            role_template_path: Some(dir.join("role_templates.json")),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bootstrap_root_agent_creates_agent() {
+        let runtime = AgentRuntime::new(test_config(), Arc::new(MockEmbed));
+        let mut pool = AgentPool::new();
+
+        let agent_id = runtime.bootstrap_root_agent(
+            "Build a REST API",
+            "developer",
+            &mut pool,
+        );
+
+        let agent = pool.get_agent(&agent_id).unwrap();
+        assert_eq!(agent.goal, "Build a REST API");
+        assert_eq!(agent.role, "developer");
+        assert_eq!(agent.depth, 0);
+        assert!(agent.parent_id.is_none());
+        assert!(agent.children.is_empty());
+        assert!(agent.task_id.is_some(), "root agent should have a task_id");
+        assert_eq!(agent.status, AgentStatus::Idle);
+        // Name should contain role prefix
+        assert!(agent.name.starts_with("developer-"));
+        // Model ID should match runtime
+        assert_eq!(agent.config.model_id, runtime.model_id);
+    }
+
+    #[tokio::test]
+    async fn test_bootstrap_root_agent_creates_task_graph_entry() {
+        let runtime = AgentRuntime::new(test_config(), Arc::new(MockEmbed));
+        let mut pool = AgentPool::new();
+
+        let agent_id = runtime.bootstrap_root_agent("test goal", "planner", &mut pool);
+        let agent = pool.get_agent(&agent_id).unwrap();
+        let task_id = agent.task_id.unwrap();
+
+        // Verify the task graph has this root task
+        let graph = runtime.task_graph.lock().unwrap();
+        let node = graph.get(&task_id).unwrap();
+        assert_eq!(node.goal, "test goal");
+        assert!(node.children.is_empty(), "root should have no children yet");
+    }
+
+    #[tokio::test]
+    async fn test_bootstrap_root_agent_role_without_template_still_works() {
+        let runtime = AgentRuntime::new(test_config(), Arc::new(MockEmbed));
+        let mut pool = AgentPool::new();
+
+        // Role "nonexistent-role" doesn't exist in the role template store
+        let agent_id = runtime.bootstrap_root_agent("goal", "nonexistent-role", &mut pool);
+        let agent = pool.get_agent(&agent_id).unwrap();
+        assert_eq!(agent.role, "nonexistent-role");
+        assert_eq!(agent.goal, "goal");
+    }
+
+    #[tokio::test]
+    async fn test_bootstrap_root_agent_unique_ids() {
+        let runtime = AgentRuntime::new(test_config(), Arc::new(MockEmbed));
+        let mut pool = AgentPool::new();
+
+        let id1 = runtime.bootstrap_root_agent("goal 1", "dev", &mut pool);
+        let id2 = runtime.bootstrap_root_agent("goal 2", "dev", &mut pool);
+
+        assert_ne!(id1, id2, "each bootstrap should generate a unique AgentId");
+        assert_eq!(pool.agents().len(), 2);
+    }
+}
