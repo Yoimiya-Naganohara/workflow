@@ -227,6 +227,90 @@ impl Default for Checkpoint {
 //  Tests
 // ============================================================================
 
+/// Restore an agent pool and task graph from the last checkpoint.
+pub async fn restore_checkpoint(
+    agent_pool: &tokio::sync::RwLock<crate::agent::AgentPool>,
+    task_graph: &std::sync::Mutex<crate::runtime::task_graph::TaskGraph>,
+) -> bool {
+    use crate::checkpoint::Checkpoint;
+
+    let cp = Checkpoint::new();
+    let snapshot = match cp.restore_snapshot() {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            tracing::info!("No checkpoint found — starting fresh");
+            return false;
+        }
+        Err(e) => {
+            tracing::warn!("Failed to load checkpoint: {} — starting fresh", e);
+            return false;
+        }
+    };
+
+    tracing::info!(
+        "Restored {} agents and {} tasks from checkpoint",
+        snapshot.agents.len(),
+        snapshot.task_graph.len(),
+    );
+
+    // Restore agent pool — preserve non-serialized config from existing pool.
+    {
+        let config = {
+            let p = agent_pool.read().await;
+            (
+                p.max_retries,
+                p.checkpoint_interval,
+                p.ttl_secs,
+                p.max_agents,
+                p.reasoning_effort.clone(),
+                p.reasoning_options.clone(),
+            )
+        };
+        let mut rehydrated = Checkpoint::rehydrate_pool(&snapshot);
+        rehydrated.max_retries = config.0;
+        rehydrated.checkpoint_interval = config.1;
+        rehydrated.ttl_secs = config.2;
+        rehydrated.max_agents = config.3;
+        rehydrated.reasoning_effort = config.4;
+        rehydrated.reasoning_options = config.5;
+        let mut p = agent_pool.write().await;
+        *p = rehydrated;
+    }
+
+    // Restore task graph.
+    {
+        let mut g = task_graph
+            .lock()
+            .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+        *g = snapshot.task_graph;
+        let reset_ids: Vec<crate::core::types::TaskId> = g
+            .all_nodes()
+            .filter(|n| {
+                matches!(
+                    n.status,
+                    crate::runtime::task_graph::TaskStatus::Running
+                        | crate::runtime::task_graph::TaskStatus::Dispatching
+                )
+            })
+            .map(|n| n.id)
+            .collect();
+        for tid in reset_ids {
+            let prev = g.get(&tid).map(|n| n.status);
+            match prev {
+                Some(crate::runtime::task_graph::TaskStatus::Running) => {
+                    let _ = g.mark_ready(tid);
+                }
+                Some(crate::runtime::task_graph::TaskStatus::Dispatching) => {
+                    let _ = g.mark_created(tid);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -150,7 +150,7 @@ async fn run_tui() -> Result<()> {
                 let tg = rt.read().await.task_graph.clone();
                 // Drop the read lock before awaiting (restore_checkpoint is async).
                 drop(state);
-                workflow::runtime::AgentRuntime::restore_checkpoint(&pool, &tg).await;
+                workflow::checkpoint::restore_checkpoint(&pool, &tg).await;
             }
         }
 

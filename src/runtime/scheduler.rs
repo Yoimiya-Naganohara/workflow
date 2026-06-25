@@ -11,6 +11,7 @@ use crate::runtime::decomposition::DecompositionEngine;
 use crate::runtime::dispatch::{DispatchDecider, DispatchDecision};
 use crate::runtime::escalation::EscalationPolicy;
 use crate::runtime::event::RuntimeEvent;
+use crate::runtime::graph_analytics::TemplateEvolution;
 use crate::runtime::strategy_graph::{StrategyGraph, StrategyId, StrategyType, TaskSignature};
 
 pub struct TaskScheduler {
@@ -25,6 +26,8 @@ pub struct TaskScheduler {
     outcome_store: Option<Arc<RwLock<TaskOutcomeStore>>>,
     /// Phase 5: strategy graph for per-task strategy selection.
     strategy_graph: Option<Arc<std::sync::Mutex<StrategyGraph>>>,
+    /// Phase 4: graph analytics for template evolution.
+    template_evolution: Option<Arc<std::sync::Mutex<TemplateEvolution>>>,
 }
 
 impl TaskScheduler {
@@ -45,6 +48,7 @@ impl TaskScheduler {
             escalation: None,
             outcome_store: None,
             strategy_graph: None,
+            template_evolution: None,
         }
     }
     pub fn with_decomposition(mut self, engine: Box<dyn DecompositionEngine>) -> Self {
@@ -71,6 +75,13 @@ impl TaskScheduler {
     }
     pub fn with_strategy_graph(mut self, sg: Arc<std::sync::Mutex<StrategyGraph>>) -> Self {
         self.strategy_graph = Some(sg);
+        self
+    }
+    pub fn with_graph_analytics(
+        mut self,
+        evolution: Arc<std::sync::Mutex<TemplateEvolution>>,
+    ) -> Self {
+        self.template_evolution = Some(evolution);
         self
     }
 
@@ -206,6 +217,18 @@ impl TaskScheduler {
                     }
                     g.mark_blocked(task_id).ok();
                 }
+            }
+            // ── Phase 4: Record graph metrics for template evolution ──
+            if let Some(ref _evolution) = self.template_evolution {
+                let rt = self.runtime.read().await;
+                let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                let metrics = crate::runtime::graph_analytics::GraphMetrics::from_graph(&g);
+                tracing::debug!(
+                    "GraphAnalytics: {} nodes, {} roots, {} leaves",
+                    metrics.node_count,
+                    metrics.root_count,
+                    metrics.leaf_count,
+                );
             }
             // ── Phase 5: Record trace in StrategyGraph ──
             if let (Some(sg), Some(sid)) = (&self.strategy_graph, strategy_id_for_trace) {

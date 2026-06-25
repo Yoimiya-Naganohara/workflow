@@ -32,6 +32,7 @@ use crate::runtime::dispatch::PipelineDispatchDecider;
 use crate::runtime::embedding_analyzer::{EmbeddingGoalAnalyzer, ReferenceEmbeddings};
 use crate::runtime::escalation::DefaultEscalationPolicy;
 use crate::runtime::event::RuntimeEvent;
+use crate::runtime::graph_analytics::TemplateEvolution;
 use crate::runtime::scheduler::TaskScheduler;
 use crate::runtime::strategy_graph::{CompetitionProtocol, StrategyGraph};
 use crate::tools::ToolServerHandle;
@@ -92,7 +93,10 @@ impl RuntimeEventLoop {
                 .with_routing(
                     Box::new(DefaultRoleSelector::new(goal_analyzer)),
                     Arc::new(RwLock::new(CapabilityRegistry::new())),
-                );
+                )
+                .with_graph_analytics(Arc::new(
+                    std::sync::Mutex::new(TemplateEvolution::default()),
+                ));
 
         let checkpoint = crate::checkpoint::Checkpoint::new();
         Self {
