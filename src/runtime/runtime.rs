@@ -642,37 +642,6 @@ impl AgentRuntime {
 
     // ── Chat ──
 
-    /// Chat with an LLM agent for a user goal.
-    /// Spawns a root agent, executes it, and returns the result.
-    pub async fn chat_with_goal(
-        &self,
-        goal: &str,
-        agent_pool: &Arc<RwLock<AgentPool>>,
-    ) -> Result<String> {
-        let agent_id = {
-            let mut pool = agent_pool.write().await;
-            self.spawn_root_agent(goal, "planner", "default", &mut pool)
-                .await?
-        };
-
-        // Spawned agents are leaf nodes; execute directly.
-        self.execute_agent(agent_id, agent_pool).await;
-        self.await_agent(agent_id, agent_pool).await;
-
-        let result = {
-            let pool = agent_pool.read().await;
-            pool.get_agent(&agent_id)
-                .and_then(|a| a.result.clone())
-                .unwrap_or_default()
-        };
-
-        if result.is_empty() {
-            Err(anyhow::anyhow!("Agent produced no result"))
-        } else {
-            Ok(result)
-        }
-    }
-
     // ── Agent lifecycle ──
 
     /// Create the initial interactive agent.
@@ -1170,21 +1139,6 @@ impl AgentRuntime {
         Ok(result)
     }
 
-    pub async fn execute_agent(&self, agent_id: AgentId, agent_pool: &Arc<RwLock<AgentPool>>) {
-        self.execute_agent_inner(agent_id, agent_pool, None).await;
-    }
-
-    /// Execute agent with tool access.
-    pub async fn execute_agent_with_tools(
-        &self,
-        agent_id: AgentId,
-        agent_pool: &Arc<RwLock<AgentPool>>,
-        tool_server: crate::tools::ToolServerHandle,
-    ) {
-        self.execute_agent_inner(agent_id, agent_pool, Some(tool_server))
-            .await;
-    }
-
     /// Map a tool name to a bit position for the tool bitmap.
     fn tool_bit(name: &str) -> u64 {
         match name {
@@ -1212,6 +1166,150 @@ impl AgentRuntime {
             _ => 0,
         }
     }
+
+    // ── Shared stream processing ──
+
+    /// Process a ToolChatStream: consume events, update tool_trace, detect loops.
+    /// Shared by `execute_agent_detached` and `execute_agent_inner`.
+    async fn process_tool_stream(
+        stream: crate::llm::ToolChatStream,
+        agent_id: AgentId,
+        agent_pool: &Arc<RwLock<AgentPool>>,
+    ) -> (String, u64) {
+        use futures::StreamExt;
+        futures::pin_mut!(stream);
+        let mut text = String::new();
+        let mut tools_used: u64 = 0;
+        let mut tool_call_count = 0usize;
+        let mut done_received = false;
+
+        while let Some(event) = stream.next().await {
+            match event {
+                crate::llm::ToolEvent::Text(t) => text.push_str(&t),
+                crate::llm::ToolEvent::Reasoning(t) => {
+                    if let Ok(mut pool) = agent_pool.try_write() {
+                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                            agent.reasoning.push_str(&t);
+                        }
+                    }
+                }
+                crate::llm::ToolEvent::ToolCall { name, args, .. } => {
+                    tool_call_count += 1;
+                    tools_used |= Self::tool_bit(&name);
+                    let args_preview = serde_json::to_string(&args).unwrap_or_default();
+                    let args_preview = if args_preview.len() > 80 {
+                        format!("{}…", args_preview.chars().take(80).collect::<String>())
+                    } else {
+                        args_preview
+                    };
+                    if let Ok(mut pool) = agent_pool.try_write() {
+                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                            agent.tool_trace.push_back(crate::agent::ToolCallRecord {
+                                name,
+                                args_preview,
+                                status: crate::agent::ToolStatus::Success,
+                            });
+                            if agent.tool_trace.len() > crate::agent::MAX_TOOL_TRACE {
+                                agent.tool_trace.pop_front();
+                            }
+                        }
+                    }
+                }
+                crate::llm::ToolEvent::TokenUsage { input, output, .. } => {
+                    // Accumulate token counts on the agent for UI display.
+                    if input > 0 || output > 0 {
+                        if let Ok(mut pool) = agent_pool.try_write() {
+                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                                agent.tokens_input = agent.tokens_input.saturating_add(input);
+                                agent.tokens_output = agent.tokens_output.saturating_add(output);
+                            }
+                        }
+                    }
+                }
+                crate::llm::ToolEvent::Done { reason } => {
+                    done_received = true;
+                    if reason == crate::llm::DoneReason::LoopTerminated
+                        || reason == crate::llm::DoneReason::StreamError
+                    {
+                        tracing::info!(
+                            "Agent {:02x}.. completed with {} ({} bytes)",
+                            agent_id[0],
+                            if reason == crate::llm::DoneReason::LoopTerminated {
+                                "loop termination"
+                            } else {
+                                "stream error"
+                            },
+                            text.len(),
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+
+        if !done_received {
+            tracing::warn!(
+                "Agent {:02x}.. stream ended without Done event ({} bytes)",
+                agent_id[0],
+                text.len(),
+            );
+        }
+
+        // Empty text fallback
+        if text.trim().is_empty() && tool_call_count > 0 {
+            text = format!(
+                "Completed after {} tool call{}.",
+                tool_call_count,
+                if tool_call_count == 1 { "" } else { "s" }
+            );
+        }
+
+        // Heuristic tool error detection
+        if !text.is_empty() {
+            let error_keywords = [
+                "error:",
+                "Error:",
+                "ERROR:",
+                "failed:",
+                "Failed:",
+                "FAILED:",
+                "Not Found",
+                "permission denied",
+                "Permission denied",
+                "timed out",
+                "Timed Out",
+                "timeout",
+                "Tool execution error",
+                "connection refused",
+                "Connection refused",
+                "no such file",
+                "No such file",
+                "exit code:",
+                "Tool execution failed",
+                "cannot read",
+                "Cannot read",
+                "is a directory",
+                "Is a directory",
+            ];
+            let has_error = error_keywords.iter().any(|pat| text.contains(pat));
+            if has_error {
+                if let Ok(mut pool) = agent_pool.try_write() {
+                    if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                        for record in agent.tool_trace.iter_mut().rev().take(2) {
+                            if record.status == crate::agent::ToolStatus::Success {
+                                record.status = crate::agent::ToolStatus::Error;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        (text, tools_used)
+    }
+
+    // ── Agent execution ──
 
     /// Execute an agent without holding the runtime read lock across the LLM call.
     ///
@@ -1325,10 +1423,6 @@ Messages may contain important context from sibling agents.",
 
         // Phase 3: Execute LLM call (no lock held on runtime)
         let (response, tool_bitmap) = if let Some(handle) = &tool_server {
-            let mut text = String::new();
-            let mut tools_used: u64 = 0;
-            let mut tokens_input: u32 = 0;
-            let mut tokens_output: u32 = 0;
             let additional_params = reasoning_effort
                 .as_ref()
                 .and_then(|effort| provider.reasoning_params(effort, &reasoning_options));
@@ -1355,140 +1449,7 @@ Messages may contain important context from sibling agents.",
                     return (format!("LLM error: {}", e), AgentStatus::Failed);
                 }
             };
-            use futures::StreamExt;
-            futures::pin_mut!(stream);
-            let mut tool_call_count = 0usize;
-            let mut done_received = false;
-            while let Some(event) = stream.next().await {
-                match event {
-                    crate::llm::ToolEvent::Text(t) => text.push_str(&t),
-                    crate::llm::ToolEvent::Reasoning(t) => {
-                        // Accumulate reasoning on the agent for TUI display.
-                        if let Ok(mut pool) = agent_pool.try_write() {
-                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                                agent.reasoning.push_str(&t);
-                            }
-                        }
-                    }
-                    crate::llm::ToolEvent::ToolCall { name, args, .. } => {
-                        tool_call_count += 1;
-                        tools_used |= Self::tool_bit(&name);
-                        let args_preview = serde_json::to_string(&args).unwrap_or_default();
-                        let args_preview = if args_preview.len() > 80 {
-                            format!("{}…", args_preview.chars().take(80).collect::<String>())
-                        } else {
-                            args_preview
-                        };
-                        if let Ok(mut pool) = agent_pool.try_write() {
-                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                                agent.tool_trace.push_back(crate::agent::ToolCallRecord {
-                                    name,
-                                    args_preview,
-                                    status: crate::agent::ToolStatus::Success,
-                                });
-                                // Keep ring buffer bounded
-                                if agent.tool_trace.len() > crate::agent::MAX_TOOL_TRACE {
-                                    agent.tool_trace.pop_front();
-                                }
-                            }
-                        }
-                    }
-                    crate::llm::ToolEvent::TokenUsage { input, output, .. } => {
-                        // Accumulate across all tool-calling turns for accurate
-                        // total cost/consumption reporting (not just last-turn max).
-                        tokens_input = tokens_input.saturating_add(input);
-                        tokens_output = tokens_output.saturating_add(output);
-                    }
-                    crate::llm::ToolEvent::Done { reason } => {
-                        done_received = true;
-                        if reason == crate::llm::DoneReason::LoopTerminated
-                            || reason == crate::llm::DoneReason::StreamError
-                        {
-                            // Not a failure — continue with accumulated text.
-                            tracing::info!(
-                                "Agent {:02x}.. completed with {} ({} bytes)",
-                                agent_id[0],
-                                if reason == crate::llm::DoneReason::LoopTerminated {
-                                    "loop termination"
-                                } else {
-                                    "stream error"
-                                },
-                                text.len(),
-                            );
-                        }
-                        break;
-                    }
-                }
-            }
-            if !done_received {
-                // Stream ended without Done — complete with what we have.
-                tracing::warn!(
-                    "Agent {:02x}.. stream ended without Done event ({} bytes)",
-                    agent_id[0],
-                    text.len(),
-                );
-            }
-            // If the LLM hit max turns without producing a final message,
-            // generate a concise summary so the user sees completion feedback.
-            if text.trim().is_empty() && tool_call_count > 0 {
-                text = format!(
-                    "Completed after {} tool call{}.",
-                    tool_call_count,
-                    if tool_call_count == 1 { "" } else { "s" }
-                );
-            }
-
-            // -- Heuristic tool error detection --
-            // Scan the LLM's accumulated output for error indicators.
-            // If found, mark the most recent tool call(s) as Error.
-            if !text.is_empty() {
-                let error_keywords = [
-                    "error:",
-                    "Error:",
-                    "ERROR:",
-                    "failed:",
-                    "Failed:",
-                    "FAILED:",
-                    "not found",
-                    "Not Found",
-                    "permission denied",
-                    "Permission denied",
-                    "timed out",
-                    "Timed Out",
-                    "timeout",
-                    "Tool execution error",
-                    "connection refused",
-                    "Connection refused",
-                    "no such file",
-                    "No such file",
-                    "StatusCode:",
-                    "exit code:",
-                    "ToolNotFound",
-                    "ToolCallError",
-                    "RuntimeError",
-                    "Tool execution failed",
-                    "cannot read",
-                    "Cannot read",
-                    "is a directory",
-                    "Is a directory",
-                    "No such device",
-                    "permission",
-                ];
-                let has_error = error_keywords.iter().any(|pat| text.contains(pat));
-                if has_error {
-                    // Mark the most recent tool calls as errored.
-                    if let Ok(mut pool) = agent_pool.try_write() {
-                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                            for record in agent.tool_trace.iter_mut().rev().take(2) {
-                                if record.status == crate::agent::ToolStatus::Success {
-                                    record.status = crate::agent::ToolStatus::Error;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            let (text, tools_used) = Self::process_tool_stream(stream, agent_id, &agent_pool).await;
             (text, tools_used)
         } else {
             let text = match provider
@@ -1550,342 +1511,6 @@ Messages may contain important context from sibling agents.",
         pool.notify_completed(&agent_id);
 
         (response, AgentStatus::Completed)
-    }
-
-    /// Execute a single leaf agent: LLM call, store result, record experience.
-    ///
-    /// If `tool_server` is provided, the agent can call tools.
-    ///
-    /// NOTE: This method takes `&self` and holds the runtime read lock for the
-    /// entire duration. Prefer [`execute_agent_detached`] from long-lived contexts
-    /// to avoid blocking other runtime operations.
-    pub(crate) async fn execute_agent_inner(
-        &self,
-        agent_id: AgentId,
-        agent_pool: &Arc<RwLock<AgentPool>>,
-        tool_server: Option<crate::tools::ToolServerHandle>,
-    ) -> (String, AgentStatus) {
-        let (goal, role, config) = {
-            let pool = agent_pool.read().await;
-            let agent = match pool.get_agent(&agent_id) {
-                Some(a) => a.clone(),
-                None => return (String::new(), AgentStatus::Failed),
-            };
-            (agent.goal, agent.role, agent.config.clone())
-        };
-
-        let provider = match &self.provider {
-            Some(p) => p.clone(),
-            None => {
-                let mut pool = agent_pool.write().await;
-                if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                    agent.status = AgentStatus::Failed;
-                    agent.result = Some("No LLM provider configured".to_string());
-                    pool.release_budget_guard(&agent_id);
-                    pool.notify_completed(&agent_id);
-                }
-                return (
-                    "No LLM provider configured".to_string(),
-                    AgentStatus::Failed,
-                );
-            }
-        };
-
-        // Mark planning
-        {
-            let mut pool = agent_pool.write().await;
-            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                agent.status = AgentStatus::Planning;
-            }
-        }
-
-        let role_system_prompt = self
-            .role_template_store
-            .get_by_role(&role)
-            .map(|t| t.system_prompt)
-            .unwrap_or_else(|| format!("You are a {}. Execute the given goal.", role));
-        // Inject role-scoped memos directly into the system prompt.
-        // This replaces the old explicit ReadMemo tool pattern — memos are
-        // now automatically available without an extra tool call.
-        let memo_block = {
-            let pool = agent_pool.read().await;
-            pool.format_role_memos(&role)
-        };
-
-        let memos = memo_block.as_deref().unwrap_or("");
-        let system_prompt = format!(
-            "{}\n\n{}\n\n{}{}",
-            role_system_prompt,
-            crate::core::types::MEMO_INSTRUCTIONS,
-            crate::core::types::ZERO_TOLERANCE_INSTRUCTIONS,
-            memos,
-        );
-
-        // Read reasoning_effort + reasoning_options from pool (brief read lock).
-        let (reasoning_effort, reasoning_options) = {
-            let pool = agent_pool.read().await;
-            (
-                pool.reasoning_effort.clone(),
-                pool.reasoning_options.clone(),
-            )
-        };
-
-        let leaf_goal = format!(
-            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\nTOOL DISCIPLINE: Only call tools when you truly need information you cannot infer. Prefer answering directly from your knowledge. You have up to 6 tool call rounds available, with a maximum of 12 total tool calls per session. No single tool may be called more than 6 times. If you have called several tools and still cannot answer, summarize what you found and explain what is missing. Repeated calls to the same tool with the same arguments (3+ times) will be treated as a loop and terminated.",
-            goal
-        );
-
-        let (response, tool_bitmap) = if let Some(handle) = &tool_server {
-            let mut text = String::new();
-            let mut tools_used: u64 = 0;
-            let mut tokens_input: u32 = 0;
-            let mut tokens_output: u32 = 0;
-            let additional_params = reasoning_effort
-                .as_ref()
-                .and_then(|effort| provider.reasoning_params(effort, &reasoning_options));
-            let stream = match provider
-                .chat_with_tools_stream_mcp(
-                    &config.model_id,
-                    &system_prompt,
-                    &leaf_goal,
-                    &[],
-                    handle,
-                    additional_params.as_ref(),
-                )
-                .await
-            {
-                Ok(s) => s,
-                Err(e) => {
-                    let mut pool = agent_pool.write().await;
-                    if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                        agent.status = AgentStatus::Failed;
-                        agent.result = Some(format!("LLM error: {}", e));
-                        pool.release_budget_guard(&agent_id);
-                        pool.notify_completed(&agent_id);
-                    }
-                    return (format!("LLM error: {}", e), AgentStatus::Failed);
-                }
-            };
-            use futures::StreamExt;
-            futures::pin_mut!(stream);
-            let mut tool_call_count = 0usize;
-            let mut done_received = false;
-            while let Some(event) = stream.next().await {
-                match event {
-                    crate::llm::ToolEvent::Text(t) => text.push_str(&t),
-                    crate::llm::ToolEvent::Reasoning(t) => {
-                        // Accumulate reasoning on the agent for TUI display.
-                        if let Ok(mut pool) = agent_pool.try_write() {
-                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                                agent.reasoning.push_str(&t);
-                            }
-                        }
-                    }
-                    crate::llm::ToolEvent::ToolCall { name, args, .. } => {
-                        tool_call_count += 1;
-                        tools_used |= Self::tool_bit(&name);
-                        // Record tool call trace (ring buffer, bounded).
-                        let args_preview = serde_json::to_string(&args).unwrap_or_default();
-                        let args_preview = if args_preview.len() > 80 {
-                            format!("{}…", args_preview.chars().take(80).collect::<String>())
-                        } else {
-                            args_preview
-                        };
-                        if let Ok(mut pool) = agent_pool.try_write() {
-                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                                agent.tool_trace.push_back(crate::agent::ToolCallRecord {
-                                    name,
-                                    args_preview,
-                                    status: crate::agent::ToolStatus::Success,
-                                });
-                                if agent.tool_trace.len() > crate::agent::MAX_TOOL_TRACE {
-                                    agent.tool_trace.pop_front();
-                                }
-                            }
-                        } // try_write drops here — minimal lock duration
-                    }
-                    crate::llm::ToolEvent::TokenUsage { input, output, .. } => {
-                        tokens_input = tokens_input.saturating_add(input);
-                        tokens_output = tokens_output.saturating_add(output);
-                    }
-                    crate::llm::ToolEvent::Done { reason } => {
-                        done_received = true;
-                        if reason == crate::llm::DoneReason::LoopTerminated
-                            || reason == crate::llm::DoneReason::StreamError
-                        {
-                            // Not a failure — continue with accumulated text.
-                            tracing::info!(
-                                "Agent {:02x}.. completed with {} ({} bytes)",
-                                agent_id[0],
-                                if reason == crate::llm::DoneReason::LoopTerminated {
-                                    "loop termination"
-                                } else {
-                                    "stream error"
-                                },
-                                text.len(),
-                            );
-                        }
-                        break;
-                    }
-                }
-            }
-            if !done_received {
-                // Stream ended without Done — complete with what we have.
-                tracing::warn!(
-                    "Agent {:02x}.. stream ended without Done event ({} bytes)",
-                    agent_id[0],
-                    text.len(),
-                );
-            }
-            // If the LLM hit max turns without producing a final message,
-            // generate a concise summary so the user sees completion feedback.
-            if text.trim().is_empty() && tool_call_count > 0 {
-                text = format!(
-                    "Completed after {} tool call{}.",
-                    tool_call_count,
-                    if tool_call_count == 1 { "" } else { "s" }
-                );
-            }
-
-            // -- Heuristic tool error detection --
-            // Scan the LLM's accumulated output for error indicators.
-            // If found, mark the most recent tool call(s) as Error.
-            if !text.is_empty() {
-                let error_keywords = [
-                    "error:",
-                    "Error:",
-                    "ERROR:",
-                    "failed:",
-                    "Failed:",
-                    "FAILED:",
-                    "not found",
-                    "Not Found",
-                    "permission denied",
-                    "Permission denied",
-                    "timed out",
-                    "Timed Out",
-                    "timeout",
-                    "Tool execution error",
-                    "connection refused",
-                    "Connection refused",
-                    "no such file",
-                    "No such file",
-                    "StatusCode:",
-                    "exit code:",
-                    "ToolNotFound",
-                    "ToolCallError",
-                    "RuntimeError",
-                    "Tool execution failed",
-                    "cannot read",
-                    "Cannot read",
-                    "is a directory",
-                    "Is a directory",
-                    "No such device",
-                    "permission",
-                ];
-                let has_error = error_keywords.iter().any(|pat| text.contains(pat));
-                if has_error {
-                    // Mark the most recent tool calls as errored.
-                    if let Ok(mut pool) = agent_pool.try_write() {
-                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                            for record in agent.tool_trace.iter_mut().rev().take(2) {
-                                if record.status == crate::agent::ToolStatus::Success {
-                                    record.status = crate::agent::ToolStatus::Error;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            (text, tools_used)
-        } else {
-            match provider
-                .chat(&config.model_id, &system_prompt, &leaf_goal)
-                .await
-            {
-                Ok(r) => (r, 0),
-                Err(e) => {
-                    let mut pool = agent_pool.write().await;
-                    if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                        agent.status = AgentStatus::Failed;
-                        agent.result = Some(format!("LLM error: {}", e));
-                        pool.release_budget_guard(&agent_id);
-                        pool.notify_completed(&agent_id);
-                    }
-                    return (format!("LLM error: {}", e), AgentStatus::Failed);
-                }
-            }
-        };
-
-        // Leaf agent — response is the result
-        let (role_template_id, recorded_tool_bitmap) = {
-            let mut pool = agent_pool.write().await;
-            let role_tpl_id = pool.get_agent(&agent_id).and_then(|a| a.role_template_id);
-            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                agent.result = Some(response.clone());
-                agent.status = AgentStatus::Completed;
-                pool.release_budget_guard(&agent_id);
-                pool.notify_completed(&agent_id);
-            }
-            (role_tpl_id, tool_bitmap)
-        };
-
-        // Record experience entry (feedback loop).
-        if let Ok(emb) = self.pipeline.embedding().embed(&goal).await {
-            self.pipeline.add_experience(ExperienceEntry {
-                embedding: emb,
-                applicability_vector: [0.0f32; 128],
-                tool_bitmap: recorded_tool_bitmap,
-                role_template_id,
-                weight: 0.8,
-                domain_version: 0,
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-                l2_override_weight: 0.0,
-                l2_override_created_at: 0,
-            });
-        }
-
-        (response, AgentStatus::Completed)
-    }
-
-    pub async fn await_agent(
-        &self,
-        agent_id: AgentId,
-        agent_pool: &Arc<RwLock<AgentPool>>,
-    ) -> String {
-        let notify = {
-            let pool = agent_pool.read().await;
-            pool.get_completion_notify(&agent_id)
-        };
-
-        if let Some(notify) = notify {
-            // Loop: Notify may fire early when the agent is retried.
-            // `notify_completed` is called inside `execute_agent_detached` on
-            // every failure, even transient ones (retry).  After retry, the
-            // agent status is reset to Idle.  Wait for the true terminal state.
-            loop {
-                notify.notified().await;
-                let pool = agent_pool.read().await;
-                let is_terminal = pool.get_agent(&agent_id).map_or(true, |a| {
-                    matches!(
-                        a.status,
-                        crate::agent::AgentStatus::Completed | crate::agent::AgentStatus::Failed
-                    )
-                });
-                if is_terminal {
-                    break;
-                }
-            }
-        }
-
-        let pool = agent_pool.read().await;
-        pool.get_agent(&agent_id)
-            .and_then(|a| a.result.clone())
-            .unwrap_or_default()
     }
 }
 

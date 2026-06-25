@@ -26,9 +26,14 @@ use tokio::sync::{RwLock, mpsc};
 use crate::agent::{AgentPool, AgentStatus};
 use crate::core::types::AgentId;
 use crate::runtime::AgentRuntime;
+use crate::runtime::capability::{CapabilityRegistry, DefaultRoleSelector, TaskOutcomeStore};
+use crate::runtime::decomposition::{DefaultDecompositionEngine, TensionThreshold};
 use crate::runtime::dispatch::PipelineDispatchDecider;
+use crate::runtime::embedding_analyzer::{EmbeddingGoalAnalyzer, ReferenceEmbeddings};
+use crate::runtime::escalation::DefaultEscalationPolicy;
 use crate::runtime::event::RuntimeEvent;
 use crate::runtime::scheduler::TaskScheduler;
+use crate::runtime::strategy_graph::{CompetitionProtocol, StrategyGraph};
 use crate::tools::ToolServerHandle;
 
 /// Background agent lifecycle loop.
@@ -53,7 +58,7 @@ pub struct RuntimeEventLoop {
 
 impl RuntimeEventLoop {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         runtime: Arc<RwLock<AgentRuntime>>,
         pool: Arc<RwLock<AgentPool>>,
         event_rx: mpsc::Receiver<RuntimeEvent>,
@@ -62,8 +67,33 @@ impl RuntimeEventLoop {
         state: Option<std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>>,
     ) -> Self {
         let decider = Box::new(PipelineDispatchDecider::new(runtime.clone()));
+
+        // Extract embedding service and build decomposition/routing components.
+        let goal_analyzer: Arc<dyn crate::runtime::embedding_analyzer::GoalAnalyzer> = {
+            let rt = runtime.read().await;
+            let svc = rt.embedding_service();
+            let refs = ReferenceEmbeddings::compute(&*svc).await;
+            Arc::new(EmbeddingGoalAnalyzer::new(refs))
+        };
+
         let scheduler =
-            TaskScheduler::new(runtime.clone(), pool.clone(), broker_tx.clone(), decider);
+            TaskScheduler::new(runtime.clone(), pool.clone(), broker_tx.clone(), decider)
+                .with_strategy_graph(Arc::new(std::sync::Mutex::new(StrategyGraph::new(
+                    CompetitionProtocol::default(),
+                ))))
+                .with_escalation(
+                    Box::new(DefaultEscalationPolicy::default()),
+                    Arc::new(RwLock::new(TaskOutcomeStore::new())),
+                )
+                .with_decomposition(Box::new(DefaultDecompositionEngine::new(
+                    TensionThreshold::default(),
+                    goal_analyzer.clone(),
+                )))
+                .with_routing(
+                    Box::new(DefaultRoleSelector::new(goal_analyzer)),
+                    Arc::new(RwLock::new(CapabilityRegistry::new())),
+                );
+
         let checkpoint = crate::checkpoint::Checkpoint::new();
         Self {
             runtime,

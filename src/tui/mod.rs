@@ -114,7 +114,8 @@ impl Tui {
                 broker_tx,
                 tool_server,
                 Some(app_state),
-            );
+            )
+            .await;
             loop_.run().await;
         });
 
