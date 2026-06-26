@@ -530,6 +530,11 @@ impl AgentRuntime {
             "list_agents" => 1 << 18,
             "send_message" => 1 << 19,
             "read_messages" => 1 << 20,
+            "line_edit" => 1 << 21,
+            "fetch" => 1 << 22,
+            "search_asset" => 1 << 23,
+            "extract_json" => 1 << 24,
+            "diff_edit" => 1 << 25,
             _ => 0,
         }
     }
@@ -646,6 +651,31 @@ mod tests {
         assert_eq!(AgentRuntime::tool_bit("read_messages"), 1 << 20);
     }
 
+    #[test]
+    fn test_tool_bit_line_edit() {
+        assert_eq!(AgentRuntime::tool_bit("line_edit"), 1 << 21);
+    }
+
+    #[test]
+    fn test_tool_bit_fetch() {
+        assert_eq!(AgentRuntime::tool_bit("fetch"), 1 << 22);
+    }
+
+    #[test]
+    fn test_tool_bit_search_asset() {
+        assert_eq!(AgentRuntime::tool_bit("search_asset"), 1 << 23);
+    }
+
+    #[test]
+    fn test_tool_bit_extract_json() {
+        assert_eq!(AgentRuntime::tool_bit("extract_json"), 1 << 24);
+    }
+
+    #[test]
+    fn test_tool_bit_diff_edit() {
+        assert_eq!(AgentRuntime::tool_bit("diff_edit"), 1 << 25);
+    }
+
     // Combined bitmap from multiple tools
     #[test]
     fn test_tool_bit_combined_or() {
@@ -689,6 +719,11 @@ mod tests {
             "list_agents",
             "send_message",
             "read_messages",
+            "line_edit",
+            "fetch",
+            "search_asset",
+            "extract_json",
+            "diff_edit",
         ];
         let bits: Vec<u64> = tool_names
             .iter()
