@@ -27,39 +27,41 @@ use super::builtin::ToolCallError;
 pub struct MemoToolDeps {
     /// The shared agent pool.
     pub agent_pool: Arc<RwLock<AgentPool>>,
-    /// Handle to the full AppState to read `responsible_agent_id`.
-    state: Arc<RwLock<crate::tui::state::AppState>>,
+    /// The responsible agent ID (set at construction time).
+    responsible_agent_id: Option<AgentId>,
 }
 
 impl MemoToolDeps {
-    /// Extract memo tool dependencies from an AppState handle.
+    /// Create dependencies from an agent pool and optional agent ID.
     ///
-    /// If the lock is contended (e.g. a write lock is held elsewhere),
-    /// this creates a stub with an empty agent pool.  The tools will
-    /// return "Agent pool locked" errors at call time rather than
-    /// panicking at startup.
+    /// This replaces `from_state()` — callers pass the pool and ID
+    /// directly instead of going through `AppState`, avoiding the
+    /// `tools → tui` dependency cycle.
+    pub fn new(agent_pool: Arc<RwLock<AgentPool>>, responsible_agent_id: Option<AgentId>) -> Self {
+        Self {
+            agent_pool,
+            responsible_agent_id,
+        }
+    }
+
+    /// Create from an AppState handle (legacy; creates tui dependency).
     pub fn from_state(state: &Arc<RwLock<crate::tui::state::AppState>>) -> Self {
         let agent_pool = match state.try_read() {
             Ok(s) => s.core.agent_pool.clone(),
             Err(_) => {
-                // Lock contended — create a fresh empty pool as fallback.
-                // Tools will return errors until a real pool is available.
                 tracing::warn!("MemoToolDeps: AppState lock contended, using fallback pool");
                 Arc::new(RwLock::new(crate::agent::AgentPool::new()))
             }
         };
-        Self {
-            agent_pool,
-            state: state.clone(),
-        }
-    }
-
-    /// Read the current responsible agent ID from the AppState.
-    fn responsible_agent_id(&self) -> Option<AgentId> {
-        self.state
+        let responsible = state
             .try_read()
             .ok()
-            .and_then(|s| s.core.responsible_agent_id)
+            .and_then(|s| s.core.responsible_agent_id);
+        Self::new(agent_pool, responsible)
+    }
+
+    fn responsible_agent_id(&self) -> Option<AgentId> {
+        self.responsible_agent_id
     }
 }
 

@@ -7,33 +7,42 @@ use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::tui::state::AppState;
-
 use super::builtin::ToolCallError;
 
 /// Register agent-management and inter-agent communication tools.
+///
+/// Takes extracted dependencies rather than AppState to avoid the
+/// `tools → tui` dependency cycle.
 pub fn register_tools(
     server: crate::tools::ToolServer,
-    state: Arc<RwLock<AppState>>,
+    agent_pool: Arc<RwLock<crate::agent::AgentPool>>,
+    runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
+    responsible_agent_id: Option<crate::core::types::AgentId>,
 ) -> crate::tools::ToolServer {
     server
         .tool(SpawnAgent {
-            state: state.clone(),
+            runtime_event_tx: runtime_event_tx.clone(),
+            responsible_agent_id,
         })
         .tool(SendMessage {
-            state: state.clone(),
+            agent_pool: agent_pool.clone(),
+            runtime_event_tx: runtime_event_tx.clone(),
+            responsible_agent_id,
         })
         .tool(ReadMessages {
-            state: state.clone(),
+            agent_pool: agent_pool.clone(),
+            responsible_agent_id,
         })
-        .tool(ListAgents { state })
+        .tool(ListAgents { agent_pool })
 }
 
 // ── SendMessage ──
 
 #[derive(Clone)]
 pub struct SendMessage {
-    state: Arc<RwLock<AppState>>,
+    agent_pool: Arc<RwLock<crate::agent::AgentPool>>,
+    runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
+    responsible_agent_id: Option<crate::core::types::AgentId>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,36 +81,36 @@ impl Tool for SendMessage {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let s = self.state.read().await;
-        let agent_id = s
-            .core
+        let agent_id = self
             .responsible_agent_id
             .ok_or_else(|| ToolCallError("No active agent to send from".to_string()))?;
-        let pool = s.core.agent_pool.read().await;
-        let sender_name = pool
-            .get_agent(&agent_id)
-            .map(|a| a.name.clone())
-            .unwrap_or_else(|| "unknown".to_string());
+        let sender_name = {
+            let pool = self.agent_pool.read().await;
+            pool.get_agent(&agent_id)
+                .map(|a| a.name.clone())
+                .unwrap_or_else(|| "unknown".to_string())
+        };
 
         // Find recipient by name
-        let recipient = pool
-            .agents()
-            .iter()
-            .find(|a| a.name == args.recipient)
-            .map(|a| (a.id, a.status.clone()))
-            .ok_or_else(|| {
-                ToolCallError(format!(
-                    "Agent '{}' not found. Use `list_agents` to see active agents.",
-                    args.recipient
-                ))
-            })?;
-        drop(pool);
+        let recipient = {
+            let pool = self.agent_pool.read().await;
+            pool.agents()
+                .iter()
+                .find(|a| a.name == args.recipient)
+                .map(|a| a.id)
+                .ok_or_else(|| {
+                    ToolCallError(format!(
+                        "Agent '{}' not found. Use `list_agents` to see active agents.",
+                        args.recipient
+                    ))
+                })?
+        };
 
         // Write via try_write — spin backoff pattern
         let mut retries = 0u32;
         loop {
-            if let Ok(mut pool) = s.core.agent_pool.try_write() {
-                pool.send_message(recipient.0, agent_id, &sender_name, &args.message, None)
+            if let Ok(mut pool) = self.agent_pool.try_write() {
+                pool.send_message(recipient, agent_id, &sender_name, &args.message, None)
                     .map_err(ToolCallError)?;
                 break;
             }
@@ -115,14 +124,11 @@ impl Tool for SendMessage {
         }
 
         // Emit InboxMessage event so the recipient gets notified.
-        // The RuntimeEventLoop handles re-activation of idle/completed
-        // agents and bumps version flags for running ones (notification mode).
         let preview: String = args.message.chars().take(200).collect();
-        if let Some(tx) = &s.core.runtime_event_tx {
-            // Count unread messages after delivery (best-effort).
+        if let Some(tx) = &self.runtime_event_tx {
             let count = {
-                if let Ok(pool) = s.core.agent_pool.try_read() {
-                    pool.get_agent(&recipient.0)
+                if let Ok(pool) = self.agent_pool.try_read() {
+                    pool.get_agent(&recipient)
                         .map(|a| a.inbox.len())
                         .unwrap_or(0)
                 } else {
@@ -131,7 +137,7 @@ impl Tool for SendMessage {
             };
             let _ = tx
                 .send(crate::runtime::RuntimeEvent::InboxMessage {
-                    agent_id: recipient.0,
+                    agent_id: recipient,
                     from_name: sender_name,
                     preview,
                     unread_count: count,
@@ -147,7 +153,8 @@ impl Tool for SendMessage {
 
 #[derive(Clone)]
 pub struct ReadMessages {
-    state: Arc<RwLock<AppState>>,
+    agent_pool: Arc<RwLock<crate::agent::AgentPool>>,
+    responsible_agent_id: Option<crate::core::types::AgentId>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -182,15 +189,13 @@ impl Tool for ReadMessages {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let s = self.state.read().await;
-        let agent_id = s
-            .core
+        let agent_id = self
             .responsible_agent_id
             .ok_or_else(|| ToolCallError("No active agent to read messages for".to_string()))?;
 
         let max = args.max.unwrap_or(20).min(20);
         let messages = {
-            let mut pool = s.core.agent_pool.write().await;
+            let mut pool = self.agent_pool.write().await;
             let all = pool.drain_inbox(&agent_id);
             all.into_iter().take(max).collect::<Vec<_>>()
         };
@@ -211,7 +216,7 @@ impl Tool for ReadMessages {
 
 #[derive(Clone)]
 pub struct ListAgents {
-    state: Arc<RwLock<AppState>>,
+    agent_pool: Arc<RwLock<crate::agent::AgentPool>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,8 +241,7 @@ impl Tool for ListAgents {
     }
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let s = self.state.read().await;
-        let pool = s.core.agent_pool.read().await;
+        let pool = self.agent_pool.read().await;
         let agents = pool.agents();
         if agents.is_empty() {
             return Ok("No agents in pool.".to_string());
@@ -264,7 +268,8 @@ impl Tool for ListAgents {
 
 #[derive(Clone)]
 pub struct SpawnAgent {
-    state: Arc<RwLock<AppState>>,
+    runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
+    responsible_agent_id: Option<crate::core::types::AgentId>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -352,16 +357,13 @@ impl Tool for SpawnAgent {
         // Phase 2A: Emit SpawnTask event to the task graph via the event loop.
         // The scheduler (in RuntimeEventLoop) will create the task node,
         // run the pipeline, and eventually activate a child agent.
-        let (runtime_tx, parent_id) = {
-            let s = self.state.read().await;
-            let parent_id = s.core.responsible_agent_id.ok_or_else(|| {
-                ToolCallError("No responsible parent agent is active".to_string())
-            })?;
-            let runtime_tx = s.core.runtime_event_tx.clone().ok_or_else(|| {
-                ToolCallError("Runtime event channel not initialized".to_string())
-            })?;
-            (runtime_tx, parent_id)
-        };
+        let parent_id = self
+            .responsible_agent_id
+            .ok_or_else(|| ToolCallError("No responsible parent agent is active".to_string()))?;
+        let runtime_tx = self
+            .runtime_event_tx
+            .clone()
+            .ok_or_else(|| ToolCallError("Runtime event channel not initialized".to_string()))?;
 
         runtime_tx
             .send(crate::runtime::event::RuntimeEvent::SpawnTask {
@@ -462,8 +464,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_agent_definition_returns_valid_tool_def() {
-        let state = Arc::new(RwLock::new(crate::tui::state::AppState::default()));
-        let tool = SpawnAgent { state };
+        let tool = SpawnAgent {
+            runtime_event_tx: None,
+            responsible_agent_id: None,
+        };
         let def = tool.definition(String::new()).await;
         assert_eq!(def.name, "spawn_agent");
         assert!(def.description.contains("child agent"));
@@ -476,8 +480,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_agent_empty_role_rejected() {
-        let state = Arc::new(RwLock::new(crate::tui::state::AppState::default()));
-        let tool = SpawnAgent { state };
+        let tool = SpawnAgent {
+            runtime_event_tx: None,
+            responsible_agent_id: None,
+        };
         let result = tool
             .call(SpawnAgentArgs {
                 role: "  ".to_string(),
@@ -493,8 +499,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_agent_empty_goal_rejected() {
-        let state = Arc::new(RwLock::new(crate::tui::state::AppState::default()));
-        let tool = SpawnAgent { state };
+        let tool = SpawnAgent {
+            runtime_event_tx: None,
+            responsible_agent_id: None,
+        };
         let result = tool
             .call(SpawnAgentArgs {
                 role: "planner".to_string(),
@@ -512,9 +520,9 @@ mod tests {
 
     #[test]
     fn test_register_tools_returns_server() {
-        let state = Arc::new(RwLock::new(crate::tui::state::AppState::default()));
+        let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
         let server = crate::tools::ToolServer::new();
-        let _server = register_tools(server, state);
+        let _server = register_tools(server, pool, None, None);
         // Should not panic
     }
 }

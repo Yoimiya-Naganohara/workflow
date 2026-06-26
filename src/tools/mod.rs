@@ -23,15 +23,25 @@ pub fn create_tool_server() -> ToolServerHandle {
 
 /// Create a [`ToolServerHandle`] with built-ins, agent tools, and memo tools.
 ///
-/// The `state` is used for both the agent tools (spawn_agent) and to derive
-/// the memo tool dependencies (agent pool, responsible agent ID).
+/// Extracts dependencies from AppState to avoid `tools → tui` dependency.
 pub fn create_agent_tool_server(
     state: std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>,
 ) -> ToolServerHandle {
+    let (pool, tx, agent_id) = {
+        let s = state.try_read().ok();
+        (
+            s.as_ref().map(|s| s.core.agent_pool.clone()),
+            s.as_ref().and_then(|s| s.core.runtime_event_tx.clone()),
+            s.as_ref().and_then(|s| s.core.responsible_agent_id),
+        )
+    };
+    let pool = pool.unwrap_or_else(|| {
+        std::sync::Arc::new(tokio::sync::RwLock::new(crate::agent::AgentPool::new()))
+    });
+
     let server = builtin::register_tools(ToolServer::new());
-    let server = agent::register_tools(server, state.clone());
-    // Derive memo deps from the state
-    let memo_deps = memo::MemoToolDeps::from_state(&state);
+    let server = agent::register_tools(server, pool.clone(), tx, agent_id);
+    let memo_deps = memo::MemoToolDeps::new(pool, agent_id);
     memo::register_memo_tools(server, memo_deps).run()
 }
 
@@ -40,10 +50,22 @@ pub fn create_sandboxed_agent_tool_server(
     base_state: std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>,
     sandbox: Option<std::sync::Arc<crate::tools::sandbox::SandboxHandle>>,
 ) -> ToolServerHandle {
+    let (pool, tx, agent_id) = {
+        let s = base_state.try_read().ok();
+        (
+            s.as_ref().map(|s| s.core.agent_pool.clone()),
+            s.as_ref().and_then(|s| s.core.runtime_event_tx.clone()),
+            s.as_ref().and_then(|s| s.core.responsible_agent_id),
+        )
+    };
+    let pool = pool.unwrap_or_else(|| {
+        std::sync::Arc::new(tokio::sync::RwLock::new(crate::agent::AgentPool::new()))
+    });
+
     let with_search_asset = sandbox.is_some();
     let server = builtin::register_sandboxed_tools(ToolServer::new(), sandbox, with_search_asset);
-    let server = agent::register_tools(server, base_state.clone());
-    let memo_deps = memo::MemoToolDeps::from_state(&base_state);
+    let server = agent::register_tools(server, pool.clone(), tx, agent_id);
+    let memo_deps = memo::MemoToolDeps::new(pool, agent_id);
     memo::register_memo_tools(server, memo_deps).run()
 }
 
@@ -911,6 +933,26 @@ host = \"0.0.0.0\"
     // send_message, read_messages via MCP ToolServerHandle
     // ────────────────────────────────────────────────────────
 
+    /// Extract core state fields from an AppState handle (for tests).
+    fn extract_core(
+        state: &std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>,
+    ) -> (
+        std::sync::Arc<tokio::sync::RwLock<crate::agent::AgentPool>>,
+        Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
+        Option<crate::core::types::AgentId>,
+    ) {
+        let s = state.try_read().ok();
+        (
+            s.as_ref()
+                .map(|s| s.core.agent_pool.clone())
+                .unwrap_or_else(|| {
+                    std::sync::Arc::new(tokio::sync::RwLock::new(crate::agent::AgentPool::new()))
+                }),
+            s.as_ref().and_then(|s| s.core.runtime_event_tx.clone()),
+            s.as_ref().and_then(|s| s.core.responsible_agent_id),
+        )
+    }
+
     /// Helper: create a minimal AppState with a pool of test agents.
     fn make_agent_state(
         agent_count: usize,
@@ -973,8 +1015,9 @@ host = \"0.0.0.0\"
     #[tokio::test]
     async fn test_simulate_agent_list_agents_tool() {
         let state = make_agent_state(3);
+        let (pool, tx, aid) = extract_core(&state);
         let server = crate::tools::ToolServer::new();
-        let server = crate::tools::agent::register_tools(server, state);
+        let server = crate::tools::agent::register_tools(server, pool, tx, aid);
         let handle = server.run();
 
         let result = handle.call_tool("list_agents", "{}").await.unwrap();
@@ -989,8 +1032,9 @@ host = \"0.0.0.0\"
     #[tokio::test]
     async fn test_simulate_agent_send_and_read_messages() {
         let state = make_agent_state(2);
+        let (pool, tx, aid) = extract_core(&state);
         let server = crate::tools::ToolServer::new();
-        let server = crate::tools::agent::register_tools(server, state.clone());
+        let server = crate::tools::agent::register_tools(server, pool, tx, aid);
         let handle = server.run();
 
         // Send a message from responsible agent (agent-0) to agent-1
@@ -1025,8 +1069,9 @@ host = \"0.0.0.0\"
     #[tokio::test]
     async fn test_simulate_agent_list_agents_empty() {
         let state = make_agent_state(0);
+        let (pool, tx, aid) = extract_core(&state);
         let server = crate::tools::ToolServer::new();
-        let server = crate::tools::agent::register_tools(server, state);
+        let server = crate::tools::agent::register_tools(server, pool, tx, aid);
         let handle = server.run();
 
         let result = handle.call_tool("list_agents", "{}").await.unwrap();
@@ -1038,8 +1083,9 @@ host = \"0.0.0.0\"
     #[tokio::test]
     async fn test_simulate_agent_send_message_invalid_recipient() {
         let state = make_agent_state(1);
+        let (pool, tx, aid) = extract_core(&state);
         let server = crate::tools::ToolServer::new();
-        let server = crate::tools::agent::register_tools(server, state);
+        let server = crate::tools::agent::register_tools(server, pool, tx, aid);
         let handle = server.run();
 
         let send_args = serde_json::json!({
@@ -1059,8 +1105,9 @@ host = \"0.0.0.0\"
     #[tokio::test]
     async fn test_simulate_agent_read_messages_empty() {
         let state = make_agent_state(1);
+        let (pool, tx, aid) = extract_core(&state);
         let server = crate::tools::ToolServer::new();
-        let server = crate::tools::agent::register_tools(server, state);
+        let server = crate::tools::agent::register_tools(server, pool, tx, aid);
         let handle = server.run();
 
         let result = handle
