@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::core::metrics::AgentMetrics;
 use tokio::sync::Notify;
 
 pub fn now_secs() -> u64 {
@@ -203,6 +205,9 @@ pub struct AgentPool {
     /// via the `await_sibling` tool.  Cleared after the dependency
     /// is satisfied.
     pending_deps: HashMap<AgentId, Vec<AgentId>>,
+    /// Per-agent execution metrics (indexed by agent_id).
+    #[serde(skip)]
+    pub agent_metrics: HashMap<AgentId, AgentMetrics>,
     /// Max idle TTL for completed/failed agents (seconds). Default: 3600 (1h).
     pub ttl_secs: u64,
     /// Maximum number of agents in the pool. When exceeded, the least
@@ -238,6 +243,7 @@ impl AgentPool {
             budget_guards: HashMap::new(),
             role_memos: HashMap::new(),
             pending_deps: HashMap::new(),
+            agent_metrics: HashMap::new(),
             ttl_secs: crate::core::types::SECONDS_PER_HOUR,
             max_agents: crate::core::constants::DEFAULT_MAX_AGENTS,
             reasoning_effort: None,
@@ -300,6 +306,55 @@ impl AgentPool {
         if let Some(notify) = self.completions.get(id) {
             notify.notify_one();
         }
+    }
+
+    // ── Execution metrics ──
+
+    /// Initialize or get the metrics tracker for an agent.
+    pub fn init_metrics(&mut self, agent_id: &AgentId) {
+        self.agent_metrics.entry(*agent_id).or_default();
+    }
+
+    /// Record a tool call for an agent.
+    pub fn record_tool_call(&mut self, agent_id: &AgentId, tool_name: &str) {
+        let metrics = self.agent_metrics.entry(*agent_id).or_default();
+        metrics.total_calls += 1;
+        let entry = metrics.tools.entry(tool_name.to_string()).or_default();
+        entry.call_count += 1;
+    }
+
+    /// Record a tool error for an agent.
+    pub fn record_tool_error(&mut self, agent_id: &AgentId, tool_name: &str) {
+        let metrics = self.agent_metrics.entry(*agent_id).or_default();
+        metrics.total_errors += 1;
+        if let Some(entry) = metrics.tools.get_mut(tool_name) {
+            entry.error_count += 1;
+        }
+    }
+
+    /// Mark agent execution start.
+    pub fn mark_execution_start(&mut self, agent_id: &AgentId) {
+        let metrics = self.agent_metrics.entry(*agent_id).or_default();
+        metrics.started_at = crate::agent::now_secs();
+    }
+
+    /// Mark agent execution complete.
+    pub fn mark_execution_complete(&mut self, agent_id: &AgentId) {
+        if let Some(metrics) = self.agent_metrics.get_mut(agent_id) {
+            metrics.completed_at = crate::agent::now_secs();
+        }
+    }
+
+    /// Get a log line for an agent's metrics (for monitoring).
+    pub fn metrics_log_line(
+        &self,
+        agent_id: &AgentId,
+        agent_name: &str,
+        role: &str,
+    ) -> Option<String> {
+        self.agent_metrics
+            .get(agent_id)
+            .map(|m| m.to_log_line(agent_name, role))
     }
 
     // ── Inter-agent message passing ──

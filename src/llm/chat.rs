@@ -338,7 +338,8 @@ impl LlmProvider {
                         },
                     )) => {
                         let tool_name = tool_call.function.name.clone();
-                        let args = tool_call.function.arguments.clone();
+                        // Move args instead of clone — avoids one Value copy per call.
+                        let args = tool_call.function.arguments;
 
                         // ── Bounding check 1: absolute total tool calls ──
                         total_tool_calls += 1;

@@ -31,6 +31,7 @@ impl AgentRuntime {
                 crate::llm::ToolEvent::ToolCall { name, args, .. } => {
                     tool_call_count += 1;
                     tools_used |= Self::tool_bit(&name);
+                    let tool_name = name.clone();
                     let args_preview = serde_json::to_string(&args).unwrap_or_default();
                     let args_preview = if args_preview.len() > 80 {
                         format!("{}…", args_preview.chars().take(80).collect::<String>())
@@ -38,9 +39,12 @@ impl AgentRuntime {
                         args_preview
                     };
                     if let Ok(mut pool) = agent_pool.try_write() {
+                        // Record metrics
+                        pool.record_tool_call(&agent_id, &tool_name);
+                        // Record tool trace
                         if let Some(agent) = pool.get_agent_mut(&agent_id) {
                             agent.tool_trace.push_back(crate::agent::ToolCallRecord {
-                                name,
+                                name: tool_name,
                                 args_preview,
                                 status: crate::agent::ToolStatus::Success,
                                 error_message: None,
@@ -138,6 +142,15 @@ impl AgentRuntime {
                 Some(text[start..end].to_string())
             }) {
                 if let Ok(mut pool) = agent_pool.try_write() {
+                    // Record error in metrics
+                    if let Some(last_tool) = pool
+                        .get_agent(&agent_id)
+                        .and_then(|a| a.tool_trace.back())
+                        .map(|r| r.name.clone())
+                    {
+                        pool.record_tool_error(&agent_id, &last_tool);
+                    }
+                    // Mark error in tool trace
                     if let Some(agent) = pool.get_agent_mut(&agent_id) {
                         for record in agent.tool_trace.iter_mut().rev().take(2) {
                             if record.status == crate::agent::ToolStatus::Success {
@@ -481,5 +494,93 @@ mod tests {
         assert!(tools & (1 << 0) != 0, "read_file bit set"); // read_file = bit 0
         assert!(tools & (1 << 2) != 0, "sh bit set"); // sh = bit 2
         assert!(tools & (1 << 1) != 0, "write_file bit set"); // write_file = bit 1
+    }
+
+    // ── Metrics integration tests ──
+
+    #[tokio::test]
+    async fn test_metrics_record_tool_call() {
+        let (pool, aid) = make_pool_and_agent();
+        pool.write().await.init_metrics(&aid);
+        pool.write().await.record_tool_call(&aid, "read_file");
+        pool.write().await.record_tool_call(&aid, "sh");
+        pool.write().await.record_tool_call(&aid, "read_file");
+
+        let p = pool.read().await;
+        let m = p.agent_metrics.get(&aid).unwrap();
+        assert_eq!(m.total_calls, 3);
+        assert_eq!(m.tools.get("read_file").unwrap().call_count, 2);
+        assert_eq!(m.tools.get("sh").unwrap().call_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_record_error() {
+        let (pool, aid) = make_pool_and_agent();
+        {
+            let mut p = pool.write().await;
+            p.init_metrics(&aid);
+            p.record_tool_call(&aid, "sh");
+            p.record_tool_call(&aid, "sh");
+            p.record_tool_call(&aid, "read_file");
+            p.record_tool_error(&aid, "sh");
+        }
+        let p = pool.read().await;
+        let m = p.agent_metrics.get(&aid).unwrap();
+        assert_eq!(m.total_calls, 3);
+        assert_eq!(m.total_errors, 1);
+        assert_eq!(m.tools.get("sh").unwrap().error_count, 1);
+        assert_eq!(m.tools.get("sh").unwrap().success_rate(), 0.5);
+        assert_eq!(m.tools.get("read_file").unwrap().success_rate(), 1.0);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_log_line() {
+        let (pool, aid) = make_pool_and_agent();
+        {
+            let mut p = pool.write().await;
+            p.mark_execution_start(&aid);
+            p.record_tool_call(&aid, "grep");
+            p.mark_execution_complete(&aid);
+        }
+        let log = pool
+            .read()
+            .await
+            .metrics_log_line(&aid, "agent-1", "tester");
+        let msg = log.unwrap();
+        assert!(msg.contains("agent-1"));
+        assert!(msg.contains("tester"));
+        assert!(msg.contains("calls=1"));
+        assert!(msg.contains("grep"));
+    }
+
+    #[tokio::test]
+    async fn test_metrics_full_stream_integration() {
+        let (pool, aid) = make_pool_and_agent();
+        pool.write().await.init_metrics(&aid);
+
+        let stream = mock_stream(vec![
+            ToolEvent::ToolCall {
+                name: "read_file".to_string(),
+                args: serde_json::json!({"path": "/tmp/test.txt"}),
+                result: String::new(),
+            },
+            ToolEvent::ToolCall {
+                name: "grep".to_string(),
+                args: serde_json::json!({"pattern": "fn main"}),
+                result: String::new(),
+            },
+            ToolEvent::Text("found it".to_string()),
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
+        ]);
+        AgentRuntime::process_tool_stream(stream, aid, &pool).await;
+
+        let p = pool.read().await;
+        let m = p.agent_metrics.get(&aid).unwrap();
+        assert_eq!(m.total_calls, 2);
+        assert_eq!(m.tools.get("read_file").unwrap().call_count, 1);
+        assert_eq!(m.tools.get("grep").unwrap().call_count, 1);
+        assert_eq!(m.total_errors, 0);
     }
 }

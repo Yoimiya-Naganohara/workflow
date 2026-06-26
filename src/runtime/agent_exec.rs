@@ -111,6 +111,12 @@ Messages may contain important context from sibling agents.",
             goal
         );
 
+        // Mark execution start in metrics
+        {
+            let mut pool = agent_pool.write().await;
+            pool.mark_execution_start(&agent_id);
+        }
+
         // Phase 3: Execute LLM call (no lock held on runtime)
         let (response, tool_bitmap) = if let Some(handle) = &tool_server {
             let additional_params = reasoning_effort
@@ -164,6 +170,7 @@ Messages may contain important context from sibling agents.",
         // Phase 4: Record result under brief lock
         {
             let mut pool = agent_pool.write().await;
+            pool.mark_execution_complete(&agent_id);
             if let Some(agent) = pool.get_agent_mut(&agent_id) {
                 agent.status = AgentStatus::Completed;
                 agent.result = Some(response.clone());
@@ -195,8 +202,16 @@ Messages may contain important context from sibling agents.",
             }
         }
 
-        // Phase 6: Release budget guard and notify completion
+        // Phase 6: Log metrics and release resources
         let mut pool = agent_pool.write().await;
+
+        // Emit structured log line for monitoring
+        if let Some(log_line) =
+            pool.metrics_log_line(&agent_id, &format!("{:02x}..", agent_id[0]), &role)
+        {
+            tracing::info!(target: "agent_metrics", "{}", log_line);
+        }
+
         pool.release_budget_guard(&agent_id);
         pool.notify_completed(&agent_id);
 

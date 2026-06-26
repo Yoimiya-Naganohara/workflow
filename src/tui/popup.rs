@@ -721,11 +721,14 @@ mod tests {
         // Data extraction (same as render_agent_detail_popup).
         let (_name, _role, trace) = match app.core.agent_pool.try_read() {
             Ok(pool) => {
-                let agent = pool.agents().iter().find(|a| a.id == agent_id).unwrap();
+                let (name, role) = pool.agents().iter()
+                    .find(|a| a.id == agent_id)
+                    .map(|a| (a.name.clone(), a.role.clone()))
+                    .unwrap_or_else(|| (String::new(), String::new()));
                 let trace = build_tool_trace_preview(&pool, &agent_id);
-                (agent.name.clone(), agent.role.clone(), trace)
+                (name, role, trace)
             }
-            Err(_) => panic!("lock"),
+            Err(_) => (String::new(), String::new(), Vec::new()),
         };
         assert_eq!(trace.len(), 2);
         assert!(trace[0].contains("read_file"));
