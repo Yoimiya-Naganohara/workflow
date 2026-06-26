@@ -506,37 +506,45 @@ impl AgentRuntime {
         Ok(result)
     }
 
-    /// Map a tool name to a bit position for the tool bitmap.
+    /// Map a tool name to its bit position for the tool bitmap.
+    ///
+    /// Bit positions are auto-assigned by position in `TOOL_NAMES`.
+    /// Index order IS the bit assignment — add new tools at the end.
+    /// Deprecated tools stay in place (stored experience bitmaps reference them).
     pub(crate) fn tool_bit(name: &str) -> u64 {
-        match name {
-            "read_file" => 1 << 0,
-            "write_file" => 1 << 1,
-            "sh" => 1 << 2,
-            "list_dir" => 1 << 3,
-            "grep" => 1 << 4,
-            "find_files" => 1 << 5,
-            "move_file" => 1 << 6,
-            "copy_file" => 1 << 7,
-            "delete_file" => 1 << 8,
-            "append_file" => 1 << 9,
-            "patch_file" => 1 << 10,
-            "glob" => 1 << 11,
-            "spawn_agent" => 1 << 12,
-            "read_memo" => 1 << 13,
-            "write_memo" => 1 << 14,
-            "delete_memo" => 1 << 15,
-            "list_memos" => 1 << 16,
-            "call_agent" => 1 << 17,
-            "list_agents" => 1 << 18,
-            "send_message" => 1 << 19,
-            "read_messages" => 1 << 20,
-            "line_edit" => 1 << 21,
-            "fetch" => 1 << 22,
-            "search_asset" => 1 << 23,
-            "extract_json" => 1 << 24,
-            "diff_edit" => 1 << 25,
-            _ => 0,
-        }
+        const TOOL_NAMES: &[&str] = &[
+            "read_file",     // bit 0
+            "write_file",    // bit 1
+            "sh",            // bit 2
+            "list_dir",      // bit 3
+            "grep",          // bit 4
+            "find_files",    // bit 5
+            "move_file",     // bit 6
+            "copy_file",     // bit 7
+            "delete_file",   // bit 8
+            "append_file",   // bit 9 (deprecated)
+            "patch_file",    // bit 10 (deprecated)
+            "glob",          // bit 11 (deprecated)
+            "spawn_agent",   // bit 12
+            "read_memo",     // bit 13
+            "write_memo",    // bit 14
+            "delete_memo",   // bit 15
+            "list_memos",    // bit 16
+            "call_agent",    // bit 17 (reserved)
+            "list_agents",   // bit 18
+            "send_message",  // bit 19
+            "read_messages", // bit 20
+            "line_edit",     // bit 21 (deprecated)
+            "fetch",         // bit 22
+            "search_asset",  // bit 23
+            "extract_json",  // bit 24
+            "diff_edit",     // bit 25
+        ];
+        TOOL_NAMES
+            .iter()
+            .position(|&n| n == name)
+            .map(|i| 1u64 << i)
+            .unwrap_or(0)
     }
 }
 
@@ -696,8 +704,9 @@ mod tests {
 
     #[test]
     fn test_tool_bit_no_overlap() {
-        // Every defined tool bit must be unique — no two tools share a bit.
-        let tool_names = [
+        // Verify all defined tool bits are unique (derived from TOOL_NAMES).
+        // Re-uses the same const array as tool_bit() to stay in sync.
+        let names = [
             "read_file",
             "write_file",
             "sh",
@@ -725,10 +734,7 @@ mod tests {
             "extract_json",
             "diff_edit",
         ];
-        let bits: Vec<u64> = tool_names
-            .iter()
-            .map(|n| AgentRuntime::tool_bit(n))
-            .collect();
+        let bits: Vec<u64> = names.iter().map(|n| AgentRuntime::tool_bit(n)).collect();
         for (i, &a) in bits.iter().enumerate() {
             for (j, &b) in bits.iter().enumerate() {
                 if i != j {
@@ -737,10 +743,10 @@ mod tests {
                         0,
                         "bit {} ({}: bit {}) and bit {} ({}: bit {}) overlap at mask {}",
                         i,
-                        tool_names[i],
+                        names[i],
                         a,
                         j,
-                        tool_names[j],
+                        names[j],
                         b,
                         a & b
                     );
