@@ -62,10 +62,6 @@ pub fn register_sandboxed_tools(
         .tool(MoveFile)
         .tool(CopyFile)
         .tool(DeleteFile)
-        .tool(AppendFile)
-        .tool(PatchFile)
-        .tool(Glob)
-        .tool(LineEdit)
         .tool(Fetch)
         .tool(crate::tools::structured::ExtractJson)
         .tool(crate::tools::diff_edit::DiffEdit);

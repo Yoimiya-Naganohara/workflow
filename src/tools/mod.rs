@@ -115,21 +115,29 @@ mod tests {
         assert!(names.contains(&"move_file"), "missing move_file");
         assert!(names.contains(&"copy_file"), "missing copy_file");
         assert!(names.contains(&"delete_file"), "missing delete_file");
-        assert!(names.contains(&"append_file"), "missing append_file");
-        assert!(names.contains(&"patch_file"), "missing patch_file");
-        assert!(names.contains(&"glob"), "missing glob");
-        assert!(names.contains(&"line_edit"), "missing line_edit");
         assert!(names.contains(&"fetch"), "missing fetch");
+        assert!(names.contains(&"diff_edit"), "missing diff_edit");
+        assert!(names.contains(&"extract_json"), "missing extract_json");
         // search_asset is NOT registered in non-sandbox server (requires sandbox + embedder)
         assert!(
             !names.contains(&"search_asset"),
             "search_asset must not appear in non-sandbox server"
         );
-        assert!(names.contains(&"extract_json"), "missing extract_json");
+        // Deprecated tools no longer registered: append_file, patch_file, glob, line_edit
+        assert!(
+            !names.contains(&"append_file"),
+            "append_file should be removed"
+        );
+        assert!(
+            !names.contains(&"patch_file"),
+            "patch_file should be removed"
+        );
+        assert!(!names.contains(&"glob"), "glob should be removed");
+        assert!(!names.contains(&"line_edit"), "line_edit should be removed");
         assert_eq!(
             defs.len(),
-            16,
-            "non-sandbox server has 16 built-in tools (search_asset excluded)"
+            12,
+            "non-sandbox server has 12 built-in tools (5 deprecated/removed, search_asset excluded)"
         );
 
         // Each definition has parameters with a type
@@ -250,9 +258,9 @@ mod tests {
         println!("[SIMULATE] Agent list_dir result:\n{}", result);
     }
 
-    /// Simulate an agent calling `glob` via MCP.
+    /// Simulate an agent calling `find_files` (glob replacement) via MCP.
     #[tokio::test]
-    async fn test_simulate_agent_glob() {
+    async fn test_simulate_agent_find_files_glob() {
         let handle = create_tool_server();
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::write(dir.path().join("main.rs"), "").unwrap();
@@ -260,14 +268,21 @@ mod tests {
         std::fs::write(dir.path().join("readme.md"), "").unwrap();
 
         let args = serde_json::json!({
-            "pattern": format!("{}/*.rs", dir.path().to_str().unwrap())
+            "pattern": "*.rs",
+            "root": dir.path().to_str().unwrap().to_string()
         });
 
-        let result = handle.call_tool("glob", &args.to_string()).await.unwrap();
+        let result = handle
+            .call_tool("find_files", &args.to_string())
+            .await
+            .unwrap();
         assert!(result.contains("main.rs"));
         assert!(result.contains("lib.rs"));
         assert!(!result.contains("readme.md"));
-        println!("[SIMULATE] Agent glob result:\n{}", result);
+        println!(
+            "[SIMULATE] Agent find_files (glob replacement) result:\n{}",
+            result
+        );
     }
 
     /// Simulate an agent calling `grep` via MCP.
@@ -385,52 +400,62 @@ mod tests {
         println!("[SIMULATE] Agent delete_file result: {}", result);
     }
 
-    /// Simulate an agent calling `append_file` via MCP.
+    /// Simulate appending to a file via shell `>>` (append_file deprecated).
     #[tokio::test]
-    async fn test_simulate_agent_append_file() {
+    async fn test_simulate_agent_append_via_shell() {
         let handle = create_tool_server();
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("log.txt");
         std::fs::write(&file, "existing content\n").unwrap();
 
-        let args = serde_json::json!({
-            "path": file.to_str().unwrap().to_string(),
-            "content": "appended line"
+        // Use shell `>>` to append (append_file is deprecated)
+        let shell_args = serde_json::json!({
+            "command": format!("echo 'appended line' >> {}", file.to_str().unwrap())
         });
-
         let result = handle
-            .call_tool("append_file", &args.to_string())
+            .call_tool("sh", &shell_args.to_string())
             .await
             .unwrap();
-        assert!(result.contains("appended"));
+        assert!(
+            result.contains("exit code: 0"),
+            "append via shell failed: {}",
+            result
+        );
+
         let content = std::fs::read_to_string(&file).unwrap();
         assert!(content.contains("existing content"));
         assert!(content.contains("appended line"));
-        println!("[SIMULATE] Agent append_file result: {}", result);
+        println!("[SIMULATE] Append via shell result:\n{}", result);
     }
 
-    /// Simulate an agent calling `patch_file` via MCP.
+    /// Simulate an agent calling `diff_edit` (replaces patch_file) via MCP.
     #[tokio::test]
-    async fn test_simulate_agent_patch_file() {
+    async fn test_simulate_agent_diff_edit() {
         let handle = create_tool_server();
         let dir = tempfile::TempDir::new().unwrap();
-        let file = dir.path().join("patch_me.txt");
+        let file = dir.path().join("edit_me.txt");
         std::fs::write(&file, "hello old world\n").unwrap();
+
+        let edits = "\
+<<<<<<< SEARCH
+hello old world
+=======
+hello new world
+>>>>>>> REPLACE";
 
         let args = serde_json::json!({
             "path": file.to_str().unwrap().to_string(),
-            "old_text": "old",
-            "new_text": "new"
+            "edits": edits
         });
 
         let result = handle
-            .call_tool("patch_file", &args.to_string())
+            .call_tool("diff_edit", &args.to_string())
             .await
             .unwrap();
-        assert!(result.contains("Patched"));
+        assert!(result.contains("1 hunk"));
         let content = std::fs::read_to_string(&file).unwrap();
-        assert!(content.contains("hello new world"));
-        println!("[SIMULATE] Agent patch_file result: {}", result);
+        assert!(content.contains("new world"));
+        println!("[SIMULATE] Agent diff_edit result:\n{}", result);
     }
 
     /// Simulate an agent calling an unknown tool (error case).
@@ -521,18 +546,23 @@ mod tests {
         assert!(read_result.contains("greet"));
         println!("[WORKFLOW] Step 2 — read_file:\n{}", read_result);
 
-        // Step 3: Patch the function
-        let patch_args = serde_json::json!({
+        // Step 3: Edit the function via diff_edit (replaces patch_file)
+        let edits = "\
+<<<<<<< SEARCH
+    print(f\"Hello, {name}\")
+=======
+    print(f\"Hi, {name}\")
+>>>>>>> REPLACE";
+        let diff_args = serde_json::json!({
             "path": path,
-            "old_text": "Hello",
-            "new_text": "Hi"
+            "edits": edits
         });
-        let patch_result = handle
-            .call_tool("patch_file", &patch_args.to_string())
+        let diff_result = handle
+            .call_tool("diff_edit", &diff_args.to_string())
             .await
             .unwrap();
-        assert!(patch_result.contains("Patched"));
-        println!("[WORKFLOW] Step 3 — patch_file: {}", patch_result);
+        assert!(diff_result.contains("1 hunk"));
+        println!("[WORKFLOW] Step 3 — diff_edit: {}", diff_result);
 
         // Step 4: Run the script via shell
         let shell_args = serde_json::json!({ "command": format!("cd {} && python3 workflow.py 2>&1 || python workflow.py 2>&1 || echo 'no python'", dir.path().to_str().unwrap()) });
@@ -564,34 +594,38 @@ mod tests {
         println!("[SIMULATE] Agent error handling: {}", err);
     }
 
-    /// Simulate calling `line_edit` via MCP.
+    /// Simulate calling `diff_edit` (replaces line_edit) via MCP.
     #[tokio::test]
-    async fn test_simulate_agent_line_edit() {
+    async fn test_simulate_agent_edit_config_with_diff() {
         let handle = create_tool_server();
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("config.toml");
         std::fs::write(&file, "# Config\nhost = \"localhost\"\nport = 8080\n").unwrap();
 
+        let edits = "\
+<<<<<<< SEARCH
+host = \"localhost\"
+=======
+host = \"0.0.0.0\"
+>>>>>>> REPLACE";
+
         let args = serde_json::json!({
             "path": file.to_str().unwrap().to_string(),
-            "operations": [
-                {
-                    "op": "replace_range",
-                    "start_line": 2,
-                    "end_line": 2,
-                    "text": "host = \"0.0.0.0\""
-                }
-            ]
+            "edits": edits
         });
 
         let result = handle
-            .call_tool("line_edit", &args.to_string())
+            .call_tool("diff_edit", &args.to_string())
             .await
             .unwrap();
-        println!("[SIMULATE] Agent line_edit result: {}", result);
+        assert!(result.contains("1 hunk"));
         let content = std::fs::read_to_string(&file).unwrap();
         assert!(content.contains("host = \"0.0.0.0\""));
         assert!(!content.contains("host = \"localhost\""));
+        println!(
+            "[SIMULATE] Agent edit config via diff_edit result:\n{}",
+            result
+        );
     }
 
     /// Simulate an agent calling `fetch` via MCP.
