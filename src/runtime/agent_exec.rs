@@ -219,26 +219,33 @@ mod tests {
             Ok(e)
         }
         async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; 384]>> {
-            Ok(texts.iter().map(|_| {
-                let mut e = [0.0f32; 384];
-                e[0] = 1.0;
-                e
-            }).collect())
+            Ok(texts
+                .iter()
+                .map(|_| {
+                    let mut e = [0.0f32; 384];
+                    e[0] = 1.0;
+                    e
+                })
+                .collect())
         }
         fn similarity(&self, a: &[f32; 384], b: &[f32; 384]) -> f32 {
             crate::core::simd::cosine_similarity_384(a, b)
         }
-        fn cache_size(&self) -> usize { 0 }
+        fn cache_size(&self) -> usize {
+            0
+        }
         fn clear_cache(&self) {}
-        fn cache_hits(&self) -> u64 { 0 }
-        fn cache_misses(&self) -> u64 { 0 }
+        fn cache_hits(&self) -> u64 {
+            0
+        }
+        fn cache_misses(&self) -> u64 {
+            0
+        }
     }
 
     fn test_config() -> AgentRuntimeConfig {
-        let dir = std::env::temp_dir().join(format!(
-            "workflow_exec_test_{}",
-            rand::random::<u64>()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("workflow_exec_test_{}", rand::random::<u64>()));
         AgentRuntimeConfig {
             bedrock_path: Some(dir.join("experience_a.bin")),
             role_template_path: Some(dir.join("role_templates.json")),
@@ -286,10 +293,8 @@ mod tests {
         )));
         let (pool, _aid) = pool_with_agent();
         let unknown_id: AgentId = rand::random();
-        let (result, status) = AgentRuntime::execute_agent_detached(
-            runtime, unknown_id, pool, None,
-        )
-        .await;
+        let (result, status) =
+            AgentRuntime::execute_agent_detached(runtime, unknown_id, pool, None).await;
         assert_eq!(status, AgentStatus::Failed);
         assert!(result.is_empty());
     }
@@ -303,10 +308,8 @@ mod tests {
         let (pool, aid) = pool_with_agent();
         // Provider is None by default — execute_agent_detached should
         // mark the agent as failed and release budget guard.
-        let (result, status) = AgentRuntime::execute_agent_detached(
-            runtime, aid, pool.clone(), None,
-        )
-        .await;
+        let (result, status) =
+            AgentRuntime::execute_agent_detached(runtime, aid, pool.clone(), None).await;
         assert_eq!(status, AgentStatus::Failed);
         assert!(
             result.contains("No LLM provider configured"),
@@ -317,6 +320,12 @@ mod tests {
         let pool_r = pool.read().await;
         let agent = pool_r.get_agent(&aid).unwrap();
         assert_eq!(agent.status, crate::agent::AgentStatus::Failed);
-        assert!(agent.result.as_deref().unwrap_or("").contains("No LLM provider"));
+        assert!(
+            agent
+                .result
+                .as_deref()
+                .unwrap_or("")
+                .contains("No LLM provider")
+        );
     }
 }

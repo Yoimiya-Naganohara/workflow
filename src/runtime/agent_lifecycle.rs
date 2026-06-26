@@ -668,18 +668,47 @@ mod tests {
     fn test_tool_bit_no_overlap() {
         // Every defined tool bit must be unique — no two tools share a bit.
         let tool_names = [
-            "read_file", "write_file", "sh", "list_dir", "grep",
-            "find_files", "move_file", "copy_file", "delete_file",
-            "append_file", "patch_file", "glob", "spawn_agent",
-            "read_memo", "write_memo", "delete_memo", "list_memos",
-            "call_agent", "list_agents", "send_message", "read_messages",
+            "read_file",
+            "write_file",
+            "sh",
+            "list_dir",
+            "grep",
+            "find_files",
+            "move_file",
+            "copy_file",
+            "delete_file",
+            "append_file",
+            "patch_file",
+            "glob",
+            "spawn_agent",
+            "read_memo",
+            "write_memo",
+            "delete_memo",
+            "list_memos",
+            "call_agent",
+            "list_agents",
+            "send_message",
+            "read_messages",
         ];
-        let bits: Vec<u64> = tool_names.iter().map(|n| AgentRuntime::tool_bit(n)).collect();
+        let bits: Vec<u64> = tool_names
+            .iter()
+            .map(|n| AgentRuntime::tool_bit(n))
+            .collect();
         for (i, &a) in bits.iter().enumerate() {
             for (j, &b) in bits.iter().enumerate() {
                 if i != j {
-                    assert_eq!(a & b, 0, "bit {} ({}: bit {}) and bit {} ({}: bit {}) overlap at mask {}",
-                        i, tool_names[i], a, j, tool_names[j], b, a & b);
+                    assert_eq!(
+                        a & b,
+                        0,
+                        "bit {} ({}: bit {}) and bit {} ({}: bit {}) overlap at mask {}",
+                        i,
+                        tool_names[i],
+                        a,
+                        j,
+                        tool_names[j],
+                        b,
+                        a & b
+                    );
                 }
             }
         }
@@ -697,24 +726,33 @@ mod tests {
             Ok(e)
         }
         async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; 384]>> {
-            Ok(texts.iter().map(|_| {
-                let mut e = [0.0f32; 384]; e[0] = 1.0; e
-            }).collect())
+            Ok(texts
+                .iter()
+                .map(|_| {
+                    let mut e = [0.0f32; 384];
+                    e[0] = 1.0;
+                    e
+                })
+                .collect())
         }
         fn similarity(&self, a: &[f32; 384], b: &[f32; 384]) -> f32 {
             crate::core::simd::cosine_similarity_384(a, b)
         }
-        fn cache_size(&self) -> usize { 0 }
+        fn cache_size(&self) -> usize {
+            0
+        }
         fn clear_cache(&self) {}
-        fn cache_hits(&self) -> u64 { 0 }
-        fn cache_misses(&self) -> u64 { 0 }
+        fn cache_hits(&self) -> u64 {
+            0
+        }
+        fn cache_misses(&self) -> u64 {
+            0
+        }
     }
 
     fn test_config() -> crate::runtime::AgentRuntimeConfig {
-        let dir = std::env::temp_dir().join(format!(
-            "workflow_lifecycle_test_{}",
-            rand::random::<u64>()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("workflow_lifecycle_test_{}", rand::random::<u64>()));
         crate::runtime::AgentRuntimeConfig {
             bedrock_path: Some(dir.join("experience_a.bin")),
             role_template_path: Some(dir.join("role_templates.json")),
@@ -727,11 +765,7 @@ mod tests {
         let runtime = AgentRuntime::new(test_config(), Arc::new(MockEmbed));
         let mut pool = AgentPool::new();
 
-        let agent_id = runtime.bootstrap_root_agent(
-            "Build a REST API",
-            "developer",
-            &mut pool,
-        );
+        let agent_id = runtime.bootstrap_root_agent("Build a REST API", "developer", &mut pool);
 
         let agent = pool.get_agent(&agent_id).unwrap();
         assert_eq!(agent.goal, "Build a REST API");

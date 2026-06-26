@@ -86,11 +86,7 @@ fn test_checkpoint_multiple_agents_roundtrip() {
     let mut pool = workflow::agent::AgentPool::new();
     let ids: Vec<_> = (0..5)
         .map(|i| {
-            let mut agent = make_agent(
-                &format!("agent-{}", i),
-                "worker",
-                &format!("goal {}", i),
-            );
+            let mut agent = make_agent(&format!("agent-{}", i), "worker", &format!("goal {}", i));
             agent.depth = i as u32;
             agent.last_active_at = i as u64;
             let id = agent.id;

@@ -26,14 +26,7 @@ async fn test_reflection_report_code_complete_pass() {
 #[tokio::test]
 async fn test_reflection_report_code_complete_fail() {
     let cfg = ReflectionConfig::default();
-    let report = check_rules(
-        &cfg,
-        "implement",
-        "just do it",
-        "",
-        None,
-    )
-    .await;
+    let report = check_rules(&cfg, "implement", "just do it", "", None).await;
     assert_eq!(report.code_complete, RuleVerdict::Fail);
     assert!(!report.all_passed);
 }
@@ -47,7 +40,14 @@ async fn test_reflection_report_error_awareness() {
     assert_eq!(report.error_awareness, RuleVerdict::Fail);
 
     // Error in trace, acknowledged → Pass
-    let report = check_rules(&cfg, "run", "there was an error, fixing", "error: fail", None).await;
+    let report = check_rules(
+        &cfg,
+        "run",
+        "there was an error, fixing",
+        "error: fail",
+        None,
+    )
+    .await;
     assert_eq!(report.error_awareness, RuleVerdict::Pass);
 
     // No error → Skip

@@ -148,7 +148,7 @@ impl AgentRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::{DoneReason, ToolEvent, ToolChatStream};
+    use crate::llm::{DoneReason, ToolChatStream, ToolEvent};
     use futures::stream;
 
     /// Helper: create a mock stream from a vec of ToolEvents.
@@ -198,7 +198,9 @@ mod tests {
         let stream = mock_stream(vec![
             ToolEvent::Text("Hello ".to_string()),
             ToolEvent::Text("World".to_string()),
-            ToolEvent::Done { reason: DoneReason::Normal },
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
         ]);
         let (text, _tools) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         assert_eq!(text, "Hello World");
@@ -213,7 +215,9 @@ mod tests {
                 args: serde_json::json!({}),
                 result: String::new(),
             },
-            ToolEvent::Done { reason: DoneReason::Normal },
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
         ]);
         let (_text, tools) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         assert_eq!(tools, 1 << 0, "read_file = bit 0");
@@ -229,7 +233,9 @@ mod tests {
         let (pool, aid) = make_pool_and_agent();
         let stream = mock_stream(vec![
             ToolEvent::Reasoning("thinking...".to_string()),
-            ToolEvent::Done { reason: DoneReason::Normal },
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
         ]);
         AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         let pool_r = pool.read().await;
@@ -241,9 +247,21 @@ mod tests {
     async fn test_token_usage_accumulates() {
         let (pool, aid) = make_pool_and_agent();
         let stream = mock_stream(vec![
-            ToolEvent::TokenUsage { input: 100, output: 50, cached_input: 0, cache_creation_input: 0 },
-            ToolEvent::TokenUsage { input: 200, output: 75, cached_input: 0, cache_creation_input: 0 },
-            ToolEvent::Done { reason: DoneReason::Normal },
+            ToolEvent::TokenUsage {
+                input: 100,
+                output: 50,
+                cached_input: 0,
+                cache_creation_input: 0,
+            },
+            ToolEvent::TokenUsage {
+                input: 200,
+                output: 75,
+                cached_input: 0,
+                cache_creation_input: 0,
+            },
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
         ]);
         AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         let pool_r = pool.read().await;
@@ -256,8 +274,15 @@ mod tests {
     async fn test_zero_token_usage_skipped() {
         let (pool, aid) = make_pool_and_agent();
         let stream = mock_stream(vec![
-            ToolEvent::TokenUsage { input: 0, output: 0, cached_input: 0, cache_creation_input: 0 },
-            ToolEvent::Done { reason: DoneReason::Normal },
+            ToolEvent::TokenUsage {
+                input: 0,
+                output: 0,
+                cached_input: 0,
+                cache_creation_input: 0,
+            },
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
         ]);
         AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         let pool_r = pool.read().await;
@@ -270,7 +295,9 @@ mod tests {
         let (pool, aid) = make_pool_and_agent();
         let stream = mock_stream(vec![
             ToolEvent::Text("some text".to_string()),
-            ToolEvent::Done { reason: DoneReason::LoopTerminated },
+            ToolEvent::Done {
+                reason: DoneReason::LoopTerminated,
+            },
         ]);
         let (text, _) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         assert_eq!(text, "some text");
@@ -279,9 +306,9 @@ mod tests {
     #[tokio::test]
     async fn test_done_stream_error() {
         let (pool, aid) = make_pool_and_agent();
-        let stream = mock_stream(vec![
-            ToolEvent::Done { reason: DoneReason::StreamError },
-        ]);
+        let stream = mock_stream(vec![ToolEvent::Done {
+            reason: DoneReason::StreamError,
+        }]);
         let (text, _) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         assert!(text.is_empty());
     }
@@ -307,7 +334,9 @@ mod tests {
                 args: serde_json::json!({"cmd": "ls"}),
                 result: String::new(),
             },
-            ToolEvent::Done { reason: DoneReason::Normal },
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
         ]);
         let (text, _) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         assert!(text.contains("Completed after"));
@@ -328,7 +357,9 @@ mod tests {
                 args: serde_json::json!({"path": "x"}),
                 result: String::new(),
             },
-            ToolEvent::Done { reason: DoneReason::Normal },
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
         ]);
         let (text, _) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         assert!(text.contains("2 tool calls"));
@@ -344,14 +375,19 @@ mod tests {
                 result: String::new(),
             },
             ToolEvent::Text("Error: file not found".to_string()),
-            ToolEvent::Done { reason: DoneReason::Normal },
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
         ]);
         AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         let pool_r = pool.read().await;
         let agent = pool_r.get_agent(&aid).unwrap();
         // Last tool call should be marked Error
         assert!(
-            agent.tool_trace.iter().any(|t| t.status == crate::agent::ToolStatus::Error),
+            agent
+                .tool_trace
+                .iter()
+                .any(|t| t.status == crate::agent::ToolStatus::Error),
             "expected at least one tool marked Error"
         );
     }
@@ -366,14 +402,19 @@ mod tests {
                 result: String::new(),
             },
             ToolEvent::Text("Success: file read OK".to_string()),
-            ToolEvent::Done { reason: DoneReason::Normal },
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
         ]);
         AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         let pool_r = pool.read().await;
         let agent = pool_r.get_agent(&aid).unwrap();
         // No error keyword matched, tool should remain Success
         assert!(
-            agent.tool_trace.iter().all(|t| t.status == crate::agent::ToolStatus::Success),
+            agent
+                .tool_trace
+                .iter()
+                .all(|t| t.status == crate::agent::ToolStatus::Success),
             "no tool should be marked Error"
         );
     }
@@ -382,19 +423,25 @@ mod tests {
     async fn test_tool_call_trace_overflow() {
         let (pool, aid) = make_pool_and_agent();
         let max = crate::agent::MAX_TOOL_TRACE;
-        let mut events: Vec<ToolEvent> = (0..max + 5).map(|i| {
-            ToolEvent::ToolCall {
+        let mut events: Vec<ToolEvent> = (0..max + 5)
+            .map(|i| ToolEvent::ToolCall {
                 name: format!("tool_{}", i),
                 args: serde_json::json!({}),
                 result: String::new(),
-            }
-        }).collect();
-        events.push(ToolEvent::Done { reason: DoneReason::Normal });
+            })
+            .collect();
+        events.push(ToolEvent::Done {
+            reason: DoneReason::Normal,
+        });
         let stream = mock_stream(events);
         AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         let pool_r = pool.read().await;
         let agent = pool_r.get_agent(&aid).unwrap();
-        assert_eq!(agent.tool_trace.len(), max, "trace should be capped at MAX_TOOL_TRACE");
+        assert_eq!(
+            agent.tool_trace.len(),
+            max,
+            "trace should be capped at MAX_TOOL_TRACE"
+        );
     }
 
     #[tokio::test]
@@ -416,11 +463,13 @@ mod tests {
                 args: serde_json::json!({}),
                 result: String::new(),
             },
-            ToolEvent::Done { reason: DoneReason::Normal },
+            ToolEvent::Done {
+                reason: DoneReason::Normal,
+            },
         ]);
         let (_text, tools) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
-        assert!(tools & (1 << 0) != 0, "read_file bit set");  // read_file = bit 0
-        assert!(tools & (1 << 2) != 0, "sh bit set");         // sh = bit 2
+        assert!(tools & (1 << 0) != 0, "read_file bit set"); // read_file = bit 0
+        assert!(tools & (1 << 2) != 0, "sh bit set"); // sh = bit 2
         assert!(tools & (1 << 1) != 0, "write_file bit set"); // write_file = bit 1
     }
 }

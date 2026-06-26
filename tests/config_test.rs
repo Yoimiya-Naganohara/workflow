@@ -9,7 +9,10 @@ use anyhow::Result;
 fn test_default_config_source() {
     let source = DefaultConfigSource;
     let configs = source.load().expect("default configs should load");
-    assert!(!configs.is_empty(), "should have at least one default provider");
+    assert!(
+        !configs.is_empty(),
+        "should have at least one default provider"
+    );
 
     let openai = configs.iter().find(|c| c.id == "openai").unwrap();
     assert_eq!(openai.name, "OpenAI");

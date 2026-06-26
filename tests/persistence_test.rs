@@ -40,19 +40,22 @@ fn test_persistence_all() {
 
     // ── 2. Save and reload state ──
     let mut state = persistence::load();
-    state.api_keys.insert("anthropic".to_string(), "sk-test-123".to_string());
+    state
+        .api_keys
+        .insert("anthropic".to_string(), "sk-test-123".to_string());
     state.configured_providers.push("anthropic".to_string());
     persistence::save(&state).unwrap();
 
     let loaded = persistence::load();
     assert_eq!(loaded.api_keys.get("anthropic").unwrap(), "sk-test-123");
-    assert!(loaded.configured_providers.contains(&"anthropic".to_string()));
+    assert!(
+        loaded
+            .configured_providers
+            .contains(&"anthropic".to_string())
+    );
 
     // ── 3. Session roundtrip ──
-    let msgs = vec![
-        make_msg("user", "Hello"),
-        make_msg("user", "Hi there!"),
-    ];
+    let msgs = vec![make_msg("user", "Hello"), make_msg("user", "Hi there!")];
     persistence::save_session(&msgs).unwrap();
     let loaded = persistence::load_session().unwrap();
     assert_eq!(loaded.len(), 2);
@@ -63,7 +66,11 @@ fn test_persistence_all() {
     persistence::save_session_as("project-y", &[make_msg("user", "Session B")]).unwrap();
 
     let sessions = persistence::list_sessions();
-    assert!(sessions.contains(&"project-x".to_string()), "sessions: {:?}", sessions);
+    assert!(
+        sessions.contains(&"project-x".to_string()),
+        "sessions: {:?}",
+        sessions
+    );
     assert!(sessions.contains(&"project-y".to_string()));
 
     let loaded = persistence::load_session_as("project-x").unwrap();
