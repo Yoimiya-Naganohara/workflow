@@ -20,7 +20,7 @@ use crate::l0::L0Permit;
 use crate::l1::ExperienceRetrieval;
 use crate::l1::L1Assessment;
 use crate::l2::AuditEngine;
-use crate::l2::llm::{L2LlmAuditEngine, L2LlmConfig};
+use crate::l2::{L2LlmAuditEngine, L2LlmConfig};
 use crate::llm::EmbeddingService;
 
 // ============================================================================
