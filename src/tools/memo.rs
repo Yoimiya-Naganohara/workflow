@@ -80,12 +80,7 @@ pub fn register_memo_tools(
 //  Helpers
 // ============================================================================
 
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
+use crate::agent::now_secs;
 
 /// Find the calling agent's ID, name, and role (immutable read).
 fn find_agent_info(deps: &MemoToolDeps) -> Option<(AgentId, String, String)> {

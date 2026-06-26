@@ -154,3 +154,206 @@ impl RuntimeEvent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_id(byte: u8) -> AgentId {
+        let mut id = [0u8; 16];
+        id[0] = byte;
+        id
+    }
+
+    #[test]
+    fn test_activate_agent_event() {
+        let e = RuntimeEvent::ActivateAgent {
+            agent_id: make_id(1),
+            parent_id: None,
+        };
+        assert_eq!(e.label(), "activate-agent");
+        assert!(format!("{:?}", e).contains("ActivateAgent"));
+    }
+
+    #[test]
+    fn test_child_completed_event() {
+        let e = RuntimeEvent::ChildCompleted {
+            parent_id: make_id(1),
+            child_id: make_id(2),
+            result: "done".into(),
+        };
+        assert_eq!(e.label(), "child-completed");
+        assert!(format!("{:?}", e).contains("done"));
+    }
+
+    #[test]
+    fn test_ready_for_aggregation() {
+        let e = RuntimeEvent::ReadyForAggregation {
+            agent_id: make_id(1),
+        };
+        assert_eq!(e.label(), "ready-for-aggregation");
+    }
+
+    #[test]
+    fn test_agent_failed_event() {
+        let e = RuntimeEvent::AgentFailed {
+            agent_id: make_id(1),
+            error: "timeout".into(),
+        };
+        assert_eq!(e.label(), "agent-failed");
+        assert!(format!("{:?}", e).contains("timeout"));
+    }
+
+    #[test]
+    fn test_aggregation_completed() {
+        let e = RuntimeEvent::AggregationCompleted {
+            agent_id: make_id(1),
+            result: "merged".into(),
+        };
+        assert_eq!(e.label(), "aggregation-completed");
+    }
+
+    #[test]
+    fn test_inbox_message_event() {
+        let e = RuntimeEvent::InboxMessage {
+            agent_id: make_id(2),
+            from_name: "agent-1".into(),
+            preview: "hello".into(),
+            unread_count: 3,
+        };
+        assert_eq!(e.label(), "inbox-message");
+        assert!(format!("{:?}", e).contains("agent-1"));
+    }
+
+    #[test]
+    fn test_spawn_task_event() {
+        let e = RuntimeEvent::SpawnTask {
+            goal: "build".into(),
+            role: "developer".into(),
+            parent_agent: make_id(1),
+        };
+        assert_eq!(e.label(), "spawn-task");
+    }
+
+    #[test]
+    fn test_task_completed_event() {
+        let e = RuntimeEvent::TaskCompleted {
+            task_id: make_id(1),
+            result: "success".into(),
+        };
+        assert_eq!(e.label(), "task-completed");
+    }
+
+    #[test]
+    fn test_task_failed_event() {
+        let e = RuntimeEvent::TaskFailed {
+            task_id: make_id(1),
+            error: "build error".into(),
+        };
+        assert_eq!(e.label(), "task-failed");
+    }
+
+    #[test]
+    fn test_escalate_task_event() {
+        let e = RuntimeEvent::EscalateTask {
+            task_id: make_id(1),
+            reason: "needs human".into(),
+            target_role: Some("reviewer".into()),
+            from_agent: make_id(2),
+        };
+        assert_eq!(e.label(), "escalate-task");
+    }
+
+    #[test]
+    fn test_merge_task_result_event() {
+        let e = RuntimeEvent::MergeTaskResult {
+            from_task: make_id(1),
+            into_task: make_id(2),
+            summary: Some("merged_output".into()),
+        };
+        assert_eq!(e.label(), "merge-task-result");
+    }
+
+    #[test]
+    fn test_event_clone() {
+        let e = RuntimeEvent::ActivateAgent {
+            agent_id: make_id(1),
+            parent_id: None,
+        };
+        let cloned = e.clone();
+        assert!(matches!(cloned, RuntimeEvent::ActivateAgent { .. }));
+    }
+
+    #[test]
+    fn test_event_debug() {
+        let e = RuntimeEvent::InboxMessage {
+            agent_id: make_id(1),
+            from_name: "test".into(),
+            preview: "test".into(),
+            unread_count: 0,
+        };
+        let debug = format!("{:?}", e);
+        assert!(debug.contains("InboxMessage"));
+        assert!(debug.contains("test"));
+    }
+
+    #[test]
+    fn test_all_variant_names_unique() {
+        let variants = [
+            RuntimeEvent::ActivateAgent {
+                agent_id: make_id(1),
+                parent_id: None,
+            },
+            RuntimeEvent::ChildCompleted {
+                parent_id: make_id(1),
+                child_id: make_id(2),
+                result: String::new(),
+            },
+            RuntimeEvent::ReadyForAggregation {
+                agent_id: make_id(1),
+            },
+            RuntimeEvent::AgentFailed {
+                agent_id: make_id(1),
+                error: String::new(),
+            },
+            RuntimeEvent::AggregationCompleted {
+                agent_id: make_id(1),
+                result: String::new(),
+            },
+            RuntimeEvent::InboxMessage {
+                agent_id: make_id(1),
+                from_name: String::new(),
+                preview: String::new(),
+                unread_count: 0,
+            },
+            RuntimeEvent::SpawnTask {
+                goal: String::new(),
+                role: String::new(),
+                parent_agent: make_id(1),
+            },
+            RuntimeEvent::TaskCompleted {
+                task_id: make_id(1),
+                result: String::new(),
+            },
+            RuntimeEvent::TaskFailed {
+                task_id: make_id(1),
+                error: String::new(),
+            },
+            RuntimeEvent::EscalateTask {
+                task_id: make_id(1),
+                reason: String::new(),
+                target_role: None,
+                from_agent: make_id(2),
+            },
+            RuntimeEvent::MergeTaskResult {
+                from_task: make_id(1),
+                into_task: make_id(2),
+                summary: None,
+            },
+        ];
+        let mut names: Vec<&str> = variants.iter().map(|v| v.label()).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), 11, "all variant names must be unique");
+    }
+}

@@ -310,10 +310,9 @@ impl Validator {
     /// Uses the same deterministic passes as the TUI handler:
     /// TaskGraph root → DecompositionEngine → role inference
     fn run_compiler(task: &ValidationTask) -> TaskMeasurement {
-        use crate::runtime::decomposition::{
-            DecompositionEngine, DefaultDecompositionEngine, TensionThreshold,
+        use crate::runtime::orchestration::{
+            DecompositionEngine, DefaultDecompositionEngine, MockGoalAnalyzer, TensionThreshold,
         };
-        use crate::runtime::embedding_analyzer::MockGoalAnalyzer;
         use crate::runtime::task_graph::TaskGraph;
         use std::sync::Arc;
 

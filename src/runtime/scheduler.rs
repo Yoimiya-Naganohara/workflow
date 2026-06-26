@@ -6,12 +6,12 @@ use tokio::sync::{RwLock, mpsc};
 use crate::agent::{Agent, AgentConfig, AgentPool, AgentStatus};
 use crate::core::types::AgentId;
 use crate::runtime::AgentRuntime;
-use crate::runtime::capability::{CapabilityRegistry, RoleSelector, TaskOutcome, TaskOutcomeStore};
-use crate::runtime::decomposition::DecompositionEngine;
-use crate::runtime::dispatch::{DispatchDecider, DispatchDecision};
-use crate::runtime::escalation::EscalationPolicy;
 use crate::runtime::event::RuntimeEvent;
 use crate::runtime::graph_analytics::TemplateEvolution;
+use crate::runtime::orchestration::{
+    CapabilityRegistry, DecompositionEngine, DispatchDecider, DispatchDecision, EscalationPolicy,
+    RoleSelector, TaskOutcome, TaskOutcomeStore,
+};
 use crate::runtime::strategy_graph::{StrategyGraph, StrategyId, StrategyType, TaskSignature};
 
 pub struct TaskScheduler {
@@ -266,7 +266,7 @@ impl TaskScheduler {
                 let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
                 match g.get(&task_id) {
                     Some(node) => selector.select(node, &candidates),
-                    None => crate::runtime::capability::RoutingDecision {
+                    None => crate::runtime::orchestration::RoutingDecision {
                         role: role.to_string(),
                         confidence: 0.5,
                         capability_score: 0.0,

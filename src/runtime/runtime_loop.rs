@@ -26,13 +26,13 @@ use tokio::sync::{RwLock, mpsc};
 use crate::agent::{AgentPool, AgentStatus};
 use crate::core::types::AgentId;
 use crate::runtime::AgentRuntime;
-use crate::runtime::capability::{CapabilityRegistry, DefaultRoleSelector, TaskOutcomeStore};
-use crate::runtime::decomposition::{DefaultDecompositionEngine, TensionThreshold};
-use crate::runtime::dispatch::PipelineDispatchDecider;
-use crate::runtime::embedding_analyzer::{EmbeddingGoalAnalyzer, ReferenceEmbeddings};
-use crate::runtime::escalation::DefaultEscalationPolicy;
 use crate::runtime::event::RuntimeEvent;
 use crate::runtime::graph_analytics::TemplateEvolution;
+use crate::runtime::orchestration::{
+    CapabilityRegistry, DefaultDecompositionEngine, DefaultEscalationPolicy, DefaultRoleSelector,
+    EmbeddingGoalAnalyzer, PipelineDispatchDecider, ReferenceEmbeddings, TaskOutcomeStore,
+    TensionThreshold,
+};
 use crate::runtime::scheduler::TaskScheduler;
 use crate::runtime::strategy_graph::{CompetitionProtocol, StrategyGraph};
 use crate::tools::ToolServerHandle;
@@ -70,7 +70,7 @@ impl RuntimeEventLoop {
         let decider = Box::new(PipelineDispatchDecider::new(runtime.clone()));
 
         // Extract embedding service and build decomposition/routing components.
-        let goal_analyzer: Arc<dyn crate::runtime::embedding_analyzer::GoalAnalyzer> = {
+        let goal_analyzer: Arc<dyn crate::runtime::orchestration::GoalAnalyzer> = {
             let rt = runtime.read().await;
             let svc = rt.embedding_service();
             let refs = ReferenceEmbeddings::compute(&*svc).await;

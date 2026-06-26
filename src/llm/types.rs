@@ -167,3 +167,130 @@ pub enum ToolEvent {
 }
 
 pub type ToolChatStream = Pin<Box<dyn Stream<Item = ToolEvent> + Send>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_done_reason_variants() {
+        assert_eq!(format!("{:?}", DoneReason::Normal), "Normal");
+        assert_eq!(
+            format!("{:?}", DoneReason::LoopTerminated),
+            "LoopTerminated"
+        );
+        assert_eq!(format!("{:?}", DoneReason::StreamError), "StreamError");
+    }
+
+    #[test]
+    fn test_tool_event_debug() {
+        let event = ToolEvent::Text("hello".to_string());
+        assert!(format!("{:?}", event).contains("Text"));
+    }
+
+    #[test]
+    fn test_tool_event_clone() {
+        let event = ToolEvent::Text("clone".to_string());
+        let cloned = event.clone();
+        assert!(matches!(cloned, ToolEvent::Text(t) if t == "clone"));
+    }
+
+    #[test]
+    fn test_tool_call_event() {
+        let event = ToolEvent::ToolCall {
+            name: "read_file".into(),
+            args: serde_json::json!({"path": "/tmp/test.txt"}),
+            result: String::new(),
+        };
+        match &event {
+            ToolEvent::ToolCall { name, args, .. } => {
+                assert_eq!(name, "read_file");
+                assert_eq!(args["path"], "/tmp/test.txt");
+            }
+            _ => panic!("expected ToolCall"),
+        }
+    }
+
+    #[test]
+    fn test_token_usage_event() {
+        let event = ToolEvent::TokenUsage {
+            input: 100,
+            output: 50,
+            cached_input: 10,
+            cache_creation_input: 5,
+        };
+        match event {
+            ToolEvent::TokenUsage { input, output, .. } => {
+                assert_eq!(input, 100);
+                assert_eq!(output, 50);
+            }
+            _ => panic!("expected TokenUsage"),
+        }
+    }
+
+    #[test]
+    fn test_tool_event_done_variants() {
+        for reason in &[
+            DoneReason::Normal,
+            DoneReason::LoopTerminated,
+            DoneReason::StreamError,
+        ] {
+            let event = ToolEvent::Done { reason: *reason };
+            match event {
+                ToolEvent::Done { reason: r } => assert_eq!(r, *reason),
+                _ => panic!("expected Done"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_message_serialization() {
+        let msg = Message {
+            role: "user".into(),
+            content: "hello".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: Message = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.role, "user");
+        assert_eq!(back.content, "hello");
+    }
+
+    #[test]
+    fn test_llm_request_serialization() {
+        let req = LlmRequest {
+            model: "gpt-4".into(),
+            messages: vec![Message {
+                role: "system".into(),
+                content: "be helpful".into(),
+            }],
+            temperature: 0.7,
+            max_tokens: 1000,
+            timeout_secs: None,
+            max_retries: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: LlmRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.model, "gpt-4");
+        assert_eq!(back.messages.len(), 1);
+    }
+
+    #[test]
+    fn test_llm_response_serialization() {
+        let resp = LlmResponse {
+            content: "response text".into(),
+            tokens_used: 150,
+            cached_input_tokens: 10,
+            cache_creation_input_tokens: 5,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let back: LlmResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.content, "response text");
+        assert_eq!(back.tokens_used, 150);
+    }
+
+    #[test]
+    fn test_protocol_formatting() {
+        assert_eq!(format!("{}", ProviderProtocol::OpenAi), "OpenAI");
+        assert_eq!(format!("{:?}", ProviderProtocol::Gemini), "Gemini");
+    }
+}

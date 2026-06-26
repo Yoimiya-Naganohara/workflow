@@ -1,15 +1,12 @@
 #![allow(clippy::module_inception)]
 
 pub mod agent_lifecycle;
-pub mod capability;
 pub mod config;
-pub mod decomposition;
-pub mod dispatch;
-pub mod embedding_analyzer;
-pub mod escalation;
 pub mod event;
+
 pub mod graph_analytics;
 pub mod optimizer;
+pub mod orchestration;
 pub mod pipeline;
 pub mod runtime;
 pub mod runtime_loop;

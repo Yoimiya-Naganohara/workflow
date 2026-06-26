@@ -50,9 +50,14 @@ impl AgentRuntime {
                         }
                     }
                 }
-                crate::llm::ToolEvent::TokenUsage { input, output, .. } => {
+                crate::llm::ToolEvent::TokenUsage {
+                    input,
+                    output,
+                    cached_input,
+                    cache_creation_input,
+                } => {
                     // Accumulate token counts on the agent for UI display.
-                    if input > 0 || output > 0 {
+                    if input > 0 || output > 0 || cached_input > 0 || cache_creation_input > 0 {
                         if let Ok(mut pool) = agent_pool.try_write() {
                             if let Some(agent) = pool.get_agent_mut(&agent_id) {
                                 agent.tokens_input = agent.tokens_input.saturating_add(input);

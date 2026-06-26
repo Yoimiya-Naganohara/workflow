@@ -5,10 +5,10 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::runtime::decomposition::{
-    DecompositionEngine, DefaultDecompositionEngine, TensionThreshold,
+use crate::runtime::orchestration::{
+    DecompositionEngine, DefaultDecompositionEngine, EmbeddingGoalAnalyzer, ReferenceEmbeddings,
+    TensionThreshold,
 };
-use crate::runtime::embedding_analyzer::{EmbeddingGoalAnalyzer, ReferenceEmbeddings};
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::Tui;
