@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 pub use crate::core::constants::*;
 
 pub type TaskId = [u8; 16];
@@ -70,6 +72,66 @@ pub struct ExperienceEntry {
     pub timestamp: u64,
     pub l2_override_weight: f32,
     pub l2_override_created_at: u64,
+}
+
+// ============================================================================
+//  Chat / UI domain types (moved from tui::state)
+// ============================================================================
+
+/// Status of a chat message in the stream.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MessageStatus {
+    Thinking,
+    Streaming,
+    Completed,
+    Error,
+}
+
+/// Role of a chat message sender.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MessageRole {
+    System,
+    User,
+    Agent,
+    Decision,
+}
+
+/// A single chat message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: MessageRole,
+    pub content: String,
+    #[serde(default)]
+    pub reasoning: String,
+    pub timestamp: String,
+    pub status: MessageStatus,
+}
+
+/// A selected model for chat.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelectedModel {
+    pub provider_id: String,
+    pub model_id: String,
+    pub provider_name: String,
+    pub model_name: String,
+}
+
+/// Status of an agent in the diagnostic tree.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentStatus {
+    Running,
+    Suspended,
+    Completed,
+    Failed,
+}
+
+/// Entry in the agent diagnostic tree.
+#[derive(Debug, Clone)]
+pub struct AgentEntry {
+    pub id: String,
+    pub name: String,
+    pub status: AgentStatus,
+    pub budget: u64,
 }
 
 #[cfg(test)]

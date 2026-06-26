@@ -366,3 +366,145 @@ impl TaskScheduler {
             .await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::AgentRuntime;
+    use crate::runtime::AgentRuntimeConfig;
+    use crate::runtime::event::RuntimeEvent;
+    use crate::runtime::orchestration::{DispatchDecider, PipelineDispatchDecider};
+    use std::sync::Arc;
+    use tokio::sync::{RwLock, mpsc};
+
+    /// Create a scheduler with default components for testing.
+    fn test_decider() -> Box<dyn DispatchDecider> {
+        Box::new(PipelineDispatchDecider::new(Arc::new(RwLock::new(
+            AgentRuntime::new(AgentRuntimeConfig::default(), Arc::new(MockEmbed)),
+        ))))
+    }
+
+    struct MockEmbed;
+    #[async_trait::async_trait]
+    impl crate::llm::EmbeddingService for MockEmbed {
+        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; 384]> {
+            let mut e = [0.0f32; 384];
+            e[0] = 1.0;
+            Ok(e)
+        }
+        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; 384]>> {
+            Ok(texts
+                .iter()
+                .map(|_| {
+                    let mut e = [0.0f32; 384];
+                    e[0] = 1.0;
+                    e
+                })
+                .collect())
+        }
+        fn similarity(&self, a: &[f32; 384], b: &[f32; 384]) -> f32 {
+            crate::core::simd::cosine_similarity_384(a, b)
+        }
+        fn cache_size(&self) -> usize {
+            0
+        }
+        fn clear_cache(&self) {}
+        fn cache_hits(&self) -> u64 {
+            0
+        }
+        fn cache_misses(&self) -> u64 {
+            0
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_new() {
+        let rt = Arc::new(RwLock::new(AgentRuntime::new(
+            AgentRuntimeConfig::default(),
+            Arc::new(MockEmbed),
+        )));
+        let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
+        let (_tx, _rx) = mpsc::channel(16);
+        let decider = test_decider();
+        let scheduler = TaskScheduler::new(rt, pool, _tx, decider);
+        // Builder methods should chain
+        let _ = scheduler.with_decomposition(Box::new(
+            crate::runtime::orchestration::NoopDecompositionEngine,
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_with_no_ready_tasks() {
+        let rt = Arc::new(RwLock::new(AgentRuntime::new(
+            AgentRuntimeConfig::default(),
+            Arc::new(MockEmbed),
+        )));
+        let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
+        let (_tx, _rx) = mpsc::channel(16);
+        let decider = test_decider();
+        let scheduler = TaskScheduler::new(rt, pool, _tx, decider);
+        // With no tasks, dispatch should be a no-op
+        scheduler.dispatch().await;
+        // No panic = success
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_with_ready_task() {
+        let rt = Arc::new(RwLock::new(AgentRuntime::new(
+            AgentRuntimeConfig::default(),
+            Arc::new(MockEmbed),
+        )));
+        let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
+        let (_tx, mut _rx) = mpsc::channel(16);
+        let decider = test_decider();
+        let scheduler = TaskScheduler::new(rt.clone(), pool, _tx, decider);
+
+        // Add a ready task to the graph
+        {
+            let r = rt.read().await;
+            let mut g = r.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            g.spawn_root("test goal");
+        }
+
+        // Dispatch should process the task
+        scheduler.dispatch().await;
+        // No panic = dispatch handled the task
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_full_chain() {
+        let rt = Arc::new(RwLock::new(AgentRuntime::new(
+            AgentRuntimeConfig::default(),
+            Arc::new(MockEmbed),
+        )));
+        let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
+        let (_tx, _rx) = mpsc::channel(16);
+        let decider = test_decider();
+
+        let scheduler = TaskScheduler::new(rt.clone(), pool.clone(), _tx, decider)
+            .with_decomposition(Box::new(
+                crate::runtime::orchestration::NoopDecompositionEngine,
+            ))
+            .with_escalation(
+                Box::new(crate::runtime::orchestration::DefaultEscalationPolicy::default()),
+                Arc::new(RwLock::new(
+                    crate::runtime::orchestration::TaskOutcomeStore::new(),
+                )),
+            );
+
+        // Add a task
+        {
+            let r = rt.read().await;
+            let mut g = r.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            g.spawn_root("complex task");
+        }
+
+        scheduler.dispatch().await;
+        // After dispatch, the task should be marked running or rejected
+        let r = rt.read().await;
+        let g = r.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+        let tasks = g.ready_tasks();
+        // No ready tasks remain (all have been dispatched)
+        assert!(tasks.is_empty(), "all tasks should be dispatched");
+    }
+}

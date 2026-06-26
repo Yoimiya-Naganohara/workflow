@@ -9,7 +9,13 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use crate::core::types::AgentId;
+use crate::agent::AgentPool;
+use crate::core::types::{AgentId, ChatMessage, SelectedModel};
+use crate::models::ModelRegistry;
+use crate::provider::ProviderClient;
+use crate::reflection::ReflectionConfig;
+use crate::runtime::AgentRuntime;
+use crate::runtime::RuntimeEvent;
 use crate::tools::ToolServerHandle;
 
 /// Shared runtime state accessible from tools and TUI.
@@ -17,11 +23,22 @@ use crate::tools::ToolServerHandle;
 /// This struct intentionally has no TUI dependencies — it can be used by
 /// tool code, runtime code, and the TUI without creating circular deps.
 pub struct CoreState {
-    pub messages: Vec<super::types::ChatMessage>,
-    pub agent_pool: Arc<RwLock<crate::agent::AgentPool>>,
-    pub runtime: Option<Arc<RwLock<crate::runtime::AgentRuntime>>>,
+    pub messages: Vec<ChatMessage>,
+    pub models: ModelRegistry,
+    pub configured_providers: Vec<String>,
+    pub api_keys: HashMap<String, String>,
+    pub provider_clients: HashMap<String, Arc<ProviderClient>>,
+    pub selected_models: Vec<SelectedModel>,
+    pub agents: Vec<crate::tui::state::AgentEntry>,
+    pub agent_pool: Arc<RwLock<AgentPool>>,
+    pub runtime: Option<Arc<RwLock<AgentRuntime>>>,
     pub tool_server: ToolServerHandle,
     pub responsible_agent_id: Option<AgentId>,
-    pub runtime_event_tx:
-        Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
+    pub default_role: String,
+    pub reflection: ReflectionConfig,
+    /// Track the last chat context for retry.
+    pub last_chat_request_id: u64,
+    /// Channel sender to the background `RuntimeEventLoop`.
+    /// Tools use this to dispatch async work without blocking the LLM stream.
+    pub runtime_event_tx: Option<tokio::sync::mpsc::Sender<RuntimeEvent>>,
 }

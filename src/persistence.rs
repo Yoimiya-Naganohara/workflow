@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use tracing;
 
 use crate::agent::MemoEntry;
+use crate::core::types::SelectedModel;
 use crate::models::{CustomProvider, ModelRegistry};
-use crate::tui::state::SelectedModel;
 
 // ============================================================================
 //  KeyStore — controlled API key persistence

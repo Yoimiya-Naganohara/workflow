@@ -4,12 +4,11 @@ use std::sync::Arc;
 use futures::future::AbortHandle;
 use tokio::sync::RwLock;
 
-use crate::core::types::AgentId;
 use crate::models::{ModelCapabilities, ModelRegistry};
-use crate::provider::ProviderClient;
+
 use crate::reflection::ReflectionConfig;
 use crate::runtime::AgentRuntime;
-use crate::tools::ToolServerHandle;
+
 use crate::tui::effect::AppEvent;
 
 // ── Shared types ──
@@ -60,23 +59,7 @@ pub enum AppMode {
     Build,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum MessageStatus {
-    Thinking,
-    Streaming,
-    Completed,
-    Error,
-}
-
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct ChatMessage {
-    pub role: MessageRole,
-    pub content: String,
-    #[serde(default)]
-    pub reasoning: String,
-    pub timestamp: String,
-    pub status: MessageStatus,
-}
+pub use crate::core::types::{ChatMessage, MessageRole, MessageStatus, SelectedModel};
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
@@ -91,61 +74,8 @@ impl ChatMessage {
     }
 }
 
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum MessageRole {
-    System,
-    User,
-    Agent,
-    Decision,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct SelectedModel {
-    pub provider_id: String,
-    pub model_id: String,
-    pub provider_name: String,
-    pub model_name: String,
-}
-
-#[derive(Clone)]
-pub struct AgentEntry {
-    pub id: String,
-    pub name: String,
-    pub status: AgentStatus,
-    pub budget: u64,
-}
-
-#[derive(Clone, PartialEq)]
-pub enum AgentStatus {
-    Running,
-    Suspended,
-    Completed,
-    Failed,
-}
-
-// ── Grouped state structs ──
-
-/// Business / domain state — persisted or long-lived.
-pub struct CoreState {
-    pub messages: Vec<ChatMessage>,
-    pub models: ModelRegistry,
-    pub configured_providers: Vec<String>,
-    pub api_keys: HashMap<String, String>,
-    pub provider_clients: HashMap<String, Arc<ProviderClient>>,
-    pub selected_models: Vec<SelectedModel>,
-    pub agents: Vec<AgentEntry>,
-    pub agent_pool: Arc<RwLock<crate::agent::AgentPool>>,
-    pub runtime: Option<Arc<RwLock<AgentRuntime>>>,
-    pub tool_server: ToolServerHandle,
-    pub responsible_agent_id: Option<AgentId>,
-    pub default_role: String,
-    pub reflection: ReflectionConfig,
-    /// Track the last chat context for retry.
-    pub last_chat_request_id: u64,
-    /// Channel sender to the background `RuntimeEventLoop`.
-    /// Tools use this to dispatch async work without blocking the LLM stream.
-    pub runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
-}
+pub use crate::core::state::CoreState;
+pub use crate::core::types::{AgentEntry, AgentStatus};
 
 /// Transient UI state — reset on restart.
 pub struct UiState {
