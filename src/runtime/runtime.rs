@@ -83,11 +83,19 @@ impl AgentRuntime {
                 .join("experience_a.bin")
         });
 
-        // Open dual-track memory with mmap persistence (creates file if needed)
-        let dual_track = Box::new(
-            DualTrackMemory::open(&bedrock_path, 512, config.l1_confidence_threshold)
-                .expect("Failed to open experience pool"),
-        );
+        // Open dual-track memory with mmap persistence (creates file if needed).
+        // Falls back to in-memory pool on failure (no persistence but no crash).
+        let dual_track =
+            match DualTrackMemory::open(&bedrock_path, 512, config.l1_confidence_threshold) {
+                Ok(pool) => Box::new(pool),
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to open experience pool, using in-memory fallback: {}",
+                        e
+                    );
+                    Box::new(DualTrackMemory::in_memory(512usize))
+                }
+            };
 
         let pipeline = DecisionPipelineBuilder::new()
             .admission(Box::new(AdmissionController::new(

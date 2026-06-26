@@ -413,7 +413,6 @@ impl LlmProvider {
                         yield ToolEvent::ToolCall {
                             name: tool_name,
                             args,
-                            result: String::new(),
                         };
                     }
                     Ok(MultiTurnStreamItem::StreamAssistantItem(
@@ -556,7 +555,6 @@ mod tests {
         let event = ToolEvent::ToolCall {
             name: "read_file".to_string(),
             args: serde_json::json!({"path": "/tmp/test.txt"}),
-            result: String::new(),
         };
         match event {
             ToolEvent::ToolCall { name, args, .. } => {
@@ -603,7 +601,6 @@ mod tests {
         let event = ToolEvent::ToolCall {
             name: "test".to_string(),
             args: serde_json::json!({}),
-            result: "ok".to_string(),
         };
         let debug = format!("{:?}", event);
         assert!(debug.contains("ToolCall"));

@@ -236,7 +236,6 @@ mod tests {
             ToolEvent::ToolCall {
                 name: "read_file".to_string(),
                 args: serde_json::json!({}),
-                result: String::new(),
             },
             ToolEvent::Done {
                 reason: DoneReason::Normal,
@@ -355,7 +354,6 @@ mod tests {
             ToolEvent::ToolCall {
                 name: "sh".to_string(),
                 args: serde_json::json!({"cmd": "ls"}),
-                result: String::new(),
             },
             ToolEvent::Done {
                 reason: DoneReason::Normal,
@@ -373,12 +371,10 @@ mod tests {
             ToolEvent::ToolCall {
                 name: "sh".to_string(),
                 args: serde_json::json!({"cmd": "ls"}),
-                result: String::new(),
             },
             ToolEvent::ToolCall {
                 name: "read_file".to_string(),
                 args: serde_json::json!({"path": "x"}),
-                result: String::new(),
             },
             ToolEvent::Done {
                 reason: DoneReason::Normal,
@@ -395,7 +391,6 @@ mod tests {
             ToolEvent::ToolCall {
                 name: "read_file".to_string(),
                 args: serde_json::json!({"path": "/nonexistent"}),
-                result: String::new(),
             },
             ToolEvent::Text("Error: file not found".to_string()),
             ToolEvent::Done {
@@ -422,7 +417,6 @@ mod tests {
             ToolEvent::ToolCall {
                 name: "read_file".to_string(),
                 args: serde_json::json!({"path": "/tmp/x"}),
-                result: String::new(),
             },
             ToolEvent::Text("Success: file read OK".to_string()),
             ToolEvent::Done {
@@ -450,7 +444,6 @@ mod tests {
             .map(|i| ToolEvent::ToolCall {
                 name: format!("tool_{}", i),
                 args: serde_json::json!({}),
-                result: String::new(),
             })
             .collect();
         events.push(ToolEvent::Done {
@@ -474,17 +467,14 @@ mod tests {
             ToolEvent::ToolCall {
                 name: "read_file".to_string(),
                 args: serde_json::json!({}),
-                result: String::new(),
             },
             ToolEvent::ToolCall {
                 name: "sh".to_string(),
                 args: serde_json::json!({}),
-                result: String::new(),
             },
             ToolEvent::ToolCall {
                 name: "write_file".to_string(),
                 args: serde_json::json!({}),
-                result: String::new(),
             },
             ToolEvent::Done {
                 reason: DoneReason::Normal,
@@ -562,12 +552,10 @@ mod tests {
             ToolEvent::ToolCall {
                 name: "read_file".to_string(),
                 args: serde_json::json!({"path": "/tmp/test.txt"}),
-                result: String::new(),
             },
             ToolEvent::ToolCall {
                 name: "grep".to_string(),
                 args: serde_json::json!({"pattern": "fn main"}),
-                result: String::new(),
             },
             ToolEvent::Text("found it".to_string()),
             ToolEvent::Done {

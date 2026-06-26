@@ -104,20 +104,23 @@ impl Tui {
         let runtime = state_clone.read().await.core.runtime.clone();
         let tool_server = state_clone.read().await.core.tool_server.clone();
         let app_state = state_clone.clone();
-        tokio::spawn(async move {
-            let rt = runtime.expect("Runtime must be initialised before event loop");
-            use crate::runtime::runtime_loop::RuntimeEventLoop;
-            let loop_ = RuntimeEventLoop::new(
-                rt,
-                pool,
-                event_loop_rx,
-                broker_tx,
-                tool_server,
-                Some(app_state),
-            )
-            .await;
-            loop_.run().await;
-        });
+        if let Some(rt) = runtime {
+            tokio::spawn(async move {
+                use crate::runtime::runtime_loop::RuntimeEventLoop;
+                let loop_ = RuntimeEventLoop::new(
+                    rt,
+                    pool,
+                    event_loop_rx,
+                    broker_tx,
+                    tool_server,
+                    Some(app_state),
+                )
+                .await;
+                loop_.run().await;
+            });
+        } else {
+            tracing::error!("Runtime not initialized — event loop not started");
+        }
 
         let app_tx = self.app_event_tx.clone();
         let state_for_broker = self.state.clone();

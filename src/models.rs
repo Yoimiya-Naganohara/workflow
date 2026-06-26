@@ -233,26 +233,29 @@ pub trait ProviderSource: Send + Sync {
 // ============================================================================
 
 pub struct ModelsDevSource {
-    client: reqwest::Client,
+    client: Option<reqwest::Client>,
 }
 
 impl Default for ModelsDevSource {
     fn default() -> Self {
-        Self::new()
+        Self {
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .ok(),
+        }
     }
 }
 
 impl ModelsDevSource {
-    pub fn new() -> Self {
+    pub fn new() -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
-            .unwrap_or_else(|e| {
-                // reqwest client construction only fails on TLS backend issues,
-                // which is unrecoverable. Panic with a clear message.
-                panic!("Failed to build reqwest client (TLS backend issue): {}", e);
-            });
-        Self { client }
+            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client (TLS issue): {}", e))?;
+        Ok(Self {
+            client: Some(client),
+        })
     }
 }
 
@@ -289,11 +292,10 @@ impl ProviderSource for ModelsDevSource {
     }
 
     async fn fetch(&self) -> Result<Vec<Provider>> {
-        let resp = self
-            .client
-            .get("https://models.dev/api.json")
-            .send()
-            .await?;
+        let client = self.client.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("HTTP client unavailable (TLS initialization failed)")
+        })?;
+        let resp = client.get("https://models.dev/api.json").send().await?;
         let status = resp.status();
         if !status.is_success() {
             anyhow::bail!("models.dev HTTP {}", status);
@@ -549,7 +551,7 @@ impl ModelRegistry {
     }
 
     pub async fn fetch(&mut self) -> Result<()> {
-        let source = ModelsDevSource::new();
+        let source = ModelsDevSource::new()?;
         let providers = source.fetch().await?;
         self.providers = providers;
         Ok(())

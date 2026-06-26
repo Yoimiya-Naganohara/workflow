@@ -721,7 +721,9 @@ mod tests {
         // Data extraction (same as render_agent_detail_popup).
         let (_name, _role, trace) = match app.core.agent_pool.try_read() {
             Ok(pool) => {
-                let (name, role) = pool.agents().iter()
+                let (name, role) = pool
+                    .agents()
+                    .iter()
                     .find(|a| a.id == agent_id)
                     .map(|a| (a.name.clone(), a.role.clone()))
                     .unwrap_or_else(|| (String::new(), String::new()));

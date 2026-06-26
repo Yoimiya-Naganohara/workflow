@@ -144,10 +144,16 @@ pub enum ToolEvent {
     /// Separate from Text so the TUI can render it with distinct styling
     /// (dimmed/italic) and track it independently of the final response.
     Reasoning(String),
+    /// The LLM requested a tool call.  The `result` field was removed
+    /// because rig's streaming API does not expose the tool execution
+    /// result in the `ToolCall` event — it is consumed internally by
+    /// the multi-turn framework before our code sees the event.
+    ///
+    /// Use `ListAgents` or inspect the response text that follows a
+    /// `ToolCall` event to infer the tool's effect.
     ToolCall {
         name: String,
         args: serde_json::Value,
-        result: String,
     },
     /// Per-turn token usage from the LLM provider.
     ///
@@ -200,7 +206,6 @@ mod tests {
         let event = ToolEvent::ToolCall {
             name: "read_file".into(),
             args: serde_json::json!({"path": "/tmp/test.txt"}),
-            result: String::new(),
         };
         match &event {
             ToolEvent::ToolCall { name, args, .. } => {

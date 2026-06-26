@@ -168,6 +168,22 @@ pub struct DualTrackMemory {
 }
 
 impl DualTrackMemory {
+    /// Create a dual-track memory with no file backing (in-memory only).
+    pub fn in_memory(fluid_max_size: usize) -> Self {
+        Self {
+            bedrock: crate::experience::pool::ExperiencePool::in_memory(),
+            fluid: FluidTrack::new(fluid_max_size),
+            consolidator: ClusterConsolidator::default(),
+            min_cluster_size: 3,
+            consolidated_weight: 0.7,
+            bedrock_credibility: 1.0,
+            fluid_credibility: 0.6,
+            confidence_threshold: 0.5,
+            auto_consolidate_at: fluid_max_size,
+            min_experiences: 5,
+        }
+    }
+
     /// Open or create a dual-track memory.
     ///
     /// The bedrock path points to the mmap file for persistent

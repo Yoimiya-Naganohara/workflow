@@ -69,20 +69,18 @@ pub const BUDGET_ANOMALY_RATIO: f64 = 0.8;
 /// Maximum responsibility chain length before flagging.
 pub const MAX_CHAIN_LENGTH: usize = 20;
 
-/// Default max tool-calling turns for MCP chat (6 = cost-bounded upper limit).
-/// Higher values increase LLM "tool loops" where the model calls tools
-/// repeatedly instead of producing a final answer.
-pub const DEFAULT_MAX_TOOL_TURNS: usize = 6;
+/// Default max tool-calling turns for MCP chat (Claude design: no hard limit).
+/// Set high enough that the only practical stop is LLM FinalResponse.
+pub const DEFAULT_MAX_TOOL_TURNS: usize = 100;
 
-/// Maximum total tool calls allowed in a single stream before force-termination.
-/// Independent of `DEFAULT_MAX_TOOL_TURNS` (which limits rig multi-turn rounds).
-/// Each round may contain multiple tool calls; this caps the absolute count.
-pub const MAX_TOOL_CALLS_PER_STREAM: usize = 12;
+/// Maximum total tool calls allowed (Claude design: effectively unlimited).
+/// Only exists as a circuit breaker for truly pathological cases.
+pub const MAX_TOOL_CALLS_PER_STREAM: usize = 200;
 
-/// Maximum times the same tool (by name) can be called in a single stream,
-/// regardless of argument variation.  Catches patterns like "read_file with
-/// different paths" called 8+ times instead of using a bulk tool.
-pub const MAX_CALLS_PER_TOOL: usize = 6;
+/// Maximum times the same tool by name can be called (Claude design: not enforced).
+/// Per-tool frequency limits can cut off legitimate multi-call workflows.
+/// Set equal to total limit so only total+calls + duplicate detection apply.
+pub const MAX_CALLS_PER_TOOL: usize = 200;
 
 /// Capacity for runtime event MPSC channels.
 pub const RUNTIME_CHANNEL_CAPACITY: usize = 256;

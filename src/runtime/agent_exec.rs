@@ -107,7 +107,7 @@ Messages may contain important context from sibling agents.",
             inbox_hint,
         );
         let leaf_goal = format!(
-            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\nTOOL DISCIPLINE: Only call tools when you truly need information you cannot infer. Prefer answering directly from your knowledge. You have up to 6 tool call rounds available, with a maximum of 12 total tool calls per session. No single tool may be called more than 6 times. If you have called several tools and still cannot answer, summarize what you found and explain what is missing. Repeated calls to the same tool with the same arguments (3+ times) will be treated as a loop and terminated.",
+            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\nRULES:\n1. Use tools freely — there is no limit on how many times you can call them.\n2. Keep working until you have a complete, well-researched answer.\n3. When you have enough information, stop and provide your final answer.\n4. If you detect you are calling the same tool with the same arguments 3+ times, you are looping — stop and summarize what you have.\n\nYou are a capable engineer. Do not stop working until the goal is achieved.",
             goal
         );
 

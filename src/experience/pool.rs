@@ -119,6 +119,19 @@ pub struct ExperiencePool {
 }
 
 impl ExperiencePool {
+    /// Create an in-memory pool with no file backing.
+    /// Used as a fallback when file-based persistence fails.
+    pub fn in_memory() -> Self {
+        Self {
+            path: PathBuf::new(),
+            entries: Vec::new(),
+            _mmap: None,
+            mmap_mut: None,
+            dirty: AtomicBool::new(false),
+            capacity: 0,
+        }
+    }
+
     /// Open (or create) a pool at `path`.
     ///
     /// If the file exists and has a valid header, entries are loaded
@@ -318,10 +331,14 @@ impl ExperiencePool {
         }
 
         // Get the mutable mmap.
-        let mm = self
-            .mmap_mut
-            .as_mut()
-            .expect("mmap_mut must exist after grow");
+        let mm = match self.mmap_mut.as_mut() {
+            Some(mm) => mm,
+            None => {
+                return Err(anyhow::anyhow!(
+                    "mmap_mut is None after grow — flush failed"
+                ));
+            }
+        };
 
         let entries_bytes_slice = unsafe {
             std::slice::from_raw_parts(

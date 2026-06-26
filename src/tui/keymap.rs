@@ -162,69 +162,109 @@ mod tests {
     #[test]
     fn test_default_arrow_keys() {
         let km = Keymap::default();
-        assert_eq!(km.resolve(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)), Action::MoveUp);
-        assert_eq!(km.resolve(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)), Action::MoveDown);
+        assert_eq!(
+            km.resolve(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
+            Action::MoveUp
+        );
+        assert_eq!(
+            km.resolve(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            Action::MoveDown
+        );
     }
 
     #[test]
     fn test_default_enter_sends() {
         let km = Keymap::default();
-        assert_eq!(km.resolve(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)), Action::SendMessage);
+        assert_eq!(
+            km.resolve(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            Action::SendMessage
+        );
     }
 
     #[test]
     fn test_default_esc_cancels() {
         let km = Keymap::default();
-        assert_eq!(km.resolve(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)), Action::Cancel);
+        assert_eq!(
+            km.resolve(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            Action::Cancel
+        );
     }
 
     #[test]
     fn test_unbound_key_returns_none() {
         let km = Keymap::default();
-        assert_eq!(km.resolve(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)), Action::None);
+        assert_eq!(
+            km.resolve(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)),
+            Action::None
+        );
     }
 
     #[test]
     fn test_char_input_fallback() {
         let km = Keymap::default();
-        assert_eq!(km.resolve(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)), Action::TypeChar('a'));
+        assert_eq!(
+            km.resolve(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+            Action::TypeChar('a')
+        );
     }
 
     #[test]
     fn test_shift_char_input() {
         let km = Keymap::default();
-        assert_eq!(km.resolve(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)), Action::TypeChar('A'));
+        assert_eq!(
+            km.resolve(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)),
+            Action::TypeChar('A')
+        );
     }
 
     #[test]
     fn test_ctrl_c_does_not_fallback() {
         let km = Keymap::default();
         // Ctrl+C is Quit, not TypeChar('c')
-        assert_eq!(km.resolve(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), Action::Quit);
+        assert_eq!(
+            km.resolve(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            Action::Quit
+        );
         // plain 'c' is TypeChar
-        assert_eq!(km.resolve(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)), Action::TypeChar('c'));
+        assert_eq!(
+            km.resolve(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)),
+            Action::TypeChar('c')
+        );
     }
 
     #[test]
     fn test_format_ctrl_c() {
-        assert_eq!(format_key(&KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), "Ctrl+c");
+        assert_eq!(
+            format_key(&KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            "Ctrl+c"
+        );
     }
 
     #[test]
     fn test_format_enter() {
-        assert_eq!(format_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)), "Enter");
+        assert_eq!(
+            format_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            "Enter"
+        );
     }
 
     #[test]
     fn test_format_esc() {
-        assert_eq!(format_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)), "Esc");
+        assert_eq!(
+            format_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            "Esc"
+        );
     }
 
     #[test]
     fn test_format_f1() {
         let result = format_key(&KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
         // KeyCode::F(1) formats as "F(1)" via Debug
-        assert!(result.contains("F"), "expected F key in format, got: {}", result);
+        assert!(
+            result.contains("F"),
+            "expected F key in format, got: {}",
+            result
+        );
     }
 
     #[test]
@@ -246,8 +286,14 @@ mod tests {
     #[test]
     fn test_custom_bind() {
         let mut km = Keymap::new();
-        km.bind(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), Action::Quit);
-        assert_eq!(km.resolve(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)), Action::Quit);
+        km.bind(
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+            Action::Quit,
+        );
+        assert_eq!(
+            km.resolve(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
+            Action::Quit
+        );
     }
 }
 
