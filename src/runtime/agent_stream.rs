@@ -43,6 +43,7 @@ impl AgentRuntime {
                                 name,
                                 args_preview,
                                 status: crate::agent::ToolStatus::Success,
+                                error_message: None,
                             });
                             if agent.tool_trace.len() > crate::agent::MAX_TOOL_TRACE {
                                 agent.tool_trace.pop_front();
@@ -131,13 +132,17 @@ impl AgentRuntime {
                 "is a directory",
                 "Is a directory",
             ];
-            let has_error = error_keywords.iter().any(|pat| text.contains(pat));
-            if has_error {
+            if let Some(error_line) = error_keywords.iter().find_map(|pat| {
+                let start = text.find(pat)?;
+                let end = (start + 120).min(text.len());
+                Some(text[start..end].to_string())
+            }) {
                 if let Ok(mut pool) = agent_pool.try_write() {
                     if let Some(agent) = pool.get_agent_mut(&agent_id) {
                         for record in agent.tool_trace.iter_mut().rev().take(2) {
                             if record.status == crate::agent::ToolStatus::Success {
                                 record.status = crate::agent::ToolStatus::Error;
+                                record.error_message = Some(error_line.clone());
                                 break;
                             }
                         }

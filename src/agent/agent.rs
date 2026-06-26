@@ -117,6 +117,8 @@ pub struct ToolCallRecord {
     /// Truncated argument preview (first 80 chars).
     pub args_preview: String,
     pub status: ToolStatus,
+    /// Error message if status is Error.
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -420,16 +420,19 @@ mod tests {
                     name: "read_file".into(),
                     args_preview: "\"path\": \"src/main.rs\"".into(),
                     status: ToolStatus::Success,
+                    error_message: None,
                 },
                 ToolCallRecord {
                     name: "grep".into(),
                     args_preview: "\"pattern\": \"fn main\"".into(),
                     status: ToolStatus::Success,
+                    error_message: None,
                 },
                 ToolCallRecord {
                     name: "write_file".into(),
                     args_preview: "\"path\": \"src/lib.rs\"".into(),
                     status: ToolStatus::Success,
+                    error_message: None,
                 },
             ]),
             ..stub_agent()
@@ -460,6 +463,7 @@ mod tests {
                 name: format!("tool_{}", i),
                 args_preview: String::new(),
                 status: ToolStatus::Success,
+                error_message: None,
             });
         }
         pool.add_agent(Agent {
@@ -500,6 +504,7 @@ mod tests {
                 name: "sh".into(),
                 args_preview: "\"command\": \"rm -rf /\"".into(),
                 status: ToolStatus::Error,
+                error_message: None,
             }]),
             ..stub_agent()
         });

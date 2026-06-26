@@ -699,11 +699,13 @@ mod tests {
                         name: "grep".into(),
                         args_preview: "pattern=fn auth".into(),
                         status: ToolStatus::Success,
+                        error_message: None,
                     },
                     ToolCallRecord {
                         name: "read_file".into(),
                         args_preview: "path=auth.rs".into(),
                         status: ToolStatus::Success,
+                        error_message: None,
                     },
                 ]),
                 inbox: VecDeque::new(),
