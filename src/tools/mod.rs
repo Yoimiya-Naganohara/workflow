@@ -7,6 +7,7 @@ pub mod agent;
 pub mod builtin;
 pub mod memo;
 pub mod sandbox;
+pub mod structured;
 
 pub use rig::tool::server::{ToolServer, ToolServerHandle};
 
@@ -19,7 +20,6 @@ pub fn create_tool_server() -> ToolServerHandle {
     builtin::register_tools(ToolServer::new()).run()
 }
 
-/// Create a [`ToolServerHandle`] with built-ins plus workflow agent tools.
 /// Create a [`ToolServerHandle`] with built-ins, agent tools, and memo tools.
 ///
 /// The `state` is used for both the agent tools (spawn_agent) and to derive
@@ -39,7 +39,8 @@ pub fn create_sandboxed_agent_tool_server(
     base_state: std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>,
     sandbox: Option<std::sync::Arc<crate::tools::sandbox::SandboxHandle>>,
 ) -> ToolServerHandle {
-    let server = builtin::register_sandboxed_tools(ToolServer::new(), sandbox);
+    let with_search_asset = sandbox.is_some();
+    let server = builtin::register_sandboxed_tools(ToolServer::new(), sandbox, with_search_asset);
     let server = agent::register_tools(server, base_state.clone());
     let memo_deps = memo::MemoToolDeps::from_state(&base_state);
     memo::register_memo_tools(server, memo_deps).run()
@@ -118,7 +119,17 @@ mod tests {
         assert!(names.contains(&"glob"), "missing glob");
         assert!(names.contains(&"line_edit"), "missing line_edit");
         assert!(names.contains(&"fetch"), "missing fetch");
-        assert!(names.contains(&"search_asset"), "missing search_asset");
+        // search_asset is NOT registered in non-sandbox server (requires sandbox + embedder)
+        assert!(
+            !names.contains(&"search_asset"),
+            "search_asset must not appear in non-sandbox server"
+        );
+        assert!(names.contains(&"extract_json"), "missing extract_json");
+        assert_eq!(
+            defs.len(),
+            15,
+            "non-sandbox server has 15 built-in tools (search_asset excluded)"
+        );
 
         // Each definition has parameters with a type
         for def in &defs {
@@ -641,6 +652,7 @@ mod tests {
         let server = crate::tools::builtin::register_sandboxed_tools(
             crate::tools::ToolServer::new(),
             Some(sandbox.clone()),
+            true,
         );
         let handle = server.run();
 
@@ -678,6 +690,7 @@ mod tests {
         let server = crate::tools::builtin::register_sandboxed_tools(
             crate::tools::ToolServer::new(),
             Some(sandbox.clone()),
+            false,
         );
         let handle = server.run();
 
@@ -703,6 +716,7 @@ mod tests {
         let server = crate::tools::builtin::register_sandboxed_tools(
             crate::tools::ToolServer::new(),
             Some(sandbox.clone()),
+            false,
         );
         let handle = server.run();
 
@@ -732,6 +746,7 @@ mod tests {
         let server = crate::tools::builtin::register_sandboxed_tools(
             crate::tools::ToolServer::new(),
             Some(sandbox.clone()),
+            false,
         );
         let handle = server.run();
 
@@ -757,6 +772,7 @@ mod tests {
         let server = crate::tools::builtin::register_sandboxed_tools(
             crate::tools::ToolServer::new(),
             Some(sandbox.clone()),
+            false,
         );
         let handle = server.run();
 
@@ -821,6 +837,7 @@ mod tests {
                 let server = crate::tools::builtin::register_sandboxed_tools(
                     crate::tools::ToolServer::new(),
                     Some(sandbox.clone()),
+                    false,
                 );
                 let handle = server.run();
 

@@ -27,19 +27,26 @@ async fn spawn_blocking_fs<T: Send + 'static>(
 
 /// Register all built-in tools on a `ToolServer` (without sandbox).
 pub fn register_tools(server: crate::tools::ToolServer) -> crate::tools::ToolServer {
-    register_sandboxed_tools(server, None)
+    register_sandboxed_tools(server, None, false)
 }
 
 /// Register all built-in tools, optionally with a shared sandbox handle.
 ///
-/// When `sandbox` is `Some`, the three filesystem-critical tools
-/// (ReadFile, WriteFile, Shell) will resolve paths through the
-/// sandbox, isolating writes and preventing path escape.
+/// When `sandbox` is `Some` and `with_search_asset` is true,
+/// the `search_asset` (semantic retrieval) tool is also registered.
+/// `search_asset` requires both a sandbox and an embedding engine,
+/// so it is **excluded** from plain tool servers to prevent
+/// registration of a tool that always fails at runtime.
+///
+/// The three filesystem-critical tools (ReadFile, WriteFile, Shell)
+/// resolve paths through the sandbox, isolating writes and preventing
+/// path escape even when `search_asset` is excluded.
 pub fn register_sandboxed_tools(
     server: crate::tools::ToolServer,
     sandbox: Option<std::sync::Arc<SandboxHandle>>,
+    with_search_asset: bool,
 ) -> crate::tools::ToolServer {
-    server
+    let server = server
         .tool(ReadFile {
             sandbox: sandbox.clone(),
         })
@@ -60,7 +67,12 @@ pub fn register_sandboxed_tools(
         .tool(Glob)
         .tool(LineEdit)
         .tool(Fetch)
-        .tool(SearchAsset { sandbox })
+        .tool(crate::tools::structured::ExtractJson);
+    if with_search_asset {
+        server.tool(SearchAsset { sandbox })
+    } else {
+        server
+    }
 }
 
 // ── ReadFile ──
