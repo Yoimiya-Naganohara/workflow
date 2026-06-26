@@ -139,6 +139,29 @@ pub enum DoneReason {
 /// Event emitted during a tool-enabled chat stream.
 #[derive(Debug, Clone)]
 pub enum ToolEvent {
+    /// Agent starts processing (pi-agent-core: agent_start)
+    AgentStart,
+    /// Agent ends processing (pi-agent-core: agent_end)
+    AgentEnd,
+    /// A new turn begins (pi-agent-core: turn_start)
+    TurnStart,
+    /// A turn completes (pi-agent-core: turn_end)
+    TurnEnd,
+    /// A message begins streaming (pi-agent-core: message_start)
+    MessageStart,
+    /// A message completes (pi-agent-core: message_end)
+    MessageEnd,
+    /// A tool begins execution (pi-agent-core: tool_execution_start)
+    ToolExecutionStart {
+        name: String,
+        args: serde_json::Value,
+    },
+    /// A tool execution completes (pi-agent-core: tool_execution_end)
+    ToolExecutionEnd {
+        name: String,
+        result: String,
+        is_error: bool,
+    },
     Text(String),
     /// Reasoning/chain-of-thought content emitted by the model.
     /// Separate from Text so the TUI can render it with distinct styling

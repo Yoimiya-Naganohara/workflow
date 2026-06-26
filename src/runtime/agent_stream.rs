@@ -71,6 +71,15 @@ impl AgentRuntime {
                         }
                     }
                 }
+                // pi-agent-core lifecycle events — ignore in agent execution
+                crate::llm::ToolEvent::AgentStart
+                | crate::llm::ToolEvent::AgentEnd
+                | crate::llm::ToolEvent::TurnStart
+                | crate::llm::ToolEvent::TurnEnd
+                | crate::llm::ToolEvent::MessageStart
+                | crate::llm::ToolEvent::MessageEnd
+                | crate::llm::ToolEvent::ToolExecutionStart { .. }
+                | crate::llm::ToolEvent::ToolExecutionEnd { .. } => {}
                 crate::llm::ToolEvent::Done { reason } => {
                     done_received = true;
                     if reason == crate::llm::DoneReason::LoopTerminated

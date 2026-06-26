@@ -117,19 +117,20 @@ Messages may contain important context from sibling agents.",
             pool.mark_execution_start(&agent_id);
         }
 
-        // Phase 3: Execute LLM call (no lock held on runtime)
+        // Phase 3: Execute LLM call with our custom loop (no lock held)
         let (response, tool_bitmap) = if let Some(handle) = &tool_server {
             let additional_params = reasoning_effort
                 .as_ref()
                 .and_then(|effort| provider.reasoning_params(effort, &reasoning_options));
             let stream = match provider
-                .chat_with_tools_stream_mcp(
+                .chat_with_tools_loop(
                     &config.model_id,
                     &system_prompt,
                     &leaf_goal,
                     &[],
                     handle,
                     additional_params.as_ref(),
+                    crate::llm::chat::LoopConfig::default(),
                 )
                 .await
             {

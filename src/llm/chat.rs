@@ -1,5 +1,22 @@
 use super::*;
 use anyhow::Result;
+
+/// Callback after each tool round: (tool_names, text) → continue?
+pub type AfterToolFn = Box<dyn Fn(&[String], &str) -> bool + Send + 'static>;
+
+/// Callback before each round: (prev_tool_names) → allow?
+/// Return false to block the round.
+pub type BeforeToolFn = Box<dyn Fn(&[String]) -> bool + Send + 'static>;
+
+/// Configuration for `chat_with_tools_loop`.
+#[derive(Default)]
+pub struct LoopConfig {
+    /// Called after each round with (tool_names, text). Return false to stop.
+    pub after_tool: Option<AfterToolFn>,
+    /// Called before each round with previous round's tool names.
+    /// Return false to block the round.
+    pub before_tool: Option<BeforeToolFn>,
+}
 use async_stream::stream;
 use futures::StreamExt;
 use rig::OneOrMany;
@@ -80,6 +97,115 @@ impl LlmProvider {
     ) -> Result<ChatStream> {
         self.do_chat_stream(model, system, message, history, None)
             .await
+    }
+
+    /// Stream a chat response with multi-round loop and after_tool_call hook.
+    ///
+    /// Calls rig's multi_turn(1) in a loop. After each round, `after_tool`
+    /// is called with (tool_names, text). Return `true` to continue, `false` to stop.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn chat_with_tools_loop(
+        &self,
+        model: &str,
+        system: &str,
+        message: &str,
+        history: &[(String, String)],
+        tool_server: &ToolServerHandle,
+        additional_params: Option<&serde_json::Value>,
+        config: LoopConfig,
+    ) -> Result<ToolChatStream> {
+        let first_msg = message.to_string();
+        let sys = system.to_string();
+        let mdl = model.to_string();
+        let ts = tool_server.clone();
+        let provider_ref = self.clone();
+        let cfg = config;
+        let initial_history: Vec<(String, String)> = history.to_vec();
+        let addl = additional_params.cloned();
+
+        Ok(Box::pin(async_stream::stream! {
+            let mut current_msg = first_msg;
+            let mut hist = initial_history;
+            let mut prev_tools: Vec<String> = Vec::new();
+
+            for _ in 0..10 {
+                // before_tool: check if we should proceed
+                if let Some(ref bf) = cfg.before_tool {
+                    if !bf(&prev_tools) {
+                        yield ToolEvent::Text("Tool blocked by policy.".into());
+                        break;
+                    }
+                }
+
+                let round = match provider_ref
+                    .chat_with_tools_stream_mcp(&mdl, &sys, &current_msg, &hist, &ts, addl.as_ref())
+                    .await
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        yield ToolEvent::Text(format!("Error: {}", e));
+                        break;
+                    }
+                };
+
+                let mut text = String::new();
+                let mut tools: Vec<(String, serde_json::Value)> = Vec::new();
+                let mut done = false;
+
+                futures::pin_mut!(round);
+                use futures::StreamExt;
+
+                while let Some(event) = round.next().await {
+                    match &event {
+                        ToolEvent::Text(t) => text.push_str(t),
+                        ToolEvent::ToolCall { name, args } => tools.push((name.clone(), args.clone())),
+                        ToolEvent::Done { .. } => done = true,
+                        _ => {}
+                    }
+                    yield event;
+                    if done { break; }
+                }
+
+                if tools.is_empty() { break; }
+
+                // Emit ToolExecutionStart events
+                let tool_call_pairs: Vec<(String, String)> = tools.iter()
+                    .map(|(n, a)| (n.clone(), a.to_string()))
+                    .collect();
+
+                for (name, args) in &tools {
+                    yield ToolEvent::ToolExecutionStart {
+                        name: name.clone(),
+                        args: args.clone(),
+                    };
+                }
+
+                // Execute tools in parallel
+                let tool_results = crate::runtime::agent_loop::execute_tools_parallel(
+                    &tool_call_pairs, &ts,
+                ).await;
+
+                // Emit ToolExecutionEnd events
+                for r in &tool_results {
+                    yield ToolEvent::ToolExecutionEnd {
+                        name: r.name.clone(),
+                        result: r.result.clone(),
+                        is_error: r.is_error,
+                    };
+                }
+
+                // after_tool with results
+                let tool_names: Vec<String> = tools.iter().map(|(n, _)| n.clone()).collect();
+                if let Some(ref h) = cfg.after_tool {
+                    if !h(&tool_names, &text) { break; }
+                }
+
+                prev_tools = tool_names;
+                hist.push(("assistant".into(), text));
+                hist.push(("user".into(), "Continue.".into()));
+                current_msg = String::new();
+            }
+        }))
     }
 
     /// Stream a chat response with MCP tool-calling capability.

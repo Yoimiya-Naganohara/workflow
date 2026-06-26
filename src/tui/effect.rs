@@ -386,6 +386,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                                 done_received = true;
                                 break;
                             }
+                            _ => {}
                         }
                     }
                 },
