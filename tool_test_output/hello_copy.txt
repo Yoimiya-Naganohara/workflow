@@ -1,0 +1,5 @@
+Hello from BA喵! Test file for tool testing. 🐱
+Line 2
+Line 3
+Line 4 (appended)
+Line 5 (appended)

@@ -5,6 +5,7 @@
 
 pub mod agent;
 pub mod builtin;
+pub mod diff_edit;
 pub mod memo;
 pub mod sandbox;
 pub mod structured;
@@ -127,8 +128,8 @@ mod tests {
         assert!(names.contains(&"extract_json"), "missing extract_json");
         assert_eq!(
             defs.len(),
-            15,
-            "non-sandbox server has 15 built-in tools (search_asset excluded)"
+            16,
+            "non-sandbox server has 16 built-in tools (search_asset excluded)"
         );
 
         // Each definition has parameters with a type

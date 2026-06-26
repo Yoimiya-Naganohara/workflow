@@ -67,7 +67,8 @@ pub fn register_sandboxed_tools(
         .tool(Glob)
         .tool(LineEdit)
         .tool(Fetch)
-        .tool(crate::tools::structured::ExtractJson);
+        .tool(crate::tools::structured::ExtractJson)
+        .tool(crate::tools::diff_edit::DiffEdit);
     if with_search_asset {
         server.tool(SearchAsset { sandbox })
     } else {
