@@ -86,13 +86,11 @@ impl PoolHeader {
     }
 }
 
-#[allow(unused)]
 const _: () = assert!(size_of::<PoolHeader>() == HEADER_SIZE);
 
 // Assert that ExperienceEntry layout is stable for mmap (repr(C), no niche-optimized enums).
 // Option<u32> is 4 bytes (niche optimization makes None = 0, same size as u32).
 // If this assertion fails, the mmap file format is incompatible.
-#[allow(unused)]
 const _: () = assert!(size_of::<ExperienceEntry>() == 2104);
 
 // ---------------------------------------------------------------------------
@@ -610,16 +608,11 @@ mod tests {
         file.write_all(&999999u32.to_le_bytes()).unwrap();
         drop(file);
 
-        // Re-open — this should either detect corruption or cause UB
-        // BUG: no bounds validation on count vs file size
-        let result = std::panic::catch_unwind(|| {
-            let _pool = ExperiencePool::open(&path).unwrap();
-        });
-
-        // The open may panic (UB) or succeed with garbage data
-        if result.is_err() {
-            println!("BUG CONFIRMED: corrupted mmap count causes panic/UB");
-        }
+        // Re-open — bounds validation in load_from_file truncates
+        // the count to fit the file size, so this must succeed.
+        let pool = ExperiencePool::open(&path).unwrap();
+        // The corrupted count exceeds the file — truncated to actual max.
+        assert!(pool.len() <= 1, "corrupted count was truncated");
         std::fs::remove_file(&path).ok();
     }
 }

@@ -36,8 +36,6 @@ pub(crate) struct TableDef {
 #[derive(Debug, Clone)]
 pub(crate) struct ChatRenderOutput {
     pub rendered: Vec<RenderedLine>,
-    #[allow(dead_code)]
-    pub tables: Vec<TableDef>,
 }
 
 /// Compute how many terminal lines a table occupies.
@@ -182,7 +180,6 @@ pub(crate) fn build_chat_content(
     let content_width = width.max(20);
     let body_width = content_width.saturating_sub(4).max(1);
     let mut rendered: Vec<RenderedLine> = Vec::new();
-    let mut tables: Vec<TableDef> = Vec::new();
 
     for message in &state.messages {
         if matches!(message.role, MessageRole::System) {
@@ -275,7 +272,7 @@ pub(crate) fn build_chat_content(
                             table: Some(table_def.clone()),
                         });
                     }
-                    tables.push(table_def);
+                    // table_def is embedded in RenderedLine.table above
                     line_idx += table_h;
                     next_table_idx += 1;
                 }
@@ -303,7 +300,7 @@ pub(crate) fn build_chat_content(
         });
     }
 
-    ChatRenderOutput { rendered, tables }
+    ChatRenderOutput { rendered }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1527,7 +1524,6 @@ mod tests {
         };
         let output = ChatRenderOutput {
             rendered: vec![],
-            tables: vec![td.clone()],
         };
         let widget = output.build_table_widget(&td);
         let _ = widget;
@@ -1629,7 +1625,6 @@ mod tests {
             status: MessageStatus::Completed,
         }];
         let output = build_chat_content(&state, 80, 0, 2);
-        assert!(!output.tables.is_empty(), "should have at least one table");
         let table_line_count = output.rendered.iter().filter(|r| r.table.is_some()).count();
         assert!(table_line_count > 0, "should have table placeholder lines");
     }
