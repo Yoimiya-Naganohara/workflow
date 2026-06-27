@@ -331,7 +331,7 @@ mod dispatch_tests {
 
     use crate::core::types::TaskId;
     use crate::runtime::orchestration::*;
-    use crate::runtime::task_graph::{TaskGraph, TaskNode, TaskStatus};
+    use crate::runtime::task_graph::{TaskGraph, TaskStatus};
 
     fn setup_task(goal: &str) -> (TaskGraph, TaskId) {
         let mut graph = TaskGraph::new();
@@ -672,9 +672,7 @@ impl RoleSelector for DefaultRoleSelector {
 #[cfg(test)]
 mod cap_tests {
 
-    use crate::core::types::TaskId;
     use crate::runtime::orchestration::*;
-    use crate::runtime::task_graph::{TaskGraph, TaskNode, TaskStatus};
 
     #[test]
     fn test_capability_registry_prototypes_empty_by_default() {
@@ -922,9 +920,7 @@ impl GoalAnalyzer for MockGoalAnalyzer {
 #[cfg(test)]
 mod embedding_tests {
 
-    use crate::core::types::TaskId;
     use crate::runtime::orchestration::*;
-    use crate::runtime::task_graph::{TaskGraph, TaskNode, TaskStatus};
 
     #[test]
     fn test_mock_goal_analyzer() {
@@ -1044,9 +1040,8 @@ impl EscalationPolicy for DefaultEscalationPolicy {
 #[cfg(test)]
 mod escalation_tests {
 
-    use crate::core::types::TaskId;
     use crate::runtime::orchestration::*;
-    use crate::runtime::task_graph::{TaskGraph, TaskNode, TaskStatus};
+    use crate::runtime::task_graph::TaskNode;
 
     fn make_outcome(success: bool, latency_ms: u64) -> TaskOutcome {
         TaskOutcome {

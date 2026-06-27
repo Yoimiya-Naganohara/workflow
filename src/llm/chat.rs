@@ -16,6 +16,8 @@ pub struct LoopConfig {
     /// Called before each round with previous round's tool names.
     /// Return false to block the round.
     pub before_tool: Option<BeforeToolFn>,
+    /// Maximum number of tool-use rounds (default: 10).
+    pub max_rounds: Option<usize>,
 }
 use async_stream::stream;
 use futures::StreamExt;
@@ -128,7 +130,8 @@ impl LlmProvider {
             let mut hist = initial_history;
             let mut prev_tools: Vec<String> = Vec::new();
 
-            for _ in 0..10 {
+            let max_rounds = cfg.max_rounds.unwrap_or(10);
+            for _ in 0..max_rounds {
                 // before_tool: check if we should proceed
                 if let Some(ref bf) = cfg.before_tool {
                     if !bf(&prev_tools) {

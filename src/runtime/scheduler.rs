@@ -372,7 +372,6 @@ mod tests {
     use super::*;
     use crate::runtime::AgentRuntime;
     use crate::runtime::AgentRuntimeConfig;
-    use crate::runtime::event::RuntimeEvent;
     use crate::runtime::orchestration::{DispatchDecider, PipelineDispatchDecider};
     use std::sync::Arc;
     use tokio::sync::{RwLock, mpsc};
