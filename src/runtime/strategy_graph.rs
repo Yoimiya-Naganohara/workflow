@@ -916,7 +916,10 @@ mod tests {
                 picks.insert(id);
             }
         }
-        assert!(picks.len() >= 1, "at least one strategy should be selected");
+        assert!(
+            !picks.is_empty(),
+            "at least one strategy should be selected"
+        );
     }
 
     #[test]

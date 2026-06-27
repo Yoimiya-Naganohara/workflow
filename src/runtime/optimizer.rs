@@ -302,10 +302,12 @@ mod tests {
 
     #[test]
     fn test_min_experiences_constant() {
-        assert!(
-            MIN_EXPERIENCES >= 3,
-            "Need at least 3 for meaningful analysis"
-        );
+        const {
+            assert!(
+                MIN_EXPERIENCES >= 3,
+                "Need at least 3 for meaningful analysis"
+            )
+        };
     }
 
     #[test]

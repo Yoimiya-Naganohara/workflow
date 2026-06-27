@@ -405,16 +405,20 @@ mod tests {
 
     #[test]
     fn test_filtered_items_empty_filter() {
-        let mut palette = CommandPalette::default();
-        palette.level = PaletteLevel::Static(ROOT);
+        let palette = CommandPalette {
+            level: PaletteLevel::Static(ROOT),
+            ..CommandPalette::default()
+        };
         assert_eq!(palette.filtered_items().len(), ROOT.len());
     }
 
     #[test]
     fn test_filtered_items_with_filter() {
-        let mut palette = CommandPalette::default();
-        palette.level = PaletteLevel::Static(ROOT);
-        palette.filter = "role".to_string();
+        let palette = CommandPalette {
+            level: PaletteLevel::Static(ROOT),
+            filter: "role".to_string(),
+            ..CommandPalette::default()
+        };
         let items = palette.filtered_items();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, "role");
@@ -422,16 +426,20 @@ mod tests {
 
     #[test]
     fn test_filtered_items_no_match() {
-        let mut palette = CommandPalette::default();
-        palette.level = PaletteLevel::Static(ROOT);
-        palette.filter = "zzznonexistent".to_string();
+        let palette = CommandPalette {
+            level: PaletteLevel::Static(ROOT),
+            filter: "zzznonexistent".to_string(),
+            ..CommandPalette::default()
+        };
         assert!(palette.filtered_items().is_empty());
     }
 
     #[test]
     fn test_filtered_items_no_children_for_execute() {
-        let mut palette = CommandPalette::default();
-        palette.level = PaletteLevel::Static(ROOT);
+        let palette = CommandPalette {
+            level: PaletteLevel::Static(ROOT),
+            ..CommandPalette::default()
+        };
         let help_item = palette
             .filtered_items()
             .into_iter()

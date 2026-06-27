@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_try_parse_number_float() {
-        assert_eq!(try_parse_number("3.14"), serde_json::json!(3.14));
+        assert_eq!(try_parse_number("2.5"), serde_json::json!(2.5));
         assert_eq!(try_parse_number("-0.5"), serde_json::json!(-0.5));
     }
 

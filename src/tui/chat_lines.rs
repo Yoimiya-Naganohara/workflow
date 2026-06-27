@@ -1611,15 +1611,17 @@ mod tests {
     #[test]
     fn test_build_chat_content_with_table() {
         use crate::tui::state::{ChatMessage, MessageRole, MessageStatus};
-        let mut state = CoreState::default();
-        state.messages = vec![ChatMessage {
-            role: MessageRole::User,
-            content: "Show me data\n\n| Name | Value |\n| --- | --- |\n| A | 1 |\n| B | 2 |\n"
-                .to_string(),
-            reasoning: String::new(),
-            timestamp: "00:00".to_string(),
-            status: MessageStatus::Completed,
-        }];
+        let state = CoreState {
+            messages: vec![ChatMessage {
+                role: MessageRole::User,
+                content: "Show me data\n\n| Name | Value |\n| --- | --- |\n| A | 1 |\n| B | 2 |\n"
+                    .to_string(),
+                reasoning: String::new(),
+                timestamp: "00:00".to_string(),
+                status: MessageStatus::Completed,
+            }],
+            ..CoreState::default()
+        };
         let output = build_chat_content(&state, 80, 0, 2);
         let table_line_count = output.rendered.iter().filter(|r| r.table.is_some()).count();
         assert!(table_line_count > 0, "should have table placeholder lines");

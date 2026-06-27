@@ -816,7 +816,7 @@ host = \"0.0.0.0\"
             .await
             .unwrap();
         assert!(result.contains("sandboxed shell"));
-        assert!(result.contains(&sandbox.workdir.to_str().unwrap()));
+        assert!(result.contains(sandbox.workdir.to_str().unwrap()));
         println!("[SANDBOX] Shell runs inside workdir:\n{}", result);
 
         sandbox.cleanup();
@@ -917,7 +917,6 @@ host = \"0.0.0.0\"
                 assert!(my_file.exists(), "Agent {} file must exist", i);
 
                 sandbox.cleanup();
-                ()
             }));
         }
 

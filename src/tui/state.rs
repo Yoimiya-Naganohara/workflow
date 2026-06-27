@@ -903,6 +903,18 @@ impl Default for UiState {
 //  Full-chain integration tests
 // ============================================================================
 
+impl Default for ChatMessage {
+    fn default() -> Self {
+        Self {
+            role: MessageRole::System,
+            content: String::new(),
+            reasoning: String::new(),
+            timestamp: String::new(),
+            status: MessageStatus::Completed,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -912,10 +924,7 @@ mod tests {
     use crate::test_utils::MockEmbed;
 
     /// Simulate the handler's history-building logic (lines 718–735 of handler.rs).
-    fn build_chat_history<'a>(
-        messages: &'a [ChatMessage],
-        response_index: usize,
-    ) -> Vec<(&'a str, &'a str)> {
+    fn build_chat_history(messages: &[ChatMessage], response_index: usize) -> Vec<(&str, &str)> {
         let mut hist = Vec::new();
         for (i, msg) in messages.iter().enumerate() {
             if i >= response_index.saturating_sub(1) {
@@ -1297,17 +1306,5 @@ mod tests {
         }
 
         assert!(state.ui.cached_system_prompt.is_none());
-    }
-}
-
-impl Default for ChatMessage {
-    fn default() -> Self {
-        Self {
-            role: MessageRole::System,
-            content: String::new(),
-            reasoning: String::new(),
-            timestamp: String::new(),
-            status: MessageStatus::Completed,
-        }
     }
 }

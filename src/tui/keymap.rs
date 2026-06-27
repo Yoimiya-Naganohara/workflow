@@ -146,6 +146,71 @@ impl Default for Keymap {
     }
 }
 
+/// Format an `Action` as a human-readable description string.
+fn format_key(key: &KeyEvent) -> String {
+    let mut s = String::new();
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        s.push_str("Ctrl+");
+    }
+    if key.modifiers.contains(KeyModifiers::SHIFT) {
+        s.push_str("Shift+");
+    }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        s.push_str("Alt+");
+    }
+    match key.code {
+        KeyCode::Char(c) => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                s.push(c.to_ascii_lowercase());
+            } else {
+                s.push(c);
+            }
+        }
+        KeyCode::Enter => s.push_str("Enter"),
+        KeyCode::Esc => s.push_str("Esc"),
+        KeyCode::Tab => s.push_str("Tab"),
+        KeyCode::Backspace => s.push_str("Backspace"),
+        KeyCode::Up => s.push_str("Up"),
+        KeyCode::Down => s.push_str("Down"),
+        KeyCode::Left => s.push_str("Left"),
+        KeyCode::Right => s.push_str("Right"),
+        _ => s.push_str(&format!("{:?}", key.code)),
+    }
+    s
+}
+
+/// Format an `Action` as a human-readable description string.
+pub fn format_action(action: &Action) -> String {
+    match action {
+        Action::Quit => "Quit the application",
+        Action::CancelResponse => "Cancel current response",
+        Action::MoveUp => "Move up / Previous item",
+        Action::MoveDown => "Move down / Next item",
+        Action::MoveLeft => "Move cursor left",
+        Action::MoveRight => "Move cursor right",
+        Action::ScrollUp => "Scroll chat up",
+        Action::ScrollDown => "Scroll chat down",
+        Action::ScrollToTop => "Scroll to top",
+        Action::ScrollToBottom => "Scroll to bottom",
+        Action::Confirm => "Confirm selection",
+        Action::Cancel => "Cancel / Close dialog",
+        Action::SwitchPanel => "Switch panel",
+
+        Action::SendMessage => "Send message",
+        Action::TypeChar(_) => "Type character",
+        Action::DeleteChar => "Delete character",
+        Action::HistoryPrev => "Previous input history",
+        Action::HistoryNext => "Next input history",
+        Action::OpenProviderPicker => "Open provider picker",
+        Action::RestoreContext => "Restore previous context",
+        Action::OpenCommandPicker => "Open command picker",
+        Action::InspectAgent => "Inspect agent detail",
+
+        Action::None => "",
+    }
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,68 +360,4 @@ mod tests {
             Action::Quit
         );
     }
-}
-
-fn format_key(key: &KeyEvent) -> String {
-    let mut s = String::new();
-    if key.modifiers.contains(KeyModifiers::CONTROL) {
-        s.push_str("Ctrl+");
-    }
-    if key.modifiers.contains(KeyModifiers::SHIFT) {
-        s.push_str("Shift+");
-    }
-    if key.modifiers.contains(KeyModifiers::ALT) {
-        s.push_str("Alt+");
-    }
-    match key.code {
-        KeyCode::Char(c) => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                s.push(c.to_ascii_lowercase());
-            } else {
-                s.push(c);
-            }
-        }
-        KeyCode::Enter => s.push_str("Enter"),
-        KeyCode::Esc => s.push_str("Esc"),
-        KeyCode::Tab => s.push_str("Tab"),
-        KeyCode::Backspace => s.push_str("Backspace"),
-        KeyCode::Up => s.push_str("Up"),
-        KeyCode::Down => s.push_str("Down"),
-        KeyCode::Left => s.push_str("Left"),
-        KeyCode::Right => s.push_str("Right"),
-        _ => s.push_str(&format!("{:?}", key.code)),
-    }
-    s
-}
-
-/// Format an `Action` as a human-readable description string.
-pub fn format_action(action: &Action) -> String {
-    match action {
-        Action::Quit => "Quit the application",
-        Action::CancelResponse => "Cancel current response",
-        Action::MoveUp => "Move up / Previous item",
-        Action::MoveDown => "Move down / Next item",
-        Action::MoveLeft => "Move cursor left",
-        Action::MoveRight => "Move cursor right",
-        Action::ScrollUp => "Scroll chat up",
-        Action::ScrollDown => "Scroll chat down",
-        Action::ScrollToTop => "Scroll to top",
-        Action::ScrollToBottom => "Scroll to bottom",
-        Action::Confirm => "Confirm selection",
-        Action::Cancel => "Cancel / Close dialog",
-        Action::SwitchPanel => "Switch panel",
-
-        Action::SendMessage => "Send message",
-        Action::TypeChar(_) => "Type character",
-        Action::DeleteChar => "Delete character",
-        Action::HistoryPrev => "Previous input history",
-        Action::HistoryNext => "Next input history",
-        Action::OpenProviderPicker => "Open provider picker",
-        Action::RestoreContext => "Restore previous context",
-        Action::OpenCommandPicker => "Open command picker",
-        Action::InspectAgent => "Inspect agent detail",
-
-        Action::None => "",
-    }
-    .to_string()
 }

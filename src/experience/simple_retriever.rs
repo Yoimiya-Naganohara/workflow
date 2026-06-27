@@ -1,7 +1,7 @@
 //! Simple in-memory experience retriever — fallback when no persistent pool is configured.
 //!
 //! This is the minimal [`ExperienceRetrieval`] implementation used when
-//! [`DualTrackMemory`] is not injected. It stores experiences in a `Vec`
+//! [`DualTrackMemory`](crate::experience::dual_track::DualTrackMemory) is not injected. It stores experiences in a `Vec`
 //! and performs linear search with weighted cosine similarity.
 
 use crate::core::simd::cosine_similarity_384;
@@ -43,6 +43,8 @@ impl ExperienceRetrieval for SimpleRetriever {
         &self,
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
+        _role_template_id: Option<u32>,
+        _role_min_experiences: Option<usize>,
     ) -> Result<L1Assessment, SpawnRejection> {
         if self.experiences.is_empty() {
             // Cold start: allow with low confidence.
@@ -168,14 +170,15 @@ mod tests {
         let mut query = [0.0f32; EMBEDDING_DIM];
         query[0] = 1.0;
 
-        let result = retriever.check_confidence(&query, &query);
+        let result = retriever.check_confidence(&query, &query, None, None);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_cold_start_allows_spawn() {
         let retriever = SimpleRetriever::new(0.5);
-        let result = retriever.check_confidence(&[0.0; EMBEDDING_DIM], &[0.0; EMBEDDING_DIM]);
+        let result =
+            retriever.check_confidence(&[0.0; EMBEDDING_DIM], &[0.0; EMBEDDING_DIM], None, None);
         assert!(result.is_ok(), "empty pool should allow cold-start spawn");
         let assessment = result.unwrap();
         assert!(assessment.confidence < 0.2);
