@@ -1522,9 +1522,7 @@ mod tests {
             ],
             col_widths: vec![6, 6],
         };
-        let output = ChatRenderOutput {
-            rendered: vec![],
-        };
+        let output = ChatRenderOutput { rendered: vec![] };
         let widget = output.build_table_widget(&td);
         let _ = widget;
     }

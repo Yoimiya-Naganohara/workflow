@@ -30,10 +30,10 @@ jj log --limit 5           # see recent history
 ## Quick verification
 
 ```bash
-cargo check && cargo fmt --check && cargo clippy -- -D warnings && cargo test
+cargo check && cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo doc --no-deps
 ```
 
-CI enforces all four gates independently. Run them in this order to match CI and fail fast.
+CI enforces all five gates independently. Run in this order to match CI and fail fast.
 
 ## Build & run
 
