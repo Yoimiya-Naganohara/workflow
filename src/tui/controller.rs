@@ -299,6 +299,11 @@ pub async fn load_initial_state(state: &mut AppState) {
         }
     }
 
+    // ── Load persisted reflection config ──
+    if let Some(ref cfg) = persisted.reflection_config {
+        state.core.reflection = cfg.clone();
+    }
+
     // ── Load persisted role memos into the agent pool ──
     {
         let persisted_memos = crate::persistence::load_role_memos();

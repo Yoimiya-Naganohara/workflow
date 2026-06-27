@@ -8,8 +8,11 @@
 //! Semantic rules (relevance, semantic_promise) use the embedding service
 //! when available. Pass `None` to skip them and fall back to heuristic rules.
 
+use std::collections::HashMap;
+
 use crate::core::simd::cosine_similarity_384;
 use crate::llm::EmbeddingService;
+use async_trait::async_trait;
 
 // ═══════════════════════════════════════════════════════════════
 //  Types
@@ -26,142 +29,221 @@ pub enum RuleVerdict {
 /// Outcome of the Level 1 rules pass.
 #[derive(Debug, Clone)]
 pub struct RulesReport {
-    pub code_complete: RuleVerdict,
-    pub error_awareness: RuleVerdict,
-    pub multi_question_coverage: RuleVerdict,
-    pub empty_promise: RuleVerdict,
-    pub file_ref_used: RuleVerdict,
-    pub min_output: RuleVerdict,
-    /// Semantic: cosine similarity between question and response.
-    pub relevance: RuleVerdict,
-    /// Semantic: embedding-based check that future-tense promises are backed by tool calls.
-    pub semantic_promise: RuleVerdict,
+    /// Ordered list of rule results (one per registered rule).
+    pub results: Vec<RuleResult>,
+    /// True if no rule has verdict `Fail`.
     pub all_passed: bool,
 }
 
+impl RulesReport {
+    /// Return the verdict for a specific rule by ID.
+    pub fn verdict_for(&self, rule_id: RuleId) -> RuleVerdict {
+        self.results
+            .iter()
+            .find(|r| r.rule_id == rule_id)
+            .map(|r| r.verdict)
+            .unwrap_or(RuleVerdict::Skip)
+    }
+
+    /// Return rule IDs that failed.
+    pub fn failed_rules(&self) -> Vec<&str> {
+        self.results
+            .iter()
+            .filter(|r| r.verdict == RuleVerdict::Fail)
+            .map(|r| r.rule_id)
+            .collect()
+    }
+
+    /// Return results with `Fail` verdict.
+    pub fn failed_results(&self) -> Vec<&RuleResult> {
+        self.results
+            .iter()
+            .filter(|r| r.verdict == RuleVerdict::Fail)
+            .collect()
+    }
+
+    /// Return results with `Pass` verdict.
+    pub fn passed_results(&self) -> Vec<&RuleResult> {
+        self.results
+            .iter()
+            .filter(|r| r.verdict == RuleVerdict::Pass)
+            .collect()
+    }
+}
+
+/// Per-rule configuration.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RuleConfig {
+    pub enabled: bool,
+    /// Override threshold (None = use rule's built-in default).
+    pub threshold: Option<f32>,
+}
+
+impl Default for RuleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            threshold: None,
+        }
+    }
+}
+
 /// Configuration for the reflection engine.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ReflectionConfig {
     pub auto_reflect: bool,
     pub max_attempts: u8,
-    pub rules_enabled: [bool; 8],
+    pub rules: HashMap<String, RuleConfig>,
 }
 
 impl Default for ReflectionConfig {
     fn default() -> Self {
         Self {
-            auto_reflect: false, // default off, user opts in
-            max_attempts: 1,     // only one retry
-            rules_enabled: [true; 8],
+            auto_reflect: false,
+            max_attempts: 1,
+            rules: HashMap::from([
+                ("code_complete".to_string(), RuleConfig::default()),
+                ("error_awareness".to_string(), RuleConfig::default()),
+                ("multi_question_coverage".to_string(), RuleConfig::default()),
+                ("empty_promise".to_string(), RuleConfig::default()),
+                ("file_ref_used".to_string(), RuleConfig::default()),
+                ("min_output".to_string(), RuleConfig::default()),
+                ("relevance".to_string(), RuleConfig::default()),
+                ("semantic_promise".to_string(), RuleConfig::default()),
+            ]),
         }
     }
 }
 
-/// Indexes into the rules_enabled array.
-pub const RULE_CODE_COMPLETE: usize = 0;
-pub const RULE_ERROR_AWARENESS: usize = 1;
-pub const RULE_MULTI_QUESTION: usize = 2;
-pub const RULE_EMPTY_PROMISE: usize = 3;
-pub const RULE_FILE_REF_USED: usize = 4;
-pub const RULE_MIN_OUTPUT: usize = 5;
-pub const RULE_RELEVANCE: usize = 6;
-pub const RULE_SEMANTIC_PROMISE: usize = 7;
+impl ReflectionConfig {
+    /// Returns whether a rule is enabled (defaults to true if not configured).
+    pub fn is_rule_enabled(&self, rule_id: &str) -> bool {
+        self.rules.get(rule_id).map(|c| c.enabled).unwrap_or(true)
+    }
+
+    /// Returns an override threshold for a rule.
+    /// `None` → use the rule's built-in default.
+    pub fn rule_threshold(&self, rule_id: &str) -> Option<f32> {
+        self.rules.get(rule_id).and_then(|c| c.threshold)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Phase 1: ReflectionRule trait + Registry
+// ═══════════════════════════════════════════════════════════════
+
+/// Unique rule identifier string.
+pub type RuleId = &'static str;
+
+/// Context passed to every [`ReflectionRule::check`].
+pub struct RuleContext<'a> {
+    pub input: &'a str,
+    pub response: &'a str,
+    pub tool_trace: &'a str,
+    pub embedding: Option<&'a dyn EmbeddingService>,
+    /// Optional reflection config for runtime threshold overrides.
+    /// `None` → rules use their built-in defaults.
+    pub cfg: Option<&'a ReflectionConfig>,
+}
+
+/// Single rule evaluation result.
+#[derive(Debug, Clone)]
+pub struct RuleResult {
+    pub rule_id: RuleId,
+    pub verdict: RuleVerdict,
+}
+
+/// A single reflection rule that can be registered and checked.
+#[async_trait]
+pub trait ReflectionRule: Send + Sync {
+    fn id(&self) -> RuleId;
+    fn description(&self) -> &'static str;
+    fn default_enabled(&self) -> bool {
+        true
+    }
+    fn needs_embedding(&self) -> bool {
+        false
+    }
+    async fn check(&self, ctx: &RuleContext<'_>) -> RuleVerdict;
+}
+
+/// Registry of active reflection rules.
+pub struct RuleRegistry {
+    rules: Vec<Box<dyn ReflectionRule>>,
+}
+
+impl RuleRegistry {
+    /// Create an empty registry.
+    pub fn new() -> Self {
+        Self { rules: Vec::new() }
+    }
+
+    /// Register a rule.
+    pub fn register(&mut self, rule: Box<dyn ReflectionRule>) -> &mut Self {
+        self.rules.push(rule);
+        self
+    }
+
+    /// Look up a rule by ID.
+    pub fn get(&self, id: RuleId) -> Option<&dyn ReflectionRule> {
+        self.rules.iter().find(|r| r.id() == id).map(|r| r.as_ref())
+    }
+
+    /// Iterate over registered rules.
+    pub fn iter(&self) -> impl Iterator<Item = &dyn ReflectionRule> {
+        self.rules.iter().map(|r| r.as_ref())
+    }
+
+    /// Return all rule IDs.
+    pub fn ids(&self) -> Vec<RuleId> {
+        self.rules.iter().map(|r| r.id()).collect()
+    }
+
+    /// Number of registered rules.
+    pub fn len(&self) -> usize {
+        self.rules.len()
+    }
+
+    /// Whether the registry is empty.
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+}
+
+impl Default for RuleRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  Rules engine
 // ═══════════════════════════════════════════════════════════════
 
-/// Run all enabled Level 1 rules.
+/// Run all enabled Level 1 rules via the registry.
 ///
-/// When `embedding` is `Some`, semantic rules (relevance, semantic_promise)
-/// are evaluated via cosine similarity on 384-dim embeddings.
-/// When `embedding` is `None`, those rules are `Skip`ped.
+/// Each registered rule is checked in order. Semantic rules are skipped
+/// when `ctx.embedding` is `None`.
 pub async fn check_rules(
     cfg: &ReflectionConfig,
-    input: &str,
-    response: &str,
-    tool_trace: &str,
-    embedding: Option<&dyn EmbeddingService>,
+    registry: &RuleRegistry,
+    ctx: &RuleContext<'_>,
 ) -> RulesReport {
-    let code_complete = if cfg.rules_enabled[RULE_CODE_COMPLETE] {
-        rule_code_complete(input, response)
-    } else {
-        RuleVerdict::Skip
-    };
-
-    let error_awareness = if cfg.rules_enabled[RULE_ERROR_AWARENESS] {
-        rule_error_awareness(input, response, tool_trace)
-    } else {
-        RuleVerdict::Skip
-    };
-
-    let multi_question_coverage = if cfg.rules_enabled[RULE_MULTI_QUESTION] {
-        rule_multi_question_coverage(input, response)
-    } else {
-        RuleVerdict::Skip
-    };
-
-    let empty_promise = if cfg.rules_enabled[RULE_EMPTY_PROMISE] {
-        rule_empty_promise(response, tool_trace)
-    } else {
-        RuleVerdict::Skip
-    };
-
-    let file_ref_used = if cfg.rules_enabled[RULE_FILE_REF_USED] {
-        rule_file_ref_used(input, response)
-    } else {
-        RuleVerdict::Skip
-    };
-
-    let min_output = if cfg.rules_enabled[RULE_MIN_OUTPUT] {
-        rule_min_output(response)
-    } else {
-        RuleVerdict::Skip
-    };
-
-    // ── Semantic rules (require embedding service) ──
-    let relevance = if cfg.rules_enabled[RULE_RELEVANCE] {
-        if let Some(emb) = embedding {
-            rule_relevance(emb, input, response).await
-        } else {
-            RuleVerdict::Skip
+    let mut results: Vec<RuleResult> = Vec::new();
+    for rule in registry.iter() {
+        if cfg.is_rule_enabled(rule.id()) {
+            let verdict = rule.check(ctx).await;
+            results.push(RuleResult {
+                rule_id: rule.id(),
+                verdict,
+            });
         }
-    } else {
-        RuleVerdict::Skip
-    };
+    }
 
-    let semantic_promise = if cfg.rules_enabled[RULE_SEMANTIC_PROMISE] {
-        if let Some(emb) = embedding {
-            rule_semantic_promise(emb, response, tool_trace).await
-        } else {
-            RuleVerdict::Skip
-        }
-    } else {
-        RuleVerdict::Skip
-    };
-
-    // A rule is "passed" if it's either Pass or Skip (not applicable)
-    let results = [
-        code_complete,
-        error_awareness,
-        multi_question_coverage,
-        empty_promise,
-        file_ref_used,
-        min_output,
-        relevance,
-        semantic_promise,
-    ];
-    let all_passed = results.iter().all(|r| *r != RuleVerdict::Fail);
+    let all_passed = results.iter().all(|r| r.verdict != RuleVerdict::Fail);
 
     RulesReport {
-        code_complete,
-        error_awareness,
-        multi_question_coverage,
-        empty_promise,
-        file_ref_used,
-        min_output,
-        relevance,
-        semantic_promise,
+        results,
         all_passed,
     }
 }
@@ -184,11 +266,46 @@ fn rule_code_complete(input: &str, response: &str) -> RuleVerdict {
         return RuleVerdict::Fail;
     }
 
-    // Balance-check: count opening { } [ ] ( ) inside code blocks
-    // Simple check: count total braces in response
-    let opens: usize = response.matches(['{', '[', '(']).count();
-    let closes: usize = response.matches(['}', ']', ')']).count();
-    if opens != closes {
+    // Stack-based brace balance check scoped to code block regions only.
+    // This avoids false positives from natural-language braces outside blocks.
+    let mut in_block = false;
+    let mut stack: Vec<char> = Vec::new();
+    for line in response.lines() {
+        if line.trim_start().starts_with("```") {
+            in_block = !in_block;
+            continue;
+        }
+        if in_block {
+            for ch in line.chars() {
+                match ch {
+                    '{' | '[' | '(' => stack.push(ch),
+                    '}' => {
+                        if stack.last() == Some(&'{') {
+                            stack.pop();
+                        } else {
+                            return RuleVerdict::Fail;
+                        }
+                    }
+                    ']' => {
+                        if stack.last() == Some(&'[') {
+                            stack.pop();
+                        } else {
+                            return RuleVerdict::Fail;
+                        }
+                    }
+                    ')' => {
+                        if stack.last() == Some(&'(') {
+                            stack.pop();
+                        } else {
+                            return RuleVerdict::Fail;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    if !stack.is_empty() {
         return RuleVerdict::Fail;
     }
 
@@ -201,16 +318,25 @@ fn rule_error_awareness(_input: &str, response: &str, tool_trace: &str) -> RuleV
         || tool_trace.to_lowercase().contains("stderr")
         || tool_trace.to_lowercase().contains("fail")
         || tool_trace.contains("✗")
-        || tool_trace.contains("✘");
+        || tool_trace.contains("✘")
+        || tool_trace.contains("错误")
+        || tool_trace.contains("失败")
+        || tool_trace.contains("异常")
+        || tool_trace.contains("报错");
     if !has_error {
         return RuleVerdict::Skip;
     }
 
-    let acknowledges = response.to_lowercase().contains("error")
-        || response.to_lowercase().contains("fail")
-        || response.to_lowercase().contains("bug")
-        || response.to_lowercase().contains("修正")
-        || response.to_lowercase().contains("问题");
+    let ack_lower = response.to_lowercase();
+    let acknowledges = ack_lower.contains("error")
+        || ack_lower.contains("fail")
+        || ack_lower.contains("bug")
+        || response.contains("修正")
+        || response.contains("问题")
+        || response.contains("错误")
+        || response.contains("失败")
+        || response.contains("报错")
+        || response.contains("可以忽略");
     if !acknowledges {
         return RuleVerdict::Fail;
     }
@@ -220,10 +346,24 @@ fn rule_error_awareness(_input: &str, response: &str, tool_trace: &str) -> RuleV
 
 /// Rule 3: If user asked multiple questions, response should be proportionally long.
 fn rule_multi_question_coverage(input: &str, response: &str) -> RuleVerdict {
-    let question_count = input.chars().filter(|c| *c == '?').count();
+    let question_count = input.chars().filter(|c| *c == '?' || *c == '？').count();
     let numbered_items = input
         .lines()
-        .filter(|l| l.trim().starts_with(|c: char| c.is_ascii_digit()))
+        .filter(|l| {
+            let t = l.trim();
+            t.starts_with(|c: char| c.is_ascii_digit())
+                || t.starts_with("一、")
+                || t.starts_with("二、")
+                || t.starts_with("三、")
+                || t.starts_with("四、")
+                || t.starts_with("五、")
+                || t.starts_with("第一")
+                || t.starts_with("第二")
+                || t.starts_with("第三")
+                || t.starts_with("首先")
+                || t.starts_with("其次")
+                || t.starts_with("最后")
+        })
         .count();
     let total_questions = question_count + numbered_items;
 
@@ -231,7 +371,7 @@ fn rule_multi_question_coverage(input: &str, response: &str) -> RuleVerdict {
         return RuleVerdict::Skip;
     }
 
-    let min_len = total_questions * 50;
+    let min_len = total_questions * 30;
     if response.len() < min_len {
         return RuleVerdict::Fail;
     }
@@ -239,12 +379,12 @@ fn rule_multi_question_coverage(input: &str, response: &str) -> RuleVerdict {
     RuleVerdict::Pass
 }
 
+/// Shared keywords for future-tense promise detection across heuristic and semantic rules.
+const PROMISE_INDICATORS: &[&str] = &["I will", "接下来", "下一步", "接下来我会"];
+
 /// Rule 4: If response makes future-tense promises, there must be tool calls to back them up.
 fn rule_empty_promise(response: &str, tool_trace: &str) -> RuleVerdict {
-    let has_promise = response.contains("I will")
-        || response.contains("接下来")
-        || response.contains("下一步")
-        || response.contains("接下来我会");
+    let has_promise = PROMISE_INDICATORS.iter().any(|p| response.contains(p));
     if !has_promise {
         return RuleVerdict::Skip;
     }
@@ -300,26 +440,30 @@ fn rule_min_output(response: &str) -> RuleVerdict {
 //  Semantic rules (embedding-based)
 // ═══════════════════════════════════════════════════════════════
 
-/// Minimum cosine similarity threshold for semantic rules.
-const SEMANTIC_THRESHOLD: f32 = 0.30;
+/// Built-in default threshold for semantic rules.
+const SEMANTIC_THRESHOLD: f32 = 0.50;
 
 /// Rule 7: Semantic relevance — embed question + response, check cosine
 /// similarity.  A low score indicates the response is not about the question.
+///
+/// When `threshold_override` is `Some`, it takes precedence over `SEMANTIC_THRESHOLD`.
 async fn rule_relevance(
     embedding: &dyn EmbeddingService,
     input: &str,
     response: &str,
+    threshold_override: Option<f32>,
 ) -> RuleVerdict {
+    let threshold = threshold_override.unwrap_or(SEMANTIC_THRESHOLD);
     let (q_res, r_res) = tokio::join!(embedding.embed(input), embedding.embed(response));
     match (q_res, r_res) {
         (Ok(q), Ok(r)) => {
             let sim = cosine_similarity_384(&q, &r);
-            if sim < SEMANTIC_THRESHOLD {
+            if sim < threshold {
                 tracing::debug!(
                     input_len = input.len(),
                     response_len = response.len(),
                     sim,
-                    SEMANTIC_THRESHOLD,
+                    threshold,
                     "relevance rule FAIL"
                 );
                 RuleVerdict::Fail
@@ -335,20 +479,18 @@ async fn rule_relevance(
 /// promises, embed the promise segment and the tool trace, and verify they
 /// are semantically related.  Falls back to the heuristic rule when the
 /// tool trace is empty.
+///
+/// When `threshold_override` is `Some`, it takes precedence over `SEMANTIC_THRESHOLD`.
 async fn rule_semantic_promise(
     embedding: &dyn EmbeddingService,
     response: &str,
     tool_trace: &str,
+    threshold_override: Option<f32>,
 ) -> RuleVerdict {
     // Extract the first sentence containing a promise indicator.
     let promise_sentence = response
         .lines()
-        .find(|l| {
-            l.contains("I will")
-                || l.contains("接下来")
-                || l.contains("下一步")
-                || l.contains("接下来我会")
-        })
+        .find(|l| PROMISE_INDICATORS.iter().any(|p| l.contains(p)))
         .unwrap_or("");
 
     if promise_sentence.is_empty() {
@@ -361,6 +503,7 @@ async fn rule_semantic_promise(
         return RuleVerdict::Skip;
     }
 
+    let threshold = threshold_override.unwrap_or(SEMANTIC_THRESHOLD);
     let (p_res, t_res) = tokio::join!(
         embedding.embed(promise_sentence),
         embedding.embed(tool_trace)
@@ -368,8 +511,8 @@ async fn rule_semantic_promise(
     match (p_res, t_res) {
         (Ok(p), Ok(t)) => {
             let sim = cosine_similarity_384(&p, &t);
-            if sim < SEMANTIC_THRESHOLD {
-                tracing::debug!(sim, SEMANTIC_THRESHOLD, "semantic_promise rule FAIL");
+            if sim < threshold {
+                tracing::debug!(sim, threshold, "semantic_promise rule FAIL");
                 RuleVerdict::Fail
             } else {
                 RuleVerdict::Pass
@@ -411,6 +554,163 @@ pub fn build_continuation_feedback(failed_rules: &[&str]) -> String {
     }
     msg.push_str("\nPlease address the above and provide a complete response.");
     msg
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Phase 2: Rule struct implementations
+// ═══════════════════════════════════════════════════════════════
+
+pub struct CodeCompleteRule;
+pub struct ErrorAwarenessRule;
+pub struct MultiQuestionCoverageRule;
+pub struct EmptyPromiseRule;
+pub struct FileRefUsedRule;
+pub struct MinOutputRule;
+
+pub struct RelevanceRule {
+    pub threshold: f32,
+}
+
+pub struct SemanticPromiseRule {
+    pub threshold: f32,
+}
+
+#[async_trait]
+impl ReflectionRule for CodeCompleteRule {
+    fn id(&self) -> RuleId {
+        "code_complete"
+    }
+    fn description(&self) -> &'static str {
+        "Code blocks must be complete with balanced braces"
+    }
+    async fn check(&self, ctx: &RuleContext<'_>) -> RuleVerdict {
+        rule_code_complete(ctx.input, ctx.response)
+    }
+}
+
+#[async_trait]
+impl ReflectionRule for ErrorAwarenessRule {
+    fn id(&self) -> RuleId {
+        "error_awareness"
+    }
+    fn description(&self) -> &'static str {
+        "Tool call errors must be acknowledged in the response"
+    }
+    async fn check(&self, ctx: &RuleContext<'_>) -> RuleVerdict {
+        rule_error_awareness(ctx.input, ctx.response, ctx.tool_trace)
+    }
+}
+
+#[async_trait]
+impl ReflectionRule for MultiQuestionCoverageRule {
+    fn id(&self) -> RuleId {
+        "multi_question_coverage"
+    }
+    fn description(&self) -> &'static str {
+        "Multiple questions must receive a proportionally long response"
+    }
+    async fn check(&self, ctx: &RuleContext<'_>) -> RuleVerdict {
+        rule_multi_question_coverage(ctx.input, ctx.response)
+    }
+}
+
+#[async_trait]
+impl ReflectionRule for EmptyPromiseRule {
+    fn id(&self) -> RuleId {
+        "empty_promise"
+    }
+    fn description(&self) -> &'static str {
+        "Future-tense promises must be backed by tool calls"
+    }
+    async fn check(&self, ctx: &RuleContext<'_>) -> RuleVerdict {
+        rule_empty_promise(ctx.response, ctx.tool_trace)
+    }
+}
+
+#[async_trait]
+impl ReflectionRule for FileRefUsedRule {
+    fn id(&self) -> RuleId {
+        "file_ref_used"
+    }
+    fn description(&self) -> &'static str {
+        "@file references in input must be addressed in the response"
+    }
+    async fn check(&self, ctx: &RuleContext<'_>) -> RuleVerdict {
+        rule_file_ref_used(ctx.input, ctx.response)
+    }
+}
+
+#[async_trait]
+impl ReflectionRule for MinOutputRule {
+    fn id(&self) -> RuleId {
+        "min_output"
+    }
+    fn description(&self) -> &'static str {
+        "Response must have meaningful length"
+    }
+    async fn check(&self, ctx: &RuleContext<'_>) -> RuleVerdict {
+        rule_min_output(ctx.response)
+    }
+}
+
+#[async_trait]
+impl ReflectionRule for RelevanceRule {
+    fn id(&self) -> RuleId {
+        "relevance"
+    }
+    fn description(&self) -> &'static str {
+        "Response must be semantically related to the question"
+    }
+    fn needs_embedding(&self) -> bool {
+        true
+    }
+    async fn check(&self, ctx: &RuleContext<'_>) -> RuleVerdict {
+        if let Some(emb) = ctx.embedding {
+            let override_threshold = ctx.cfg.and_then(|c| c.rule_threshold(self.id()));
+            rule_relevance(emb, ctx.input, ctx.response, override_threshold).await
+        } else {
+            RuleVerdict::Skip
+        }
+    }
+}
+
+#[async_trait]
+impl ReflectionRule for SemanticPromiseRule {
+    fn id(&self) -> RuleId {
+        "semantic_promise"
+    }
+    fn description(&self) -> &'static str {
+        "Future-tense promises must be semantically backed by tool execution"
+    }
+    fn needs_embedding(&self) -> bool {
+        true
+    }
+    async fn check(&self, ctx: &RuleContext<'_>) -> RuleVerdict {
+        if let Some(emb) = ctx.embedding {
+            let override_threshold = ctx.cfg.and_then(|c| c.rule_threshold(self.id()));
+            rule_semantic_promise(emb, ctx.response, ctx.tool_trace, override_threshold).await
+        } else {
+            RuleVerdict::Skip
+        }
+    }
+}
+
+/// Build the default registry with all 8 rules registered.
+pub fn default_registry() -> RuleRegistry {
+    let mut reg = RuleRegistry::new();
+    reg.register(Box::new(CodeCompleteRule));
+    reg.register(Box::new(ErrorAwarenessRule));
+    reg.register(Box::new(MultiQuestionCoverageRule));
+    reg.register(Box::new(EmptyPromiseRule));
+    reg.register(Box::new(FileRefUsedRule));
+    reg.register(Box::new(MinOutputRule));
+    reg.register(Box::new(RelevanceRule {
+        threshold: SEMANTIC_THRESHOLD,
+    }));
+    reg.register(Box::new(SemanticPromiseRule {
+        threshold: SEMANTIC_THRESHOLD,
+    }));
+    reg
 }
 
 #[cfg(test)]
@@ -510,17 +810,18 @@ mod tests {
     #[tokio::test]
     async fn test_check_rules_all_pass_no_embedding() {
         let cfg = ReflectionConfig::default();
-        let report = check_rules(
-            &cfg,
-            "hello",
-            "this is a sufficiently long and complete response to the user's greeting",
-            "",
-            None, // no embedding → semantic rules are Skip
-        )
-        .await;
+        let registry = default_registry();
+        let ctx = RuleContext {
+            input: "hello",
+            response: "this is a sufficiently long and complete response to the user's greeting",
+            tool_trace: "",
+            embedding: None,
+            cfg: Some(&cfg),
+        };
+        let report = check_rules(&cfg, &registry, &ctx).await;
         assert!(report.all_passed);
-        assert_eq!(report.relevance, RuleVerdict::Skip);
-        assert_eq!(report.semantic_promise, RuleVerdict::Skip);
+        assert_eq!(report.verdict_for("relevance"), RuleVerdict::Skip);
+        assert_eq!(report.verdict_for("semantic_promise"), RuleVerdict::Skip);
     }
 
     #[test]
@@ -547,6 +848,7 @@ mod tests {
             &emb,
             "how to sort a vector in Rust?",
             "Use sort() on Vec<T>.",
+            None,
         )
         .await;
         assert_eq!(r, RuleVerdict::Pass);
@@ -558,7 +860,13 @@ mod tests {
             eprintln!("SKIP: ONNX/fastembed not available");
             return;
         };
-        let r = rule_relevance(&emb, "how to bake a cake", "The quick brown fox jumps.").await;
+        let r = rule_relevance(
+            &emb,
+            "how to bake a cake",
+            "The quick brown fox jumps.",
+            None,
+        )
+        .await;
         assert_eq!(r, RuleVerdict::Fail);
     }
 
@@ -568,7 +876,7 @@ mod tests {
             eprintln!("SKIP: ONNX/fastembed not available");
             return;
         };
-        let r = rule_semantic_promise(&emb, "Done!", "read_file -> ok").await;
+        let r = rule_semantic_promise(&emb, "Done!", "read_file -> ok", None).await;
         assert_eq!(r, RuleVerdict::Skip);
     }
 
@@ -578,7 +886,7 @@ mod tests {
             eprintln!("SKIP: ONNX/fastembed not available");
             return;
         };
-        let r = rule_semantic_promise(&emb, "I will fix the bug now", "").await;
+        let r = rule_semantic_promise(&emb, "I will fix the bug now", "", None).await;
         assert_eq!(r, RuleVerdict::Skip);
     }
 
@@ -593,6 +901,7 @@ mod tests {
             &emb,
             "I will install the required npm packages",
             "npm install: added 42 packages in 3.2s",
+            None,
         )
         .await;
         assert_eq!(r, RuleVerdict::Pass);
@@ -609,6 +918,7 @@ mod tests {
             &emb,
             "I will install the required npm packages",
             "aws s3 sync /dist s3://bucket",
+            None,
         )
         .await;
         assert_eq!(r, RuleVerdict::Fail);
@@ -621,15 +931,155 @@ mod tests {
             return;
         };
         let cfg = ReflectionConfig::default();
-        let report = check_rules(
-            &cfg,
-            "hello",
-            "this is a sufficiently long and complete response to the user's greeting",
-            "",
-            Some(&emb),
-        )
-        .await;
+        let registry = default_registry();
+        let ctx = RuleContext {
+            input: "how do I sort a vector in Rust in descending order",
+            response: "You can sort a vector in descending order by calling sort() then reverse(), or use sort_by() with a custom comparator. Both approaches work in-place.",
+            tool_trace: "",
+            embedding: Some(&emb as &dyn crate::llm::EmbeddingService),
+            cfg: Some(&cfg),
+        };
+        let report = check_rules(&cfg, &registry, &ctx).await;
         assert!(report.all_passed);
-        assert_eq!(report.relevance, RuleVerdict::Pass);
+        assert_eq!(report.verdict_for("relevance"), RuleVerdict::Pass);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Phase 1 + 2: Trait / Registry / Rule structs
+    // ═══════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_default_registry_has_eight_rules() {
+        let reg = default_registry();
+        assert_eq!(reg.len(), 8);
+    }
+
+    #[test]
+    fn test_default_registry_all_ids_unique() {
+        let reg = default_registry();
+        let ids = reg.ids();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len(), "duplicate rule IDs");
+    }
+
+    #[test]
+    fn test_registry_get_finds_rule() {
+        let reg = default_registry();
+        let rule = reg.get("code_complete").expect("code_complete rule");
+        assert_eq!(rule.id(), "code_complete");
+        assert!(!rule.needs_embedding());
+    }
+
+    #[test]
+    fn test_registry_get_missing_returns_none() {
+        let reg = default_registry();
+        assert!(reg.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_registry_empty_new() {
+        let reg = RuleRegistry::new();
+        assert!(reg.is_empty());
+        assert_eq!(reg.len(), 0);
+    }
+
+    #[test]
+    fn test_rule_struct_code_complete_delegates() {
+        let rule = CodeCompleteRule;
+        let ctx = RuleContext {
+            input: "implement a function",
+            response: "```rust\nfn main() {}\n```",
+            tool_trace: "",
+            embedding: None,
+            cfg: None,
+        };
+        let result = futures::executor::block_on(rule.check(&ctx));
+        assert_eq!(result, RuleVerdict::Pass);
+    }
+
+    #[test]
+    fn test_rule_struct_code_complete_fail() {
+        let rule = CodeCompleteRule;
+        let ctx = RuleContext {
+            input: "write a function",
+            response: "just do it",
+            tool_trace: "",
+            embedding: None,
+            cfg: None,
+        };
+        let result = futures::executor::block_on(rule.check(&ctx));
+        assert_eq!(result, RuleVerdict::Fail);
+    }
+
+    #[test]
+    fn test_rule_struct_error_awareness_skip() {
+        let rule = ErrorAwarenessRule;
+        let ctx = RuleContext {
+            input: "hello",
+            response: "fine",
+            tool_trace: "",
+            embedding: None,
+            cfg: None,
+        };
+        let result = futures::executor::block_on(rule.check(&ctx));
+        assert_eq!(result, RuleVerdict::Skip);
+    }
+
+    #[test]
+    fn test_rule_struct_empty_promise_fail() {
+        let rule = EmptyPromiseRule;
+        let ctx = RuleContext {
+            input: "fix it",
+            response: "I will fix it later",
+            tool_trace: "",
+            embedding: None,
+            cfg: None,
+        };
+        let result = futures::executor::block_on(rule.check(&ctx));
+        assert_eq!(result, RuleVerdict::Fail);
+    }
+
+    #[test]
+    fn test_rule_struct_min_output_pass() {
+        let rule = MinOutputRule;
+        let ctx = RuleContext {
+            input: "hello",
+            response: "this is a long enough response to pass the rule",
+            tool_trace: "",
+            embedding: None,
+            cfg: None,
+        };
+        let result = futures::executor::block_on(rule.check(&ctx));
+        assert_eq!(result, RuleVerdict::Pass);
+    }
+
+    #[test]
+    fn test_rule_struct_relevance_skips_without_embedding() {
+        let rule = RelevanceRule { threshold: 0.5 };
+        let ctx = RuleContext {
+            input: "hello",
+            response: "world",
+            tool_trace: "",
+            embedding: None,
+            cfg: None,
+        };
+        let result = futures::executor::block_on(rule.check(&ctx));
+        assert_eq!(result, RuleVerdict::Skip);
+    }
+
+    #[test]
+    fn test_rule_struct_file_ref_used_fail() {
+        let rule = FileRefUsedRule;
+        let ctx = RuleContext {
+            input: "check @src/main.rs",
+            response: "it looks fine",
+            tool_trace: "",
+            embedding: None,
+            cfg: None,
+        };
+        let result = futures::executor::block_on(rule.check(&ctx));
+        assert_eq!(result, RuleVerdict::Fail);
     }
 }

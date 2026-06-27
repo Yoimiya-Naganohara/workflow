@@ -536,6 +536,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
             abort_registration,
         } => {
             let cfg = crate::reflection::ReflectionConfig::default();
+            let registry = crate::reflection::default_registry();
             let tool_trace = ""; // tools are not tracked in this context yet
 
             // Run rules. Semantic rules need the embedding service.
@@ -551,35 +552,32 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                 let embed_ref: Option<&dyn crate::llm::EmbeddingService> = embed_service
                     .as_ref()
                     .map(|s| s.as_ref() as &dyn crate::llm::EmbeddingService);
-                check_rules(&cfg, &input, &full_response, tool_trace, embed_ref).await
+                let ctx = crate::reflection::RuleContext {
+                    input: &input,
+                    response: &full_response,
+                    tool_trace,
+                    embedding: embed_ref,
+                    cfg: Some(&cfg),
+                };
+                check_rules(&cfg, &registry, &ctx).await
             };
 
             if !report.all_passed {
-                // Rules failed → collect which rules failed
+                // Rules failed → map rule IDs to Chinese descriptions
                 let mut failed = Vec::new();
-                if report.code_complete == crate::reflection::RuleVerdict::Fail {
-                    failed.push("代码不完整或括号不匹配");
-                }
-                if report.error_awareness == crate::reflection::RuleVerdict::Fail {
-                    failed.push("未处理工具调用错误");
-                }
-                if report.multi_question_coverage == crate::reflection::RuleVerdict::Fail {
-                    failed.push("多问题回复过短");
-                }
-                if report.empty_promise == crate::reflection::RuleVerdict::Fail {
-                    failed.push("有空头承诺但无工具调用");
-                }
-                if report.file_ref_used == crate::reflection::RuleVerdict::Fail {
-                    failed.push("未引用用户提供的 @file");
-                }
-                if report.min_output == crate::reflection::RuleVerdict::Fail {
-                    failed.push("回复过短");
-                }
-                if report.relevance == crate::reflection::RuleVerdict::Fail {
-                    failed.push("回复与问题语义不相关");
-                }
-                if report.semantic_promise == crate::reflection::RuleVerdict::Fail {
-                    failed.push("承诺内容与工具调用语义不匹配");
+                for r in report.failed_results() {
+                    let msg = match r.rule_id {
+                        "code_complete" => "代码不完整或括号不匹配",
+                        "error_awareness" => "未处理工具调用错误",
+                        "multi_question_coverage" => "多问题回复过短",
+                        "empty_promise" => "有空头承诺但无工具调用",
+                        "file_ref_used" => "未引用用户提供的 @file",
+                        "min_output" => "回复过短",
+                        "relevance" => "回复与问题语义不相关",
+                        "semantic_promise" => "承诺内容与工具调用语义不匹配",
+                        other => other,
+                    };
+                    failed.push(msg);
                 }
 
                 let feedback = crate::reflection::build_continuation_feedback(&failed);

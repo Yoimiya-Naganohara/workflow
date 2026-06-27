@@ -462,7 +462,7 @@ impl AppState {
                 )));
             }
             AppEvent::ChatToolCall {
-                response_index,
+                response_index: _,
                 name,
                 args,
                 timestamp: _,
@@ -486,38 +486,23 @@ impl AppState {
                     args
                 };
 
-                if let Some(slot) =
-                    find_streaming_slot_response(&self.core.messages, response_index)
-                {
-                    if let Some(msg) = self.core.messages.get_mut(slot) {
-                        if !msg.content.is_empty() {
-                            msg.content.push('\n');
-                        }
-                        msg.content.push_str(&name);
-                        for arg_line in args_trunc.lines() {
-                            msg.content.push('\n');
-                            msg.content.push_str(arg_line);
-                        }
-                        // Trailing blank line to visually separate tool calls
-                        // from subsequent text or next tool call.
-                        msg.content.push('\n');
-                    }
-                } else {
-                    let mut content = name;
-                    for arg_line in args_trunc.lines() {
-                        content.push('\n');
-                        content.push_str(arg_line);
-                    }
-                    // Trailing blank line to visually separate tool calls.
+                // Always create a separate Decision message so tool calls get
+                // rendered with the "> " prefix by tool_call_lines().
+                // Previously tool calls were appended to the streaming message
+                // content, which rendered them as unstyled raw text.
+                let mut content = name;
+                for arg_line in args_trunc.lines() {
                     content.push('\n');
-                    self.core.messages.push(ChatMessage {
-                        role: MessageRole::Decision,
-                        content,
-                        reasoning: String::new(),
-                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                        status: MessageStatus::Completed,
-                    });
+                    content.push_str(arg_line);
                 }
+                content.push('\n');
+                self.core.messages.push(ChatMessage {
+                    role: MessageRole::Decision,
+                    content,
+                    reasoning: String::new(),
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                    status: MessageStatus::Completed,
+                });
                 self.recalc_tokens();
             }
             AppEvent::SelfCheckResult {

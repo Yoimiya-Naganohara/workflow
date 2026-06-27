@@ -7,6 +7,7 @@ use tracing;
 use crate::agent::MemoEntry;
 use crate::core::types::SelectedModel;
 use crate::models::{CustomProvider, ModelRegistry};
+use crate::reflection::ReflectionConfig;
 
 // ============================================================================
 //  KeyStore — controlled API key persistence
@@ -92,6 +93,9 @@ pub struct PersistedState {
     /// Shared by all agents with the same role across restarts.
     #[serde(default)]
     pub role_memos: HashMap<String, Vec<MemoEntry>>,
+    /// Persisted reflection engine configuration.
+    #[serde(default)]
+    pub reflection_config: Option<ReflectionConfig>,
 }
 
 fn config_dir() -> Result<PathBuf> {
@@ -326,6 +330,13 @@ pub fn save_custom_provider(provider: &CustomProvider) -> Result<()> {
 pub fn remove_custom_provider(custom_id: &str) -> Result<()> {
     let mut state = load();
     state.custom_providers.retain(|p| p.id != custom_id);
+    save(&state)
+}
+
+/// Persist reflection engine configuration to state.json.
+pub fn save_reflection_config(cfg: &ReflectionConfig) -> Result<()> {
+    let mut state = load();
+    state.reflection_config = Some(cfg.clone());
     save(&state)
 }
 

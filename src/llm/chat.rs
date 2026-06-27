@@ -410,6 +410,13 @@ impl LlmProvider {
                             }
                         }
                     }
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::ReasoningDelta { reasoning, .. },
+                    )) => {
+                        if !reasoning.is_empty() {
+                            yield Ok(reasoning);
+                        }
+                    }
                     Ok(MultiTurnStreamItem::FinalResponse(_)) => break,
                     Ok(_) => {}
                     Err(err) => {
@@ -551,6 +558,13 @@ impl LlmProvider {
                             if let rig::message::ReasoningContent::Text { text, .. } = block {
                                 yield ToolEvent::Reasoning(text);
                             }
+                        }
+                    }
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::ReasoningDelta { reasoning, .. },
+                    )) => {
+                        if !reasoning.is_empty() {
+                            yield ToolEvent::Reasoning(reasoning);
                         }
                     }
                     Ok(MultiTurnStreamItem::CompletionCall(call)) => {

@@ -174,7 +174,7 @@ impl ChatRenderOutput {
 pub(crate) fn build_chat_content(
     state: &CoreState,
     width: usize,
-    _think_frame: u8,
+    think_frame: u8,
     think_level: u8,
 ) -> ChatRenderOutput {
     let content_width = width.max(20);
@@ -222,7 +222,7 @@ pub(crate) fn build_chat_content(
             };
             let result = render_md(&text, body_width);
             for md_line in result.lines {
-                let mut styled = vec![Span::styled("┃", Style::default().fg(style::TEXT_MUTED))];
+                let mut styled = vec![Span::styled("┊", Style::default().fg(style::TEXT_MUTED))];
                 styled.extend(md_line.spans.into_iter().map(|mut s| {
                     s.style = s.style.add_modifier(Modifier::DIM);
                     s
@@ -245,6 +245,26 @@ pub(crate) fn build_chat_content(
             style::BLUE
         };
         let bar_char = "┃";
+
+        // Animated thinking indicator for messages in Thinking state with no content yet.
+        if message.status == crate::tui::state::MessageStatus::Thinking
+            && message.content.is_empty()
+        {
+            let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let phase = (think_frame as usize / 2) % spinner.len();
+            let mut styled = vec![Span::styled(bar_char, Style::default().fg(bar_color))];
+            styled.push(Span::styled(
+                format!(" {} thinking…", spinner[phase]),
+                Style::default()
+                    .fg(style::YELLOW)
+                    .add_modifier(Modifier::DIM),
+            ));
+            rendered.push(RenderedLine {
+                line: Line::from(styled),
+                table: None,
+            });
+            continue;
+        }
 
         let result = render_md(&message.content, body_width);
 
@@ -459,9 +479,10 @@ fn tool_call_lines(
         }
     }
 
-    // ── Emit one compact line per call ──
+    // ── Emit one line per call, args on separate indented lines ──
     for call in calls.iter() {
-        let mut spans: Vec<Span<'static>> = vec![
+        // Tool name line
+        let name_spans: Vec<Span<'static>> = vec![
             Span::styled("> ", Style::default().fg(style::TEXT_MUTED)),
             Span::styled(
                 call.name.clone(),
@@ -470,19 +491,22 @@ fn tool_call_lines(
                     .add_modifier(Modifier::BOLD),
             ),
         ];
-
-        for arg_line in &call.args {
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                arg_line.clone(),
-                Style::default().fg(style::TEXT_MUTED),
-            ));
-        }
-
         lines.push(RenderedLine {
-            line: Line::from(spans),
+            line: Line::from(name_spans),
             table: None,
         });
+
+        // Indented args, one per line
+        for arg_line in &call.args {
+            let arg_spans: Vec<Span<'static>> = vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(arg_line.clone(), Style::default().fg(style::TEXT_MUTED)),
+            ];
+            lines.push(RenderedLine {
+                line: Line::from(arg_spans),
+                table: None,
+            });
+        }
     }
 }
 

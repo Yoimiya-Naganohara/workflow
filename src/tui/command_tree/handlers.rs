@@ -711,6 +711,9 @@ pub fn agent_inspect(inv: &CommandInvocation, state: &mut AppState) -> CommandRe
 
 pub fn reflect_on(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
     state.core.reflection.auto_reflect = true;
+    if let Err(e) = crate::persistence::save_reflection_config(&state.core.reflection) {
+        tracing::warn!("Failed to persist reflection config: {}", e);
+    }
     state.core.messages.push(ChatMessage::system(
         "Reflection enabled — agent responses will be self-checked after each turn.",
     ));
@@ -719,6 +722,9 @@ pub fn reflect_on(_inv: &CommandInvocation, state: &mut AppState) -> CommandResu
 
 pub fn reflect_off(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
     state.core.reflection.auto_reflect = false;
+    if let Err(e) = crate::persistence::save_reflection_config(&state.core.reflection) {
+        tracing::warn!("Failed to persist reflection config: {}", e);
+    }
     state
         .core
         .messages
@@ -728,27 +734,21 @@ pub fn reflect_off(_inv: &CommandInvocation, state: &mut AppState) -> CommandRes
 
 pub fn reflect_status(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let enabled = state.core.reflection.auto_reflect;
-    let rules: Vec<String> = [
-        ("code", 0u8),
-        ("error", 1),
-        ("questions", 2),
-        ("promise", 3),
-        ("fileref", 4),
-        ("minlen", 5),
-    ]
-    .iter()
-    .map(|(name, i)| {
-        format!(
-            "  {} {}",
-            if state.core.reflection.rules_enabled[*i as usize] {
-                "✓"
-            } else {
-                "✗"
-            },
-            name
-        )
-    })
-    .collect();
+    let rule_names: &[(&str, &str)] = &[
+        ("code", "code_complete"),
+        ("error", "error_awareness"),
+        ("questions", "multi_question_coverage"),
+        ("promise", "empty_promise"),
+        ("fileref", "file_ref_used"),
+        ("minlen", "min_output"),
+    ];
+    let rules: Vec<String> = rule_names
+        .iter()
+        .map(|(name, id)| {
+            let r_enabled = state.core.reflection.is_rule_enabled(id);
+            format!("  {} {}", if r_enabled { "✓" } else { "✗" }, name)
+        })
+        .collect();
     state.core.messages.push(ChatMessage::system(format!(
         "Reflection: {}\nMax retries: {}\nRules:\n{}",
         if enabled { "on" } else { "off" },
@@ -769,6 +769,9 @@ pub fn reflect_max(inv: &CommandInvocation, state: &mut AppState) -> CommandResu
     match val_str.parse::<u8>() {
         Ok(n) => {
             state.core.reflection.max_attempts = n;
+            if let Err(e) = crate::persistence::save_reflection_config(&state.core.reflection) {
+                tracing::warn!("Failed to persist reflection config: {}", e);
+            }
             state.core.messages.push(ChatMessage::system(format!(
                 "Reflection max retries set to {}.",
                 n
@@ -802,23 +805,27 @@ pub fn reflect_rule(inv: &CommandInvocation, state: &mut AppState) -> CommandRes
         )));
         return CommandResult::handled();
     };
-    let idx = match inv.args[0].as_str() {
-        "code" => Some(crate::reflection::RULE_CODE_COMPLETE),
-        "error" => Some(crate::reflection::RULE_ERROR_AWARENESS),
-        "questions" => Some(crate::reflection::RULE_MULTI_QUESTION),
-        "promise" => Some(crate::reflection::RULE_EMPTY_PROMISE),
-        "fileref" => Some(crate::reflection::RULE_FILE_REF_USED),
-        "minlen" => Some(crate::reflection::RULE_MIN_OUTPUT),
-        _ => None,
+    let rule_id = match inv.args[0].as_str() {
+        "code" => "code_complete",
+        "error" => "error_awareness",
+        "questions" => "multi_question_coverage",
+        "promise" => "empty_promise",
+        "fileref" => "file_ref_used",
+        "minlen" => "min_output",
+        _ => {
+            state.core.messages.push(ChatMessage::system(format!(
+                "Unknown rule: {}. Rules: code, error, questions, promise, fileref, minlen",
+                inv.args[0]
+            )));
+            return CommandResult::handled();
+        }
     };
-    let Some(idx) = idx else {
-        state.core.messages.push(ChatMessage::system(format!(
-            "Unknown rule: {}. Rules: code, error, questions, promise, fileref, minlen",
-            inv.args[0]
-        )));
-        return CommandResult::handled();
-    };
-    state.core.reflection.rules_enabled[idx] = enable;
+    if let Some(cfg) = state.core.reflection.rules.get_mut(rule_id) {
+        cfg.enabled = enable;
+    }
+    if let Err(e) = crate::persistence::save_reflection_config(&state.core.reflection) {
+        tracing::warn!("Failed to persist reflection config: {}", e);
+    }
     state.core.messages.push(ChatMessage::system(format!(
         "Rule '{}' {}.",
         inv.args[0],
