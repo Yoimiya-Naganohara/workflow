@@ -710,7 +710,9 @@ impl StrategyGraph {
 
         // Step 3: For each cluster, compute pairwise win rates.
         for (&cid, sids) in &cluster_strategies {
-            let traces = cluster_traces.get(&cid).unwrap();
+            let Some(traces) = cluster_traces.get(&cid) else {
+                continue;
+            };
             for i in 0..sids.len() {
                 for j in (i + 1)..sids.len() {
                     let a = sids[i];

@@ -46,6 +46,10 @@ impl ExperienceRetrieval for SimpleRetriever {
         _role_template_id: Option<u32>,
         _role_min_experiences: Option<usize>,
     ) -> Result<L1Assessment, SpawnRejection> {
+        // Note: `_role_template_id` and `_role_min_experiences` are intentionally
+        // ignored here because SimpleRetriever does not store per-role metadata.
+        // The DualTrackMemory implementation (used at runtime) filters by role;
+        // this fallback always searches across all entries.
         if self.experiences.is_empty() {
             // Cold start: allow with low confidence.
             return Ok(L1Assessment {

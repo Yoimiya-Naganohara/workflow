@@ -203,13 +203,15 @@ impl LlmProvider {
 
             // Exponential backoff: 1s, 2s, 4s, ...
             let backoff = Duration::from_secs(1 << attempt);
-            tracing::warn!(
-                "LLM request failed (attempt {}/{}), retrying in {}s: {}",
-                attempt + 1,
-                max_retries + 1,
-                backoff.as_secs(),
-                last_error.as_ref().unwrap()
-            );
+            if let Some(ref err) = last_error {
+                tracing::warn!(
+                    "LLM request failed (attempt {}/{}), retrying in {}s: {}",
+                    attempt + 1,
+                    max_retries + 1,
+                    backoff.as_secs(),
+                    err
+                );
+            }
             tokio::time::sleep(backoff).await;
         }
 
