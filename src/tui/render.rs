@@ -21,7 +21,8 @@ use crate::tui::status::render_status_bar;
 
 impl Tui {
     pub(crate) async fn draw(&mut self) -> Result<()> {
-        {
+        let is_streaming = self.state.read().await.ui.active_chat_requests > 0;
+        if is_streaming {
             let mut s = self.state.write().await;
             s.ui.think_frame = s.ui.think_frame.wrapping_add(1);
         }

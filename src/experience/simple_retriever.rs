@@ -83,6 +83,10 @@ impl ExperienceRetrieval for SimpleRetriever {
     fn experience_count(&self) -> usize {
         self.experiences.len()
     }
+
+    fn export_entries(&self) -> Vec<ExperienceEntry> {
+        self.experiences.clone()
+    }
 }
 
 fn infer_tools_from_matches(matches: &[(ExperienceEntry, f32)]) -> u64 {

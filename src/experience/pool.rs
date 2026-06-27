@@ -205,6 +205,14 @@ impl ExperiencePool {
             return Ok((Vec::new(), None, None, DEFAULT_CAPACITY));
         }
 
+        if header.entry_size != EXPERIENCE_SIZE as u32 {
+            warn!(
+                "Experience pool entry size mismatch: header={}, expected={} – starting fresh",
+                header.entry_size, EXPERIENCE_SIZE
+            );
+            return Ok((Vec::new(), None, None, DEFAULT_CAPACITY));
+        }
+
         // Verify checksum against the entries data that follows the header.
         // Only hash the bytes for the declared `count` entries — trailing
         // zeros beyond count are not part of the checksum computation.
@@ -238,8 +246,27 @@ impl ExperiencePool {
             )
         };
 
-        trace!(count, capacity, "Loaded experience pool from disk");
-        Ok((entries.to_vec(), Some(ro), None, capacity))
+        // Reject entries with NaN/Inf embeddings to prevent downstream corruption.
+        let valid: Vec<ExperienceEntry> = entries
+            .iter()
+            .filter(|e| {
+                e.embedding.iter().all(|f| f.is_finite())
+                    && e.applicability_vector.iter().all(|f| f.is_finite())
+            })
+            .cloned()
+            .collect();
+        if valid.len() != count {
+            warn!(
+                "Experience pool: rejected {} entries with non-finite values",
+                count - valid.len()
+            );
+        }
+
+        trace!(
+            count = valid.len(),
+            capacity, "Loaded experience pool from disk"
+        );
+        Ok((valid, Some(ro), None, capacity))
     }
 
     // ── Public API ──

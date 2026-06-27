@@ -125,13 +125,12 @@ impl TaskResourceState {
     }
 
     /// Spin-wait backoff for CAS contention.
+    /// Uses only CPU pauses (not thread::yield_now) so it's safe in async contexts.
     fn cas_backoff(rounds: u32) {
-        if rounds <= 8 {
-            for _ in 0..1u32 << rounds {
-                std::hint::spin_loop();
-            }
-        } else {
-            std::thread::yield_now();
+        // Cap total spin iterations to avoid blocking the tokio thread.
+        let r = rounds.min(8);
+        for _ in 0..1u32 << r {
+            std::hint::spin_loop();
         }
     }
 

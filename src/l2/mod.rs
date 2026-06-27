@@ -77,19 +77,41 @@ impl L2RuleAuditEngine {
             ArbitrationResult::Prune(manifest.contending_agents.to_vec())
         } else {
             self.consecutive_failures = 0;
-            let winner = manifest.contending_agents[0];
-            let losers: Vec<AgentId> = manifest.contending_agents[1..].to_vec();
+            let winner_idx = manifest
+                .dynamic_priority_scores
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            let winner = manifest.contending_agents[winner_idx];
+            let losers: Vec<AgentId> = manifest
+                .contending_agents
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != winner_idx)
+                .map(|(_, a)| *a)
+                .collect();
             ArbitrationResult::Override {
                 winner,
                 slash_targets: losers,
             }
         };
 
+        let winner_idx = match &decision {
+            ArbitrationResult::Override { winner, .. } => manifest
+                .contending_agents
+                .iter()
+                .position(|a| a == winner)
+                .unwrap_or(0),
+            _ => 0,
+        };
+
         L2RuleAuditResult {
             decision,
             risk_statement: risk.statement,
             lesson_learned: "Resolved via L2 audit".to_string(),
-            l1_override_vector_patch: Some(self.generate_override_patch(manifest)),
+            l1_override_vector_patch: Some(self.generate_override_patch(manifest, winner_idx)),
         }
     }
 
@@ -116,10 +138,11 @@ impl L2RuleAuditEngine {
     fn generate_override_patch(
         &self,
         manifest: &ConflictManifest,
+        winner_idx: usize,
     ) -> crate::core::conflict::OverridePatch {
         let mut embedding = [0.0f32; crate::core::types::EMBEDDING_DIM];
-        if !manifest.context_embeddings.is_empty() {
-            embedding.copy_from_slice(&manifest.context_embeddings[0]);
+        if winner_idx < manifest.context_embeddings.len() {
+            embedding.copy_from_slice(&manifest.context_embeddings[winner_idx]);
         }
 
         crate::core::conflict::OverridePatch {

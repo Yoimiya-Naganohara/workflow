@@ -224,40 +224,7 @@ Messages may contain important context from sibling agents.",
 mod tests {
     use super::*;
     use crate::runtime::AgentRuntimeConfig;
-
-    /// A mock embedding service that returns fixed embeddings.
-    struct MockEmbed;
-    #[async_trait::async_trait]
-    impl crate::llm::EmbeddingService for MockEmbed {
-        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; 384]> {
-            let mut e = [0.0f32; 384];
-            e[0] = 1.0;
-            Ok(e)
-        }
-        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; 384]>> {
-            Ok(texts
-                .iter()
-                .map(|_| {
-                    let mut e = [0.0f32; 384];
-                    e[0] = 1.0;
-                    e
-                })
-                .collect())
-        }
-        fn similarity(&self, a: &[f32; 384], b: &[f32; 384]) -> f32 {
-            crate::core::simd::cosine_similarity_384(a, b)
-        }
-        fn cache_size(&self) -> usize {
-            0
-        }
-        fn clear_cache(&self) {}
-        fn cache_hits(&self) -> u64 {
-            0
-        }
-        fn cache_misses(&self) -> u64 {
-            0
-        }
-    }
+    use crate::test_utils::MockEmbed;
 
     fn test_config() -> AgentRuntimeConfig {
         let dir =

@@ -160,12 +160,12 @@ impl Clone for SandboxHandle {
         let embedder = self
             .embedder
             .read()
-            .unwrap_or_else(|e| e.into_inner())
+            .expect("sandbox mutex poisoned")
             .clone();
         let indices = self
             .asset_indices
             .read()
-            .unwrap_or_else(|e| e.into_inner())
+            .expect("sandbox mutex poisoned")
             .clone();
         Self {
             root: self.root.clone(),
@@ -307,7 +307,7 @@ impl SandboxHandle {
     /// tool server — `None` means `create_embedded_asset` falls back
     /// to plain physical writes (no indexing).
     pub fn attach_embedder(&self, embedder: Arc<dyn EmbeddingService>) {
-        let mut guard = self.embedder.write().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.embedder.write().expect("sandbox mutex poisoned");
         *guard = Some(embedder);
     }
 
@@ -349,14 +349,11 @@ impl SandboxHandle {
         let model = self
             .embedder
             .read()
-            .unwrap_or_else(|e| e.into_inner())
+            .expect("sandbox mutex poisoned")
             .clone();
         if let Some(model) = model {
             let index = AssetIndex::build(model.as_ref(), raw_content, 20).await?;
-            let mut index_guard = self
-                .asset_indices
-                .write()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut index_guard = self.asset_indices.write().expect("sandbox mutex poisoned");
             index_guard.insert(asset_id.clone(), index);
         }
 

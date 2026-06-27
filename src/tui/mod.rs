@@ -44,6 +44,7 @@ pub struct Tui {
     app_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::tui::effect::AppEvent>,
     last_session_save: std::time::Instant,
     last_session_message_count: usize,
+    needs_redraw: bool,
 }
 
 impl Tui {
@@ -75,6 +76,7 @@ impl Tui {
             app_event_rx,
             last_session_save: std::time::Instant::now(),
             last_session_message_count: 0,
+            needs_redraw: true,
         })
     }
 
@@ -132,6 +134,8 @@ impl Tui {
         let mut interval = tokio::time::interval(Duration::from_millis(50));
 
         loop {
+            self.needs_redraw = false;
+
             tokio::select! {
                 maybe_event = event_stream.next() => {
                     match maybe_event {
@@ -163,6 +167,7 @@ impl Tui {
                                             crate::tui::effect::execute_effect(effect, &tx).await;
                                         });
                                     }
+                                    self.needs_redraw = true;
                                 }
                                 Event::Mouse(mouse) => {
                                     let mut state = self.state.write().await;
@@ -176,6 +181,7 @@ impl Tui {
                                         }
                                         _ => {}
                                     }
+                                    self.needs_redraw = true;
                                 }
                                 Event::Paste(text) => {
                                     let mut state = self.state.write().await;
@@ -203,6 +209,7 @@ impl Tui {
                                         state.ui.input.insert_str(byte_idx, &text);
                                         state.ui.input_cursor += text.chars().count();
                                     }
+                                    self.needs_redraw = true;
                                 }
                                 _ => {}
                             }
@@ -226,10 +233,14 @@ impl Tui {
                             crate::tui::effect::execute_effect(effect, &tx).await;
                         });
                     }
+                    self.needs_redraw = true;
                 }
 
                 _ = interval.tick() => {
-                    // Auto-save every 30 seconds (background, best-effort).
+                    let is_streaming = self.state.read().await.ui.active_chat_requests > 0;
+                    if is_streaming {
+                        self.needs_redraw = true;
+                    }
                     if self.last_session_save.elapsed() >= std::time::Duration::from_secs(30) {
                         self.save_session().await;
                         self.last_session_save = std::time::Instant::now();
@@ -237,7 +248,9 @@ impl Tui {
                 }
             }
 
-            self.draw().await?;
+            if self.needs_redraw {
+                self.draw().await?;
+            }
         }
     }
 

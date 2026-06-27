@@ -88,7 +88,7 @@ impl TaskScheduler {
     pub async fn dispatch(&self) {
         let ready: Vec<(AgentId, String, Option<String>)> = {
             let rt = self.runtime.read().await;
-            let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            let g = rt.task_graph.lock().expect("scheduler mutex poisoned");
             g.ready_tasks()
                 .iter()
                 .filter_map(|tid| {
@@ -112,7 +112,7 @@ impl TaskScheduler {
             };
             let selected_strategy: Option<(Option<StrategyId>, u64)> =
                 self.strategy_graph.as_ref().map(|sg| {
-                    let mut g = sg.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut g = sg.lock().expect("scheduler mutex poisoned");
                     let sid = g.select_strategy(StrategyType::Estimator, 0);
                     let epoch = g.exploration.epoch;
                     (sid, epoch)
@@ -125,7 +125,7 @@ impl TaskScheduler {
             {
                 // mark_dispatching
                 let rt = self.runtime.read().await;
-                let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                let mut g = rt.task_graph.lock().expect("scheduler mutex poisoned");
                 if let Err(e) = g.mark_dispatching(task_id) {
                     tracing::warn!(
                         "scheduler: mark_dispatching({:02x}..) failed: {} — skipping",
@@ -138,12 +138,12 @@ impl TaskScheduler {
             if let Some(ref engine) = self.decomposition {
                 let should = {
                     let rt = self.runtime.read().await;
-                    let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                    let g = rt.task_graph.lock().expect("scheduler mutex poisoned");
                     engine.should_decompose(task_id, &g)
                 };
                 if should {
                     let rt = self.runtime.read().await;
-                    let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut g = rt.task_graph.lock().expect("scheduler mutex poisoned");
                     let children = engine.decompose(task_id, &mut g);
                     if !children.is_empty() {
                         tracing::info!(
@@ -170,7 +170,7 @@ impl TaskScheduler {
                         reason
                     );
                     let rt = self.runtime.read().await;
-                    let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut g = rt.task_graph.lock().expect("scheduler mutex poisoned");
                     g.mark_rejected(task_id, &format!("{}", reason)).ok();
                     if let Some(ref store) = self.outcome_store {
                         if let Ok(mut s) = store.try_write() {
@@ -193,7 +193,7 @@ impl TaskScheduler {
                         reason
                     );
                     let rt = self.runtime.read().await;
-                    let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut g = rt.task_graph.lock().expect("scheduler mutex poisoned");
                     if g.mark_created(task_id).is_err() {
                         g.mark_rejected(task_id, &format!("RetryLater fallback: {}", reason))
                             .ok();
@@ -210,7 +210,7 @@ impl TaskScheduler {
                         reason
                     );
                     let rt = self.runtime.read().await;
-                    let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut g = rt.task_graph.lock().expect("scheduler mutex poisoned");
                     if let Some(node) = g.get_mut(&task_id) {
                         node.metadata.insert("escalated_to".into(), target_role);
                         node.metadata.insert("escalated_reason".into(), reason);
@@ -221,7 +221,7 @@ impl TaskScheduler {
             // ── Phase 4: Record graph metrics for template evolution ──
             if let Some(ref _evolution) = self.template_evolution {
                 let rt = self.runtime.read().await;
-                let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                let g = rt.task_graph.lock().expect("scheduler mutex poisoned");
                 let metrics = crate::runtime::graph_analytics::GraphMetrics::from_graph(&g);
                 tracing::debug!(
                     "GraphAnalytics: {} nodes, {} roots, {} leaves",
@@ -263,7 +263,7 @@ impl TaskScheduler {
                 .unwrap_or_default();
             let routing = {
                 let rt = self.runtime.read().await;
-                let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                let g = rt.task_graph.lock().expect("scheduler mutex poisoned");
                 match g.get(&task_id) {
                     Some(node) => selector.select(node, &candidates),
                     None => crate::runtime::orchestration::RoutingDecision {
@@ -338,7 +338,7 @@ impl TaskScheduler {
         };
         {
             let rt = self.runtime.read().await;
-            let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            let mut g = rt.task_graph.lock().expect("scheduler mutex poisoned");
             if let Err(e) = g.mark_running(task_id, agent_id) {
                 tracing::warn!(
                     "scheduler: mark_running({:02x}..) failed: {}",
@@ -373,6 +373,7 @@ mod tests {
     use crate::runtime::AgentRuntime;
     use crate::runtime::AgentRuntimeConfig;
     use crate::runtime::orchestration::{DispatchDecider, PipelineDispatchDecider};
+    use crate::test_utils::MockEmbed;
     use std::sync::Arc;
     use tokio::sync::{RwLock, mpsc};
 
@@ -382,40 +383,6 @@ mod tests {
             AgentRuntime::new(AgentRuntimeConfig::default(), Arc::new(MockEmbed)),
         ))))
     }
-
-    struct MockEmbed;
-    #[async_trait::async_trait]
-    impl crate::llm::EmbeddingService for MockEmbed {
-        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; 384]> {
-            let mut e = [0.0f32; 384];
-            e[0] = 1.0;
-            Ok(e)
-        }
-        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; 384]>> {
-            Ok(texts
-                .iter()
-                .map(|_| {
-                    let mut e = [0.0f32; 384];
-                    e[0] = 1.0;
-                    e
-                })
-                .collect())
-        }
-        fn similarity(&self, a: &[f32; 384], b: &[f32; 384]) -> f32 {
-            crate::core::simd::cosine_similarity_384(a, b)
-        }
-        fn cache_size(&self) -> usize {
-            0
-        }
-        fn clear_cache(&self) {}
-        fn cache_hits(&self) -> u64 {
-            0
-        }
-        fn cache_misses(&self) -> u64 {
-            0
-        }
-    }
-
     #[tokio::test]
     async fn test_scheduler_new() {
         let rt = Arc::new(RwLock::new(AgentRuntime::new(
@@ -461,7 +428,7 @@ mod tests {
         // Add a ready task to the graph
         {
             let r = rt.read().await;
-            let mut g = r.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            let mut g = r.task_graph.lock().expect("scheduler mutex poisoned");
             g.spawn_root("test goal");
         }
 
@@ -494,14 +461,14 @@ mod tests {
         // Add a task
         {
             let r = rt.read().await;
-            let mut g = r.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            let mut g = r.task_graph.lock().expect("scheduler mutex poisoned");
             g.spawn_root("complex task");
         }
 
         scheduler.dispatch().await;
         // After dispatch, the task should be marked running or rejected
         let r = rt.read().await;
-        let g = r.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+        let g = r.task_graph.lock().expect("scheduler mutex poisoned");
         let tasks = g.ready_tasks();
         // No ready tasks remain (all have been dispatched)
         assert!(tasks.is_empty(), "all tasks should be dispatched");

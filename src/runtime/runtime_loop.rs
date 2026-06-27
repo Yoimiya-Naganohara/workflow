@@ -145,7 +145,7 @@ impl RuntimeEventLoop {
                     let serialized = {
                         let p = self.pool.read().await;
                         let rt = self.runtime.read().await;
-                        let g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                        let g = rt.task_graph.lock().expect("runtime_loop mutex poisoned");
                         self.checkpoint.serialize_snapshot(&p, &g)
                     };
                     // Phase 2: write to disk outside lock (slow I/O).
@@ -360,7 +360,7 @@ impl RuntimeEventLoop {
 
         // Step 2: Spawn child task in the graph.
         let child_task_id: crate::core::types::TaskId = {
-            let mut g = task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            let mut g = task_graph.lock().expect("runtime_loop mutex poisoned");
             match g.spawn_child(effective_parent_id, &goal) {
                 Some(cid) => {
                     if let Some(node) = g.get_mut(&cid) {
@@ -401,7 +401,7 @@ impl RuntimeEventLoop {
     async fn handle_task_completed(&self, task_id: crate::core::types::TaskId, result: &str) {
         {
             let rt = self.runtime.read().await;
-            let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            let mut g = rt.task_graph.lock().expect("runtime_loop mutex poisoned");
             if let Err(e) = g.mark_complete(task_id) {
                 tracing::warn!(
                     "TaskCompleted: mark_complete({:02x}..) failed: {}",
@@ -423,7 +423,7 @@ impl RuntimeEventLoop {
     async fn handle_task_failed(&self, task_id: crate::core::types::TaskId, error: &str) {
         {
             let rt = self.runtime.read().await;
-            let mut g = rt.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+            let mut g = rt.task_graph.lock().expect("runtime_loop mutex poisoned");
             if let Err(e) = g.mark_failed(task_id, error) {
                 tracing::warn!(
                     "TaskFailed: mark_failed({:02x}..) failed: {}",
@@ -643,11 +643,11 @@ impl RuntimeEventLoop {
                                     let child_idx = child_sb
                                         .asset_indices
                                         .read()
-                                        .unwrap_or_else(|e| e.into_inner());
+                                        .expect("runtime_loop mutex poisoned");
                                     let mut parent_idx = parent_sb
                                         .asset_indices
                                         .write()
-                                        .unwrap_or_else(|e| e.into_inner());
+                                        .expect("runtime_loop mutex poisoned");
                                     for (k, v) in child_idx.iter() {
                                         parent_idx.entry(k.clone()).or_insert_with(|| v.clone());
                                     }

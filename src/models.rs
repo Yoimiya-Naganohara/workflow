@@ -164,7 +164,8 @@ impl Model {
         };
 
         let ctx = if caps.max_context >= 1024 {
-            format!("{}K", caps.max_context / 1024)
+            let k = (caps.max_context as f64 / 1024.0).round() as u64;
+            format!("{}K", k)
         } else {
             caps.max_context.to_string()
         };

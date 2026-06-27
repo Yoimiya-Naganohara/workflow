@@ -1998,7 +1998,7 @@ impl Tool for SearchAsset {
         })?;
 
         let model = {
-            let guard = sandbox.embedder.read().unwrap_or_else(|e| e.into_inner());
+            let guard = sandbox.embedder.read().expect("builtin mutex poisoned");
             guard
                 .as_ref()
                 .ok_or_else(|| {
@@ -2018,7 +2018,7 @@ impl Tool for SearchAsset {
             let guard = sandbox
                 .asset_indices
                 .read()
-                .unwrap_or_else(|e| e.into_inner());
+                .expect("builtin mutex poisoned");
             let asset = guard.get(&args.asset_id).ok_or_else(|| {
                 ToolCallError(format!(
                     "Asset '{}' not found or not indexed",

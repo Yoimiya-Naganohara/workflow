@@ -906,35 +906,10 @@ impl Default for UiState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::EMBEDDING_DIM;
     use crate::runtime::AgentRuntime;
     use crate::runtime::config::AgentRuntimeConfig;
 
-    /// Build a mock embedding that returns a fixed vector.
-    struct MockEmbed;
-
-    #[async_trait::async_trait]
-    impl crate::llm::EmbeddingService for MockEmbed {
-        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; EMBEDDING_DIM]> {
-            Ok([1.0f32; EMBEDDING_DIM])
-        }
-        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; EMBEDDING_DIM]>> {
-            Ok(vec![[1.0f32; EMBEDDING_DIM]; texts.len()])
-        }
-        fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
-            if a == b { 1.0 } else { 0.0 }
-        }
-        fn cache_size(&self) -> usize {
-            0
-        }
-        fn clear_cache(&self) {}
-        fn cache_hits(&self) -> u64 {
-            0
-        }
-        fn cache_misses(&self) -> u64 {
-            0
-        }
-    }
+    use crate::test_utils::MockEmbed;
 
     /// Simulate the handler's history-building logic (lines 718–735 of handler.rs).
     fn build_chat_history<'a>(

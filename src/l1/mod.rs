@@ -149,6 +149,18 @@ pub trait ExperienceRetrieval: Send + Sync {
     fn bedrock_count(&self) -> usize {
         0
     }
+
+    /// Export all entries (for serialization / backup).
+    fn export_entries(&self) -> Vec<ExperienceEntry> {
+        Vec::new()
+    }
+
+    /// Import entries from an external source.
+    fn import_entries(&mut self, entries: Vec<ExperienceEntry>) {
+        for e in entries {
+            self.add_experience(e);
+        }
+    }
     /// Number of fluid (volatile) entries.
     fn fluid_count(&self) -> usize {
         0
@@ -206,6 +218,10 @@ impl ExperienceRetrieval for L1Retriever {
 
     fn experience_count(&self) -> usize {
         self.experience_count()
+    }
+
+    fn export_entries(&self) -> Vec<ExperienceEntry> {
+        self.experiences.clone()
     }
 }
 

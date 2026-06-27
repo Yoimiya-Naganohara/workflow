@@ -457,6 +457,16 @@ impl AgentRuntime {
         self.pipeline.clear_experience_pool()
     }
 
+    /// Export all pool entries to a JSON file.
+    pub fn export_pool(&self, path: &std::path::Path) -> Result<()> {
+        self.pipeline.export_pool(path)
+    }
+
+    /// Import entries from a JSON file into the pool.
+    pub fn import_pool(&self, path: &std::path::Path) -> Result<usize> {
+        self.pipeline.import_pool(path)
+    }
+
     /// Consolidate fluid experiences to bedrock (cluster + promote).
     /// This is useful before operations that need complete data access,
     /// such as role optimization or system shutdown.
@@ -565,41 +575,7 @@ mod tests {
     use std::sync::Arc;
 
     /// Mock embedding service that returns a fixed vector without API calls.
-    struct MockEmbedding;
-
-    #[async_trait::async_trait]
-    impl EmbeddingService for MockEmbedding {
-        async fn embed(&self, _text: &str) -> anyhow::Result<[f32; EMBEDDING_DIM]> {
-            let mut emb = [0.0f32; EMBEDDING_DIM];
-            emb[0] = 1.0;
-            Ok(emb)
-        }
-
-        async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<[f32; EMBEDDING_DIM]>> {
-            let mut results = Vec::with_capacity(texts.len());
-            for _ in texts {
-                let mut emb = [0.0f32; EMBEDDING_DIM];
-                emb[0] = 1.0;
-                results.push(emb);
-            }
-            Ok(results)
-        }
-
-        fn similarity(&self, a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
-            crate::core::simd::cosine_similarity_384(a, b)
-        }
-
-        fn cache_size(&self) -> usize {
-            0
-        }
-        fn clear_cache(&self) {}
-        fn cache_hits(&self) -> u64 {
-            0
-        }
-        fn cache_misses(&self) -> u64 {
-            0
-        }
-    }
+    use crate::test_utils::MockEmbedding;
 
     fn dummy_embedding() -> Arc<dyn EmbeddingService> {
         Arc::new(MockEmbedding)

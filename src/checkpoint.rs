@@ -279,9 +279,7 @@ pub async fn restore_checkpoint(
 
     // Restore task graph.
     {
-        let mut g = task_graph
-            .lock()
-            .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+        let mut g = task_graph.lock().expect("checkpoint mutex poisoned");
         *g = snapshot.task_graph;
         let reset_ids: Vec<crate::core::types::TaskId> = g
             .all_nodes()

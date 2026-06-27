@@ -359,9 +359,9 @@ fn render_md(text: &str, body_width: usize) -> MdRenderResult {
                 for spans in &line_groups {
                     let plain: String = spans.iter().map(|s| s.content.as_ref()).collect();
                     if looks_like_table_row(&plain) {
-                        let block = collect_paragraph_table_block(&plain, &mut events, body_width);
+                        let block = collect_paragraph_table_block(&plain, &mut events);
                         if block.len() >= 2 {
-                            extract_table_from_block(&block, &mut result);
+                            extract_table_from_block(&block, &mut result, body_width);
                         } else if !spans.is_empty() {
                             wrap_spans_into(&mut result, spans, body_width, "  ");
                         }
@@ -523,7 +523,6 @@ fn is_separator_row(line: &str) -> bool {
 fn collect_paragraph_table_block<'a, I>(
     first_line: &str,
     events: &mut std::iter::Peekable<I>,
-    _body_width: usize,
 ) -> Vec<String>
 where
     I: Iterator<Item = Event<'a>>,
@@ -550,7 +549,7 @@ where
 }
 
 /// Extract a table from a paragraph-style table block and add to result.
-fn extract_table_from_block(block: &[String], result: &mut MdRenderResult) {
+fn extract_table_from_block(block: &[String], result: &mut MdRenderResult, body_width: usize) {
     let rows: Vec<Vec<String>> = block
         .iter()
         .map(|line| {
@@ -589,9 +588,8 @@ fn extract_table_from_block(block: &[String], result: &mut MdRenderResult) {
         (hdr, data)
     };
 
-    // Compute column widths based on display width (no hardcoded limits)
-    let body_avail = 80; // reasonable max table width
-    let max_col = (body_avail / col_count).saturating_sub(2).max(4);
+    // Compute column widths based on display width
+    let max_col = (body_width / col_count).saturating_sub(2).max(4);
     let col_widths: Vec<usize> = (0..col_count)
         .map(|ci| {
             let all_cells: Vec<&str> = header
@@ -1453,7 +1451,7 @@ mod tests {
             "| B | 2 |".to_string(),
         ];
         let mut result = MdRenderResult::new();
-        extract_table_from_block(&block, &mut result);
+        extract_table_from_block(&block, &mut result, 80);
 
         assert_eq!(result.tables.len(), 1);
         let td = &result.tables[0];
@@ -1470,7 +1468,7 @@ mod tests {
             "| B | 2 |".to_string(),
         ];
         let mut result = MdRenderResult::new();
-        extract_table_from_block(&block, &mut result);
+        extract_table_from_block(&block, &mut result, 80);
 
         assert_eq!(result.tables.len(), 1);
         let td = &result.tables[0];
@@ -1481,7 +1479,7 @@ mod tests {
     #[test]
     fn test_extract_table_empty() {
         let mut result = MdRenderResult::new();
-        extract_table_from_block(&[], &mut result);
+        extract_table_from_block(&[], &mut result, 80);
         assert!(result.tables.is_empty());
     }
 
@@ -1489,7 +1487,7 @@ mod tests {
     fn test_extract_table_single_row() {
         let block = vec!["| Name |".to_string(), "| --- |".to_string()];
         let mut result = MdRenderResult::new();
-        extract_table_from_block(&block, &mut result);
+        extract_table_from_block(&block, &mut result, 80);
         assert_eq!(result.tables.len(), 1);
         assert!(result.tables[0].rows.is_empty());
     }

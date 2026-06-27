@@ -718,7 +718,7 @@ impl Tui {
             if let Some(aid) = agent_id {
                 if let Some(rt) = &core.runtime {
                     if let Ok(r) = rt.try_read() {
-                        let mut graph = r.task_graph.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut graph = r.task_graph.lock().expect("handler mutex poisoned");
                         let needs_task = core
                             .agent_pool
                             .try_read()

@@ -1,5 +1,7 @@
 //! Command handlers — all business logic for tree commands.
 
+use std::path::Path;
+
 use crate::tui::command_tree::{AppState, CommandInvocation, CommandResult, UiEffect};
 use crate::tui::effect::Effect;
 use crate::tui::state::{ChatMessage, MessageRole, PopupMode};
@@ -260,18 +262,38 @@ pub fn pool_clear(_inv: &CommandInvocation, state: &mut AppState) -> CommandResu
     CommandResult::handled()
 }
 
-pub fn pool_export(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
-    state.core.messages.push(ChatMessage::system(
-        "Export not yet implemented. Pool file is at ~/.workflow/experience_a.bin",
-    ));
+pub fn pool_export(inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+    let path = if inv.args.is_empty() {
+        Path::new("experience_export.json").to_path_buf()
+    } else {
+        Path::new(&inv.args[0]).to_path_buf()
+    };
+    let count = with_runtime(state, |rt| Ok(rt.experience_count())).unwrap_or(0);
+    let msg = match with_runtime(state, |rt| {
+        rt.export_pool(&path)
+            .map_err(|e| format!("Export failed: {}", e))
+    }) {
+        Ok(()) => format!("Exported {} entries to {}", count, path.display()),
+        Err(e) => e,
+    };
+    state.core.messages.push(ChatMessage::system(msg));
     CommandResult::handled()
 }
 
-pub fn pool_import(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
-    state
-        .core
-        .messages
-        .push(ChatMessage::system("Import not yet implemented"));
+pub fn pool_import(inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+    let path = if inv.args.is_empty() {
+        Path::new("experience_export.json").to_path_buf()
+    } else {
+        Path::new(&inv.args[0]).to_path_buf()
+    };
+    let msg = match with_runtime(state, |rt| {
+        rt.import_pool(&path)
+            .map_err(|e| format!("Import failed: {}", e))
+    }) {
+        Ok(n) => format!("Imported {} entries from {}", n, path.display()),
+        Err(e) => e,
+    };
+    state.core.messages.push(ChatMessage::system(msg));
     CommandResult::handled()
 }
 

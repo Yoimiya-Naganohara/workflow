@@ -12,7 +12,7 @@
 //! 1. **Execution events** — normal tool use, agent lifecycle
 //! 2. **Delegation events** — task graph mutation (Phase 2+)
 //!
-//! See [`ARCHTECHTURE.md`](../../ARCHTECHTURE.md) for the full design.
+//! See [`ARCHITECTURE.md`](../../ARCHITECTURE.md) for the full design.
 
 use crate::core::types::AgentId;
 use crate::core::types::TaskId;

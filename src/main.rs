@@ -48,6 +48,7 @@ fn register_panic_hook() {
 
 /// Clean up all sandbox directories under ~/.workflow/sandbox/.
 /// Called during shutdown to prevent filesystem leaks.
+/// Only removes directories whose names are valid UUIDs (AgentIds).
 fn cleanup_all_sandboxes() {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -55,13 +56,25 @@ fn cleanup_all_sandboxes() {
     let sandbox_root = std::path::PathBuf::from(home)
         .join(".workflow")
         .join("sandbox");
-    if sandbox_root.exists() {
-        if let Ok(entries) = std::fs::read_dir(&sandbox_root) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    let _ = std::fs::remove_dir_all(&path);
-                }
+    if !sandbox_root.exists() {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(&sandbox_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            // Only remove directories whose name is a valid 32-char hex string (16-byte ID).
+            if name.len() != 32 || !name.chars().all(|c| c.is_ascii_hexdigit()) {
+                continue;
+            }
+            if let Err(e) = std::fs::remove_dir_all(&path) {
+                tracing::warn!("Failed to remove sandbox {}: {}", name, e);
             }
         }
     }

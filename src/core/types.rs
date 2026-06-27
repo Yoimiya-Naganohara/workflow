@@ -74,6 +74,171 @@ pub struct ExperienceEntry {
     pub l2_override_created_at: u64,
 }
 
+impl Serialize for ExperienceEntry {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut st = s.serialize_struct("ExperienceEntry", 9)?;
+        st.serialize_field("embedding", &self.embedding[..])?;
+        st.serialize_field("applicability_vector", &self.applicability_vector[..])?;
+        st.serialize_field("tool_bitmap", &self.tool_bitmap)?;
+        st.serialize_field("role_template_id", &self.role_template_id)?;
+        st.serialize_field("weight", &self.weight)?;
+        st.serialize_field("domain_version", &self.domain_version)?;
+        st.serialize_field("timestamp", &self.timestamp)?;
+        st.serialize_field("l2_override_weight", &self.l2_override_weight)?;
+        st.serialize_field("l2_override_created_at", &self.l2_override_created_at)?;
+        st.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ExperienceEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::{self, MapAccess, SeqAccess, Visitor};
+        use std::fmt;
+
+        struct EntryVisitor;
+
+        impl<'de> Visitor<'de> for EntryVisitor {
+            type Value = ExperienceEntry;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("struct ExperienceEntry")
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let embedding: Vec<f32> = seq
+                    .next_element::<Vec<f32>>()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                let applicability_vector: Vec<f32> = seq
+                    .next_element::<Vec<f32>>()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                let tool_bitmap: u64 = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(2, &self))?;
+                let role_template_id: Option<u32> = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(3, &self))?;
+                let weight: f32 = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(4, &self))?;
+                let domain_version: u64 = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(5, &self))?;
+                let timestamp: u64 = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(6, &self))?;
+                let l2_override_weight: f32 = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(7, &self))?;
+                let l2_override_created_at: u64 = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(8, &self))?;
+
+                let emb_len = embedding.len();
+                let embedding: [f32; EMBEDDING_DIM] = embedding.try_into().map_err(|_| {
+                    de::Error::custom(format!(
+                        "expected embedding of length {}, got {}",
+                        EMBEDDING_DIM, emb_len
+                    ))
+                })?;
+                let app_len = applicability_vector.len();
+                let applicability_vector: [f32; 128] =
+                    applicability_vector.try_into().map_err(|_| {
+                        de::Error::custom(format!(
+                            "expected applicability_vector of length 128, got {}",
+                            app_len
+                        ))
+                    })?;
+
+                Ok(ExperienceEntry {
+                    embedding,
+                    applicability_vector,
+                    tool_bitmap,
+                    role_template_id,
+                    weight,
+                    domain_version,
+                    timestamp,
+                    l2_override_weight,
+                    l2_override_created_at,
+                })
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut embedding: Option<Vec<f32>> = None;
+                let mut applicability_vector: Option<Vec<f32>> = None;
+                let mut tool_bitmap: Option<u64> = None;
+                let mut role_template_id: Option<Option<u32>> = None;
+                let mut weight: Option<f32> = None;
+                let mut domain_version: Option<u64> = None;
+                let mut timestamp: Option<u64> = None;
+                let mut l2_override_weight: Option<f32> = None;
+                let mut l2_override_created_at: Option<u64> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "embedding" => embedding = Some(map.next_value()?),
+                        "applicability_vector" => applicability_vector = Some(map.next_value()?),
+                        "tool_bitmap" => tool_bitmap = Some(map.next_value()?),
+                        "role_template_id" => role_template_id = Some(map.next_value()?),
+                        "weight" => weight = Some(map.next_value()?),
+                        "domain_version" => domain_version = Some(map.next_value()?),
+                        "timestamp" => timestamp = Some(map.next_value()?),
+                        "l2_override_weight" => l2_override_weight = Some(map.next_value()?),
+                        "l2_override_created_at" => {
+                            l2_override_created_at = Some(map.next_value()?)
+                        }
+                        _ => {
+                            let _: de::IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+
+                let embedding: [f32; EMBEDDING_DIM] = embedding
+                    .ok_or_else(|| de::Error::missing_field("embedding"))?
+                    .try_into()
+                    .map_err(|_| de::Error::custom("embedding length mismatch"))?;
+                let applicability_vector: [f32; 128] = applicability_vector
+                    .ok_or_else(|| de::Error::missing_field("applicability_vector"))?
+                    .try_into()
+                    .map_err(|_| de::Error::custom("applicability_vector length mismatch"))?;
+
+                Ok(ExperienceEntry {
+                    embedding,
+                    applicability_vector,
+                    tool_bitmap: tool_bitmap
+                        .ok_or_else(|| de::Error::missing_field("tool_bitmap"))?,
+                    role_template_id: role_template_id
+                        .ok_or_else(|| de::Error::missing_field("role_template_id"))?,
+                    weight: weight.ok_or_else(|| de::Error::missing_field("weight"))?,
+                    domain_version: domain_version
+                        .ok_or_else(|| de::Error::missing_field("domain_version"))?,
+                    timestamp: timestamp.ok_or_else(|| de::Error::missing_field("timestamp"))?,
+                    l2_override_weight: l2_override_weight
+                        .ok_or_else(|| de::Error::missing_field("l2_override_weight"))?,
+                    l2_override_created_at: l2_override_created_at
+                        .ok_or_else(|| de::Error::missing_field("l2_override_created_at"))?,
+                })
+            }
+        }
+
+        d.deserialize_struct(
+            "ExperienceEntry",
+            &[
+                "embedding",
+                "applicability_vector",
+                "tool_bitmap",
+                "role_template_id",
+                "weight",
+                "domain_version",
+                "timestamp",
+                "l2_override_weight",
+                "l2_override_created_at",
+            ],
+            EntryVisitor,
+        )
+    }
+}
+
 // ============================================================================
 //  Chat / UI domain types (moved from tui::state)
 // ============================================================================
