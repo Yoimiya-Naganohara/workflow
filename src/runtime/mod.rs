@@ -1,7 +1,6 @@
 #![allow(clippy::module_inception)]
 
 pub mod agent_lifecycle;
-pub mod agent_loop;
 pub mod config;
 pub mod event;
 

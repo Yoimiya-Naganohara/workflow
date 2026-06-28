@@ -123,14 +123,13 @@ Messages may contain important context from sibling agents.",
                 .as_ref()
                 .and_then(|effort| provider.reasoning_params(effort, &reasoning_options));
             let stream = match provider
-                .chat_with_tools_loop(
+                .chat_with_tools_stream_mcp(
                     &config.model_id,
                     &system_prompt,
                     &leaf_goal,
                     &[],
                     handle,
                     additional_params.as_ref(),
-                    crate::llm::chat::LoopConfig::default(),
                 )
                 .await
             {

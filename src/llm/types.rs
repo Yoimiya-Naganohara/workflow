@@ -151,17 +151,6 @@ pub enum ToolEvent {
     MessageStart,
     /// A message completes (pi-agent-core: message_end)
     MessageEnd,
-    /// A tool begins execution (pi-agent-core: tool_execution_start)
-    ToolExecutionStart {
-        name: String,
-        args: serde_json::Value,
-    },
-    /// A tool execution completes (pi-agent-core: tool_execution_end)
-    ToolExecutionEnd {
-        name: String,
-        result: String,
-        is_error: bool,
-    },
     Text(String),
     /// Reasoning/chain-of-thought content emitted by the model.
     /// Separate from Text so the TUI can render it with distinct styling
