@@ -455,7 +455,7 @@ pub struct ToolCallError(pub String);
 mod tests {
     use super::*;
     use std::io::Write;
-    use tempfile::{NamedTempFile, TempDir};
+    use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn test_read_file_basic() {

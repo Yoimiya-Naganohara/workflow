@@ -133,6 +133,10 @@ impl Tui {
         let mut event_stream = EventStream::new();
         let mut interval = tokio::time::interval(Duration::from_millis(50));
 
+        // Initial draw: render the TUI immediately at startup so the user
+        // sees the interface without having to press a key first.
+        self.draw().await?;
+
         loop {
             self.needs_redraw = false;
 
