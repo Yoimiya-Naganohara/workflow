@@ -15,6 +15,7 @@ fn make_msg(role: &str, content: &str) -> ChatMessage {
         },
         content: content.to_string(),
         reasoning: String::new(),
+        chunks: vec![],
         timestamp: "2026-01-01T00:00:00Z".to_string(),
         status: MessageStatus::Completed,
     }

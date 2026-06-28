@@ -18,8 +18,9 @@ pub fn register_tools(
     agent_pool: Arc<RwLock<crate::agent::AgentPool>>,
     runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
     responsible_agent_id: Option<crate::core::types::AgentId>,
+    runtime: Option<Arc<RwLock<crate::runtime::AgentRuntime>>>,
 ) -> crate::tools::ToolServer {
-    server
+    let server = server
         .tool(SpawnAgent {
             runtime_event_tx: runtime_event_tx.clone(),
             responsible_agent_id,
@@ -33,7 +34,19 @@ pub fn register_tools(
             agent_pool: agent_pool.clone(),
             responsible_agent_id,
         })
-        .tool(ListAgents { agent_pool })
+        .tool(ListAgents { agent_pool });
+
+    if let Some(rt) = runtime {
+        server
+            .tool(crate::tools::decompose::DecomposeTool {
+                runtime: rt.clone(),
+                runtime_event_tx,
+                responsible_agent_id,
+            })
+            .tool(crate::tools::decompose::ConfirmSubtasksTool { runtime: rt })
+    } else {
+        server
+    }
 }
 
 // ── SendMessage ──
@@ -522,7 +535,7 @@ mod tests {
     fn test_register_tools_returns_server() {
         let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
         let server = crate::tools::ToolServer::new();
-        let _server = register_tools(server, pool, None, None);
+        let _server = register_tools(server, pool, None, None, None);
         // Should not panic
     }
 }

@@ -59,7 +59,7 @@ pub enum AppMode {
     Build,
 }
 
-pub use crate::core::types::{ChatMessage, MessageRole, MessageStatus, SelectedModel};
+pub use crate::core::types::{ChatMessage, MessageRole, MessageStatus, SelectedModel, StreamChunk};
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
@@ -68,6 +68,7 @@ impl ChatMessage {
             role: MessageRole::System,
             content: content.into(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: now,
             status: MessageStatus::Completed,
         }
@@ -223,6 +224,7 @@ impl AppState {
                     role: MessageRole::System,
                     content: error,
                     reasoning: String::new(),
+                    chunks: vec![],
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     status,
                 });
@@ -232,6 +234,7 @@ impl AppState {
                     role: MessageRole::System,
                     content,
                     reasoning: String::new(),
+                    chunks: vec![],
                     timestamp,
                     status: MessageStatus::Completed,
                 });
@@ -241,6 +244,7 @@ impl AppState {
                     role: MessageRole::System,
                     content: error,
                     reasoning: String::new(),
+                    chunks: vec![],
                     timestamp,
                     status: MessageStatus::Error,
                 });
@@ -254,6 +258,7 @@ impl AppState {
                     role: MessageRole::System,
                     content,
                     reasoning: String::new(),
+                    chunks: vec![],
                     timestamp,
                     status: if is_error {
                         MessageStatus::Error
@@ -272,6 +277,7 @@ impl AppState {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
                         let was_thinking = msg.status == MessageStatus::Thinking;
                         msg.content.push_str(&text);
+                        msg.chunks.push(StreamChunk::Text(text));
                         msg.status = MessageStatus::Streaming;
                         // On first token, recalc local estimate only if no API token
                         // data has arrived yet.  Once ChatTokenUsage events are flowing,
@@ -291,6 +297,7 @@ impl AppState {
                 {
                     if let Some(msg) = self.core.messages.get_mut(slot) {
                         msg.reasoning.push_str(&text);
+                        msg.chunks.push(StreamChunk::Reasoning(text));
                     }
                 }
             }
@@ -389,6 +396,7 @@ impl AppState {
                         role: MessageRole::Agent,
                         content: error,
                         reasoning: String::new(),
+                        chunks: vec![],
                         timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                         status: MessageStatus::Error,
                     });
@@ -462,47 +470,41 @@ impl AppState {
                 )));
             }
             AppEvent::ChatToolCall {
-                response_index: _,
+                response_index,
                 name,
                 args,
                 timestamp: _,
             } => {
-                // Tool call format:
-                //   <tool_name>
-                //   key=value
-                //   key=value
-                //   <blank line>
-                //
-                // Each arg line is truncated at 200 chars to prevent runaway
-                // content (e.g. embedded file contents passed as args).
-                let args_trunc = if args.len() > 200 {
-                    let end = args
-                        .char_indices()
-                        .nth(197)
-                        .map(|(i, _)| i)
-                        .unwrap_or(args.len());
-                    format!("{}…", &args[..end])
-                } else {
-                    args
-                };
-
-                // Always create a separate Decision message so tool calls get
-                // rendered with the "> " prefix by tool_call_lines().
-                // Previously tool calls were appended to the streaming message
-                // content, which rendered them as unstyled raw text.
-                let mut content = name;
-                for arg_line in args_trunc.lines() {
-                    content.push('\n');
-                    content.push_str(arg_line);
+                // Push to the streaming message's ordered chunks so tool calls
+                // render in their original position relative to text/reasoning.
+                if let Some(slot) =
+                    find_streaming_slot_response(&self.core.messages, response_index)
+                {
+                    if let Some(msg) = self.core.messages.get_mut(slot) {
+                        let args_trunc = if args.len() > 200 {
+                            let end = args
+                                .char_indices()
+                                .nth(197)
+                                .map(|(i, _)| i)
+                                .unwrap_or(args.len());
+                            format!("{}…", &args[..end])
+                        } else {
+                            args.clone()
+                        };
+                        msg.chunks.push(StreamChunk::ToolCall {
+                            name: name.clone(),
+                            args: args_trunc,
+                        });
+                        // Keep content in sync for legacy rendering / export
+                        let mut formatted = name;
+                        for arg_line in args.lines() {
+                            formatted.push('\n');
+                            formatted.push_str(arg_line);
+                        }
+                        formatted.push('\n');
+                        msg.content.push_str(&formatted);
+                    }
                 }
-                content.push('\n');
-                self.core.messages.push(ChatMessage {
-                    role: MessageRole::Decision,
-                    content,
-                    reasoning: String::new(),
-                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                    status: MessageStatus::Completed,
-                });
                 self.recalc_tokens();
             }
             AppEvent::SelfCheckResult {
@@ -545,6 +547,7 @@ impl AppState {
                     role: MessageRole::System,
                     content: feedback_msg,
                     reasoning: String::new(),
+                    chunks: vec![],
                     timestamp: now,
                     status: MessageStatus::Completed,
                 });
@@ -559,6 +562,7 @@ impl AppState {
                     role: MessageRole::Agent,
                     content: String::new(),
                     reasoning: String::new(),
+                    chunks: vec![],
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     status: MessageStatus::Thinking,
                 });
@@ -605,6 +609,7 @@ impl AppState {
                     role: MessageRole::System,
                     content,
                     reasoning: String::new(),
+                    chunks: vec![],
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     status: MessageStatus::Completed,
                 });
@@ -894,6 +899,7 @@ impl Default for ChatMessage {
             role: MessageRole::System,
             content: String::new(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: String::new(),
             status: MessageStatus::Completed,
         }
@@ -949,6 +955,7 @@ mod tests {
                 role: MessageRole::User,
                 content: "Hello".into(),
                 reasoning: String::new(),
+                chunks: vec![],
                 timestamp: "00:00:01".into(),
                 status: MessageStatus::Completed,
             },
@@ -956,6 +963,7 @@ mod tests {
                 role: MessageRole::Agent,
                 content: "Hi there".into(),
                 reasoning: String::new(),
+                chunks: vec![],
                 timestamp: "00:00:02".into(),
                 status: MessageStatus::Completed,
             },
@@ -964,6 +972,7 @@ mod tests {
                 role: MessageRole::User,
                 content: "New question".into(),
                 reasoning: String::new(),
+                chunks: vec![],
                 timestamp: "00:00:03".into(),
                 status: MessageStatus::Completed,
             },
@@ -1031,6 +1040,7 @@ mod tests {
             role: MessageRole::User,
             content: "Write a test".into(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: "00:00:01".into(),
             status: MessageStatus::Completed,
         });
@@ -1038,6 +1048,7 @@ mod tests {
             role: MessageRole::Agent,
             content: String::new(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: "00:00:02".into(),
             status: MessageStatus::Streaming,
         });
@@ -1077,6 +1088,7 @@ mod tests {
             role: MessageRole::User,
             content: "Do something".into(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: "00:00:01".into(),
             status: MessageStatus::Completed,
         });
@@ -1084,6 +1096,7 @@ mod tests {
             role: MessageRole::Agent,
             content: String::new(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: "00:00:02".into(),
             status: MessageStatus::Thinking,
         });
@@ -1200,6 +1213,7 @@ mod tests {
             role: MessageRole::User,
             content: "Implement feature".into(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: "00:01:00".into(),
             status: MessageStatus::Completed,
         });
@@ -1207,6 +1221,7 @@ mod tests {
             role: MessageRole::Agent,
             content: "Working on it...".into(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: "00:01:01".into(),
             status: MessageStatus::Completed,
         });
@@ -1218,6 +1233,7 @@ mod tests {
             role: MessageRole::User,
             content: "Add tests".into(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: "00:02:00".into(),
             status: MessageStatus::Completed,
         });
@@ -1227,6 +1243,7 @@ mod tests {
             role: MessageRole::Agent,
             content: String::new(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: "00:02:01".into(),
             status: MessageStatus::Thinking,
         });

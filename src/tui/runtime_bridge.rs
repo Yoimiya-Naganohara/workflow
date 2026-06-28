@@ -67,6 +67,7 @@ pub async fn runtime_event_broker(
                         role: MessageRole::System,
                         content: content.clone(),
                         reasoning: String::new(),
+                        chunks: vec![],
                         timestamp: now,
                         status: MessageStatus::Completed,
                     });
@@ -102,6 +103,7 @@ pub async fn runtime_event_broker(
                     role: MessageRole::Agent,
                     content: result,
                     reasoning: String::new(),
+                    chunks: vec![],
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     status: MessageStatus::Completed,
                 });
@@ -142,6 +144,7 @@ pub async fn runtime_event_broker(
             // visible in the TUI once the delegation engine is wired
             // up (Phase 3).  For now they just bump the tree version.
             RuntimeEvent::SpawnTask { .. }
+            | RuntimeEvent::SpawnTaskWithConfirm { .. }
             | RuntimeEvent::TaskCompleted { .. }
             | RuntimeEvent::TaskFailed { .. }
             | RuntimeEvent::EscalateTask { .. }

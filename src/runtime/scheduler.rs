@@ -9,8 +9,8 @@ use crate::runtime::AgentRuntime;
 use crate::runtime::event::RuntimeEvent;
 use crate::runtime::graph_analytics::TemplateEvolution;
 use crate::runtime::orchestration::{
-    CapabilityRegistry, DecompositionEngine, DispatchDecider, DispatchDecision, EscalationPolicy,
-    RoleSelector, TaskOutcome, TaskOutcomeStore,
+    CapabilityRegistry, DispatchDecider, DispatchDecision, EscalationPolicy, RoleSelector,
+    TaskOutcome, TaskOutcomeStore,
 };
 use crate::runtime::strategy_graph::{StrategyGraph, StrategyId, StrategyType, TaskSignature};
 
@@ -19,7 +19,6 @@ pub struct TaskScheduler {
     pool: Arc<RwLock<AgentPool>>,
     broker_tx: mpsc::Sender<RuntimeEvent>,
     decider: Box<dyn DispatchDecider>,
-    decomposition: Option<Box<dyn DecompositionEngine>>,
     role_selector: Option<Box<dyn RoleSelector>>,
     capability_registry: Option<Arc<RwLock<CapabilityRegistry>>>,
     escalation: Option<Box<dyn EscalationPolicy>>,
@@ -42,7 +41,6 @@ impl TaskScheduler {
             pool,
             broker_tx,
             decider,
-            decomposition: None,
             role_selector: None,
             capability_registry: None,
             escalation: None,
@@ -50,10 +48,6 @@ impl TaskScheduler {
             strategy_graph: None,
             template_evolution: None,
         }
-    }
-    pub fn with_decomposition(mut self, engine: Box<dyn DecompositionEngine>) -> Self {
-        self.decomposition = Some(engine);
-        self
     }
     pub fn with_routing(
         mut self,
@@ -132,26 +126,6 @@ impl TaskScheduler {
                         task_id[0],
                         e
                     );
-                    continue;
-                }
-            }
-            if let Some(ref engine) = self.decomposition {
-                let should = {
-                    let rt = self.runtime.read().await;
-                    let g = rt.task_graph.lock().expect("scheduler mutex poisoned");
-                    engine.should_decompose(task_id, &g)
-                };
-                if should {
-                    let rt = self.runtime.read().await;
-                    let mut g = rt.task_graph.lock().expect("scheduler mutex poisoned");
-                    let children = engine.decompose(task_id, &mut g);
-                    if !children.is_empty() {
-                        tracing::info!(
-                            "scheduler: task {:02x}.. decomposed into {} subtask(s)",
-                            task_id[0],
-                            children.len()
-                        );
-                    }
                     continue;
                 }
             }
@@ -392,11 +366,7 @@ mod tests {
         let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
         let (_tx, _rx) = mpsc::channel(16);
         let decider = test_decider();
-        let scheduler = TaskScheduler::new(rt, pool, _tx, decider);
-        // Builder methods should chain
-        let _ = scheduler.with_decomposition(Box::new(
-            crate::runtime::orchestration::NoopDecompositionEngine,
-        ));
+        let _scheduler = TaskScheduler::new(rt, pool, _tx, decider);
     }
 
     #[tokio::test]
@@ -447,16 +417,12 @@ mod tests {
         let (_tx, _rx) = mpsc::channel(16);
         let decider = test_decider();
 
-        let scheduler = TaskScheduler::new(rt.clone(), pool.clone(), _tx, decider)
-            .with_decomposition(Box::new(
-                crate::runtime::orchestration::NoopDecompositionEngine,
-            ))
-            .with_escalation(
-                Box::new(crate::runtime::orchestration::DefaultEscalationPolicy::default()),
-                Arc::new(RwLock::new(
-                    crate::runtime::orchestration::TaskOutcomeStore::new(),
-                )),
-            );
+        let scheduler = TaskScheduler::new(rt.clone(), pool.clone(), _tx, decider).with_escalation(
+            Box::new(crate::runtime::orchestration::DefaultEscalationPolicy::default()),
+            Arc::new(RwLock::new(
+                crate::runtime::orchestration::TaskOutcomeStore::new(),
+            )),
+        );
 
         // Add a task
         {

@@ -7,8 +7,9 @@ use ratatui::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::state::{CoreState, MessageRole};
+use super::state::{CoreState, MessageRole, MessageStatus};
 use super::style;
+use crate::core::types::StreamChunk;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Public types
@@ -167,6 +168,47 @@ impl ChatRenderOutput {
     }
 }
 
+/// Render a block of markdown text, calling `build_line` for each non-table line.
+fn render_md_block<F>(
+    rendered: &mut Vec<RenderedLine>,
+    text: &str,
+    body_width: usize,
+    line_idx: &mut usize,
+    next_table_idx: &mut usize,
+    build_line: F,
+) where
+    F: Fn(&MdLine) -> (Line<'static>, Option<TableDef>),
+{
+    let result = render_md(text, body_width);
+    for md_line in result.lines {
+        if let Some(ti) = md_line.table_ref {
+            if ti == *next_table_idx {
+                let td = &result.tables[ti];
+                let table_h = compute_table_height(td);
+                let table_def = TableDef {
+                    start_line: *line_idx,
+                    end_line: *line_idx + table_h,
+                    header: td.header.clone(),
+                    rows: td.rows.clone(),
+                    col_widths: td.col_widths.clone(),
+                };
+                for _ in 0..table_h {
+                    rendered.push(RenderedLine {
+                        line: Line::from(Span::raw("")),
+                        table: Some(table_def.clone()),
+                    });
+                }
+                *line_idx += table_h;
+                *next_table_idx += 1;
+            }
+            continue;
+        }
+        let (line, table) = build_line(&md_line);
+        rendered.push(RenderedLine { line, table });
+        *line_idx += 1;
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  Main entry point
 // ═══════════════════════════════════════════════════════════════════════════
@@ -210,34 +252,9 @@ pub(crate) fn build_chat_content(
             continue;
         }
 
-        // Reasoning/chain-of-thought rendering (respect think_level)
-        if think_level > 0 && !message.reasoning.is_empty() {
-            let text = if think_level == 1 && message.reasoning.chars().count() > 200 {
-                format!(
-                    "{}...\n\n_Reasoning truncated (set `/think 2` for full)_",
-                    message.reasoning.chars().take(200).collect::<String>()
-                )
-            } else {
-                message.reasoning.clone()
-            };
-            let result = render_md(&text, body_width);
-            for md_line in result.lines {
-                let mut styled = vec![Span::styled("┊", Style::default().fg(style::TEXT_MUTED))];
-                styled.extend(md_line.spans.into_iter().map(|mut s| {
-                    s.style = s.style.add_modifier(Modifier::DIM);
-                    s
-                }));
-                rendered.push(RenderedLine {
-                    line: Line::from(styled),
-                    table: None,
-                });
-            }
-        }
-
         // User or Agent message — determine bar color based on role and status
         let is_user = matches!(message.role, MessageRole::User);
-        let bar_color = if message.status == crate::tui::state::MessageStatus::Error {
-            // Red bar for error messages (tool errors, agent failures, LLM errors)
+        let bar_color = if message.status == MessageStatus::Error {
             style::RED
         } else if is_user {
             style::GREEN
@@ -246,70 +263,224 @@ pub(crate) fn build_chat_content(
         };
         let bar_char = "┃";
 
-        // Animated thinking indicator for messages in Thinking state with no content yet.
-        if message.status == crate::tui::state::MessageStatus::Thinking
-            && message.content.is_empty()
-        {
-            let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-            let phase = (think_frame as usize / 2) % spinner.len();
-            let mut styled = vec![Span::styled(bar_char, Style::default().fg(bar_color))];
-            styled.push(Span::styled(
-                format!(" {} thinking…", spinner[phase]),
-                Style::default()
-                    .fg(style::YELLOW)
-                    .add_modifier(Modifier::DIM),
-            ));
-            rendered.push(RenderedLine {
-                line: Line::from(styled),
-                table: None,
-            });
-            continue;
-        }
-
-        let result = render_md(&message.content, body_width);
-
-        // Render all lines — tables are formatted as text lines with `│`
-        // column separators so they wrap naturally via Paragraph::Wrap.
-        // Emit table placeholders and regular lines
-        let mut line_idx = rendered.len();
-        let mut next_table_idx = 0;
-
-        for md_line in result.lines {
-            if let Some(ti) = md_line.table_ref {
-                if ti == next_table_idx {
-                    let td = &result.tables[ti];
-                    let table_h = compute_table_height(td);
-                    let table_def = TableDef {
-                        start_line: line_idx,
-                        end_line: line_idx + table_h,
-                        header: td.header.clone(),
-                        rows: td.rows.clone(),
-                        col_widths: td.col_widths.clone(),
-                    };
-                    for _ in 0..table_h {
-                        rendered.push(RenderedLine {
-                            line: Line::from(Span::raw("")),
-                            table: Some(table_def.clone()),
-                        });
-                    }
-                    // table_def is embedded in RenderedLine.table above
-                    line_idx += table_h;
-                    next_table_idx += 1;
-                }
+        if !message.chunks.is_empty() {
+            // ── Ordered chunks: render each token in its original position ──
+            if message.status == MessageStatus::Thinking && message.content.is_empty() {
+                let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                let phase = (think_frame as usize / 2) % spinner.len();
+                let mut styled = vec![Span::styled(bar_char, Style::default().fg(bar_color))];
+                styled.push(Span::styled(
+                    format!(" {} thinking…", spinner[phase]),
+                    Style::default()
+                        .fg(style::YELLOW)
+                        .add_modifier(Modifier::DIM),
+                ));
+                rendered.push(RenderedLine {
+                    line: Line::from(styled),
+                    table: None,
+                });
                 continue;
             }
-            let mut styled = vec![Span::styled(bar_char, Style::default().fg(bar_color))];
-            styled.extend(
-                md_line
-                    .spans
-                    .into_iter()
-                    .map(|s| Span::styled(s.content, s.style)),
-            );
-            rendered.push(RenderedLine {
-                line: Line::from(styled),
-                table: None,
-            });
-            line_idx += 1;
+            enum Merged {
+                Text(String),
+                Reasoning(String),
+                ToolCall { name: String, args: String },
+            }
+            let mut merged: Vec<Merged> = Vec::new();
+            for chunk in &message.chunks {
+                match chunk {
+                    StreamChunk::Text(t) => {
+                        if let Some(Merged::Text(last)) = merged.last_mut() {
+                            last.push_str(t);
+                        } else {
+                            merged.push(Merged::Text(t.clone()));
+                        }
+                    }
+                    StreamChunk::Reasoning(t) => {
+                        if let Some(Merged::Reasoning(last)) = merged.last_mut() {
+                            last.push_str(t);
+                        } else {
+                            merged.push(Merged::Reasoning(t.clone()));
+                        }
+                    }
+                    StreamChunk::ToolCall { name, args } => {
+                        merged.push(Merged::ToolCall {
+                            name: name.clone(),
+                            args: args.clone(),
+                        });
+                    }
+                }
+            }
+            let mut line_idx = rendered.len();
+            let mut next_table_idx = 0;
+            for chunk in &merged {
+                match chunk {
+                    Merged::Reasoning(text) => {
+                        if think_level == 0 {
+                            continue;
+                        }
+                        let display_text = if think_level == 1 && text.chars().count() > 200 {
+                            format!(
+                                "{}...\n\n_Reasoning truncated (set `/think 2` for full)_",
+                                text.chars().take(200).collect::<String>()
+                            )
+                        } else {
+                            text.clone()
+                        };
+                        render_md_block(
+                            &mut rendered,
+                            &display_text,
+                            body_width,
+                            &mut line_idx,
+                            &mut next_table_idx,
+                            |md_line| {
+                                let mut styled =
+                                    vec![Span::styled("┊", Style::default().fg(style::TEXT_MUTED))];
+                                styled.extend(md_line.spans.iter().map(|s| {
+                                    Span::styled(
+                                        s.content.clone(),
+                                        s.style.add_modifier(Modifier::DIM),
+                                    )
+                                }));
+                                (Line::from(styled), None)
+                            },
+                        );
+                    }
+                    Merged::Text(text) => {
+                        render_md_block(
+                            &mut rendered,
+                            text,
+                            body_width,
+                            &mut line_idx,
+                            &mut next_table_idx,
+                            |md_line| {
+                                let mut styled =
+                                    vec![Span::styled(bar_char, Style::default().fg(bar_color))];
+                                styled.extend(
+                                    md_line
+                                        .spans
+                                        .iter()
+                                        .map(|s| Span::styled(s.content.clone(), s.style)),
+                                );
+                                (Line::from(styled), None)
+                            },
+                        );
+                    }
+                    Merged::ToolCall { name, args } => {
+                        // Render tool call with "> " prefix like Decision messages
+                        let name_spans: Vec<Span<'static>> = vec![
+                            Span::styled("> ", Style::default().fg(style::TEXT_MUTED)),
+                            Span::styled(name.clone(), Style::default().fg(style::PURPLE)),
+                        ];
+                        rendered.push(RenderedLine {
+                            line: Line::from(name_spans),
+                            table: None,
+                        });
+                        line_idx += 1;
+                        for arg_line in args.lines() {
+                            let arg_trimmed = arg_line.trim();
+                            if arg_trimmed.is_empty() {
+                                continue;
+                            }
+                            let arg_spans = vec![
+                                Span::styled("  ", Style::default().fg(style::TEXT_MUTED)),
+                                Span::styled(
+                                    arg_trimmed.to_string(),
+                                    Style::default().fg(style::TEXT_SECONDARY),
+                                ),
+                            ];
+                            rendered.push(RenderedLine {
+                                line: Line::from(arg_spans),
+                                table: None,
+                            });
+                            line_idx += 1;
+                        }
+                    }
+                }
+            }
+        } else {
+            // ── Legacy messages (no chunks): render reasoning block then content block ──
+            if think_level > 0 && !message.reasoning.is_empty() {
+                let text = if think_level == 1 && message.reasoning.chars().count() > 200 {
+                    format!(
+                        "{}...\n\n_Reasoning truncated (set `/think 2` for full)_",
+                        message.reasoning.chars().take(200).collect::<String>()
+                    )
+                } else {
+                    message.reasoning.clone()
+                };
+                let result = render_md(&text, body_width);
+                for md_line in result.lines {
+                    let mut styled =
+                        vec![Span::styled("┊", Style::default().fg(style::TEXT_MUTED))];
+                    styled.extend(md_line.spans.into_iter().map(|mut s| {
+                        s.style = s.style.add_modifier(Modifier::DIM);
+                        s
+                    }));
+                    rendered.push(RenderedLine {
+                        line: Line::from(styled),
+                        table: None,
+                    });
+                }
+            }
+
+            // Animated thinking indicator for messages in Thinking state with no content yet.
+            if message.status == MessageStatus::Thinking && message.content.is_empty() {
+                let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                let phase = (think_frame as usize / 2) % spinner.len();
+                let mut styled = vec![Span::styled(bar_char, Style::default().fg(bar_color))];
+                styled.push(Span::styled(
+                    format!(" {} thinking…", spinner[phase]),
+                    Style::default()
+                        .fg(style::YELLOW)
+                        .add_modifier(Modifier::DIM),
+                ));
+                rendered.push(RenderedLine {
+                    line: Line::from(styled),
+                    table: None,
+                });
+                continue;
+            }
+
+            let result = render_md(&message.content, body_width);
+            let mut line_idx = rendered.len();
+            let mut next_table_idx = 0;
+            for md_line in result.lines {
+                if let Some(ti) = md_line.table_ref {
+                    if ti == next_table_idx {
+                        let td = &result.tables[ti];
+                        let table_h = compute_table_height(td);
+                        let table_def = TableDef {
+                            start_line: line_idx,
+                            end_line: line_idx + table_h,
+                            header: td.header.clone(),
+                            rows: td.rows.clone(),
+                            col_widths: td.col_widths.clone(),
+                        };
+                        for _ in 0..table_h {
+                            rendered.push(RenderedLine {
+                                line: Line::from(Span::raw("")),
+                                table: Some(table_def.clone()),
+                            });
+                        }
+                        line_idx += table_h;
+                        next_table_idx += 1;
+                    }
+                    continue;
+                }
+                let mut styled = vec![Span::styled(bar_char, Style::default().fg(bar_color))];
+                styled.extend(
+                    md_line
+                        .spans
+                        .into_iter()
+                        .map(|s| Span::styled(s.content, s.style)),
+                );
+                rendered.push(RenderedLine {
+                    line: Line::from(styled),
+                    table: None,
+                });
+                line_idx += 1;
+            }
         }
     }
 
@@ -1641,6 +1812,7 @@ mod tests {
                 content: "Show me data\n\n| Name | Value |\n| --- | --- |\n| A | 1 |\n| B | 2 |\n"
                     .to_string(),
                 reasoning: String::new(),
+                chunks: vec![],
                 timestamp: "00:00".to_string(),
                 status: MessageStatus::Completed,
             }],

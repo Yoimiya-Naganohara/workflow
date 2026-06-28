@@ -261,6 +261,14 @@ pub enum MessageRole {
     Decision,
 }
 
+/// A single chunk of streaming output, preserving original token order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StreamChunk {
+    Text(String),
+    Reasoning(String),
+    ToolCall { name: String, args: String },
+}
+
 /// A single chat message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -268,6 +276,8 @@ pub struct ChatMessage {
     pub content: String,
     #[serde(default)]
     pub reasoning: String,
+    #[serde(default)]
+    pub chunks: Vec<StreamChunk>,
     pub timestamp: String,
     pub status: MessageStatus,
 }

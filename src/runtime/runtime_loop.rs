@@ -29,9 +29,8 @@ use crate::runtime::AgentRuntime;
 use crate::runtime::event::RuntimeEvent;
 use crate::runtime::graph_analytics::TemplateEvolution;
 use crate::runtime::orchestration::{
-    CapabilityRegistry, DefaultDecompositionEngine, DefaultEscalationPolicy, DefaultRoleSelector,
-    EmbeddingGoalAnalyzer, PipelineDispatchDecider, ReferenceEmbeddings, TaskOutcomeStore,
-    TensionThreshold,
+    CapabilityRegistry, DefaultEscalationPolicy, DefaultRoleSelector, EmbeddingGoalAnalyzer,
+    PipelineDispatchDecider, ReferenceEmbeddings, TaskOutcomeStore,
 };
 use crate::runtime::scheduler::TaskScheduler;
 use crate::runtime::strategy_graph::{CompetitionProtocol, StrategyGraph};
@@ -86,10 +85,6 @@ impl RuntimeEventLoop {
                     Box::new(DefaultEscalationPolicy::default()),
                     Arc::new(RwLock::new(TaskOutcomeStore::new())),
                 )
-                .with_decomposition(Box::new(DefaultDecompositionEngine::new(
-                    TensionThreshold::default(),
-                    goal_analyzer.clone(),
-                )))
                 .with_routing(
                     Box::new(DefaultRoleSelector::new(goal_analyzer)),
                     Arc::new(RwLock::new(CapabilityRegistry::new())),
@@ -316,6 +311,19 @@ impl RuntimeEventLoop {
                     self.handle_spawn_task(goal, role, parent_agent).await;
                 }
 
+                RuntimeEvent::SpawnTaskWithConfirm {
+                    goal,
+                    role,
+                    parent_agent,
+                    auto_confirm,
+                    response_tx,
+                } => {
+                    let result = self
+                        .handle_spawn_task_with_confirm(goal, role, parent_agent, auto_confirm)
+                        .await;
+                    let _ = response_tx.send(result);
+                }
+
                 RuntimeEvent::TaskCompleted { task_id, result } => {
                     self.handle_task_completed(task_id, &result).await;
                 }
@@ -395,6 +403,73 @@ impl RuntimeEventLoop {
         );
 
         self.scheduler.dispatch().await;
+    }
+
+    /// Handle `SpawnTaskWithConfirm` — like `handle_spawn_task` but returns
+    /// the created task ID via a oneshot channel and supports PendingConfirm.
+    async fn handle_spawn_task_with_confirm(
+        &self,
+        goal: String,
+        role: String,
+        parent_agent: AgentId,
+        auto_confirm: bool,
+    ) -> Result<crate::core::types::TaskId, String> {
+        let (effective_parent_id, task_graph) = {
+            let p = self.pool.read().await;
+            let pid = p.get_agent(&parent_agent).and_then(|a| a.task_id);
+            let pid = pid.ok_or_else(|| {
+                format!(
+                    "parent {:02x}.. has no task_id — inconsistent",
+                    parent_agent[0]
+                )
+            })?;
+            let rt = self.runtime.read().await;
+            let tg = rt.task_graph.clone();
+            (pid, tg)
+        };
+
+        let child_task_id = {
+            let mut g = task_graph.lock().expect("runtime_loop mutex poisoned");
+            let cid = g.spawn_child(effective_parent_id, &goal).ok_or_else(|| {
+                format!("parent {:02x}.. not found in graph", effective_parent_id[0])
+            })?;
+
+            if let Some(node) = g.get_mut(&cid) {
+                node.role = Some(role.clone());
+            }
+
+            // Ensure parent is marked Decomposed.
+            if let Some(parent) = g.get(&effective_parent_id) {
+                if parent.status == crate::runtime::task_graph::TaskStatus::Created
+                    || parent.status == crate::runtime::task_graph::TaskStatus::Ready
+                {
+                    g.mark_decomposed(effective_parent_id).ok();
+                }
+            }
+
+            // If auto_confirm=false, mark as PendingConfirm.
+            if !auto_confirm {
+                g.mark_pending_confirm(cid)
+                    .map_err(|e| format!("mark_pending_confirm failed: {}", e))?;
+            }
+
+            cid
+        };
+
+        tracing::info!(
+            "SpawnTaskWithConfirm: created task {:02x}.. under {:02x}.. (role={}, auto_confirm={})",
+            child_task_id[0],
+            effective_parent_id[0],
+            role,
+            auto_confirm
+        );
+
+        // Schedule if auto_confirm (don't dispatch PendingConfirm tasks).
+        if auto_confirm {
+            self.scheduler.dispatch().await;
+        }
+
+        Ok(child_task_id)
     }
 
     /// Handle `TaskCompleted` — mark a task done in the graph, then schedule.

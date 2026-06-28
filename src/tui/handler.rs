@@ -3,12 +3,8 @@
 //! Handles all key events including popup navigation.
 //! Business logic delegated to [`crate::tui::controller`] and [`commands`].
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
-use crate::runtime::orchestration::{
-    DecompositionEngine, DefaultDecompositionEngine, EmbeddingGoalAnalyzer, ReferenceEmbeddings,
-    TensionThreshold,
-};
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::Tui;
@@ -17,10 +13,6 @@ use super::keymap::Action;
 use super::state::{AppState, ChatMessage, Focus, MessageRole, MessageStatus, PopupMode};
 use crate::tui::chat_lines::char_idx_to_byte_idx;
 use crate::tui::effect::Effect;
-
-/// Cached reference embeddings for embedding-based goal analysis.
-/// Initialized on first compiler pass via `block_on` (tokio main runtime).
-static REF_EMBEDDINGS: OnceLock<Arc<ReferenceEmbeddings>> = OnceLock::new();
 
 impl Tui {
     /// Handle a key event. Returns `true` to continue, `false` to quit.
@@ -671,6 +663,7 @@ impl Tui {
             role: MessageRole::User,
             content,
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: now.clone(),
             status: MessageStatus::Completed,
         });
@@ -680,6 +673,7 @@ impl Tui {
             role: MessageRole::Agent,
             content: String::new(),
             reasoning: String::new(),
+            chunks: vec![],
             timestamp: now.clone(),
             status: MessageStatus::Thinking,
         });
@@ -727,60 +721,12 @@ impl Tui {
                             .unwrap_or(false);
 
                         if needs_task {
-                            // Pass 1: Create root task node.
+                            // Create root task node and assign to agent.
                             let root_id = graph.spawn_root(&input);
-
-                            // Pass 2: Embedding-based decomposition.
-                            // The embedding call blocks briefly (fastembed ONNX, ~5-50ms).
-                            // This is acceptable because the TUI is already single-threaded.
-                            let compile = core.runtime.as_ref().and_then(|rt| {
-                                let r = rt.try_read().ok()?;
-                                let embed = r.embedding_service();
-                                let refs = REF_EMBEDDINGS
-                                    .get_or_init(|| {
-                                        Arc::new(tokio::task::block_in_place(|| {
-                                            tokio::runtime::Handle::current()
-                                                .block_on(ReferenceEmbeddings::compute(&*embed))
-                                        }))
-                                    })
-                                    .clone();
-                                let emb = tokio::task::block_in_place(|| {
-                                    tokio::runtime::Handle::current().block_on(embed.embed(&input))
-                                })
-                                .ok()?;
-                                Some((refs, emb))
-                            });
-
-                            if let Some((refs, goal_emb)) = compile {
-                                let analyzer =
-                                    EmbeddingGoalAnalyzer::with_goal((*refs).clone(), goal_emb);
-                                let engine = DefaultDecompositionEngine::new(
-                                    TensionThreshold::default(),
-                                    Arc::new(analyzer),
-                                );
-                                let should_split = engine.should_decompose(root_id, &graph);
-
-                                if should_split {
-                                    let _children = engine.decompose(root_id, &mut graph);
-                                    if let Ok(mut pool) = core.agent_pool.try_write() {
-                                        if let Some(agent) = pool.get_agent_mut(&aid) {
-                                            agent.task_id = Some(root_id);
-                                            if let Some(first_child) = graph
-                                                .get(&root_id)
-                                                .and_then(|n| n.children.first())
-                                                .and_then(|cid| graph.get(cid))
-                                            {
-                                                if let Some(ref role) = first_child.role {
-                                                    agent.role = role.clone();
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else if let Ok(mut pool) = core.agent_pool.try_write() {
-                                    if let Some(agent) = pool.get_agent_mut(&aid) {
-                                        agent.task_id = Some(root_id);
-                                        agent.role = "planner".to_string();
-                                    }
+                            if let Ok(mut pool) = core.agent_pool.try_write() {
+                                if let Some(agent) = pool.get_agent_mut(&aid) {
+                                    agent.task_id = Some(root_id);
+                                    agent.role = "planner".to_string();
                                 }
                             }
                         }

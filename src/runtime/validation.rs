@@ -307,39 +307,16 @@ impl Validator {
 
     /// Run a single task through the Graph Compiler.
     ///
-    /// Uses the same deterministic passes as the TUI handler:
-    /// TaskGraph root → DecompositionEngine → role inference
+    /// Creates a root task node and measures graph structure.
+    /// Decomposition is now handled by the LLM tool at runtime.
     fn run_compiler(task: &ValidationTask) -> TaskMeasurement {
-        use crate::runtime::orchestration::{
-            DecompositionEngine, DefaultDecompositionEngine, MockGoalAnalyzer, TensionThreshold,
-        };
         use crate::runtime::task_graph::TaskGraph;
-        use std::sync::Arc;
 
         let mut graph = TaskGraph::new();
-        let root_id = graph.spawn_root(task.goal);
-        // Mock analyzer calibrated per task category.
-        let (domain, ambiguity) = match task.category {
-            TaskCategory::Simple | TaskCategory::Analysis => (1, 0.0),
-            TaskCategory::MultiDomain | TaskCategory::Sequential => (3, 0.0),
-            TaskCategory::Ambiguous => (1, 0.7),
-        };
-        let engine = DefaultDecompositionEngine::new(
-            TensionThreshold::default(),
-            Arc::new(MockGoalAnalyzer {
-                domain_count: domain,
-                ambiguity,
-                role: Some(("developer".into(), 0.8)),
-            }),
-        );
+        let _root_id = graph.spawn_root(task.goal);
 
-        let (dag_depth, node_count) = if engine.should_decompose(root_id, &graph) {
-            let _children = engine.decompose(root_id, &mut graph);
-            let depth = graph.ancestor_chain(root_id).len() as u32;
-            (depth, graph.len())
-        } else {
-            (1, 1)
-        };
+        // No heuristic decomposition — the graph is always a single root node.
+        let (dag_depth, node_count) = (1, 1);
 
         // Count distinct roles in the graph.
         let roles: std::collections::HashSet<&str> = graph
@@ -465,16 +442,18 @@ mod tests {
             category: TaskCategory::MultiDomain,
             goal: "Build a full-stack web app\n- @backend API\n- @frontend UI\n- @database schema",
             expected_roles: &["developer"],
-            expected_depth: 2,
-            expected_task_count: 3,
+            expected_depth: 1,
+            expected_task_count: 1,
         }];
         let compiler = Validator::run_suite(&suite, ExecutionMode::Compiler);
         let baseline = Validator::run_suite(&suite, ExecutionMode::AgentOnly);
 
         let cmp = Validator::compare(&baseline, &compiler);
-        assert!(
-            compiler.tasks[0].node_count > baseline.tasks[0].node_count,
-            "compiler should produce more nodes for multi-domain tasks"
+        // Decomposition is now LLM-driven (decompose tool), so both modes
+        // produce the same single-root structure. Verify no regression.
+        assert_eq!(
+            compiler.tasks[0].node_count, baseline.tasks[0].node_count,
+            "compiler and baseline should produce same node count (decomposition is LLM-driven)"
         );
         assert!(
             cmp.stability_ratio >= 1.0 || cmp.accuracy_delta >= 0.0,

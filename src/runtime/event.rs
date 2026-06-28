@@ -22,7 +22,7 @@ use crate::core::types::TaskId;
 ///
 /// Every variant is also forwarded to the TUI broker (via
 /// `tui/runtime_bridge.rs`) so the UI can react to state changes.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum RuntimeEvent {
     // ── Execution events ──
     /// Activate a (newly spawned) agent in the background.
@@ -96,6 +96,18 @@ pub enum RuntimeEvent {
         parent_agent: AgentId,
     },
 
+    /// Spawn a sub-task with confirmation control.
+    ///
+    /// Used by the decompose tool. The response channel returns the
+    /// created task's ID so the caller can wire dependencies.
+    SpawnTaskWithConfirm {
+        goal: String,
+        role: String,
+        parent_agent: AgentId,
+        auto_confirm: bool,
+        response_tx: tokio::sync::oneshot::Sender<Result<TaskId, String>>,
+    },
+
     /// A task in the graph has completed successfully.
     ///
     /// The runtime checks the DAG for newly-runnable downstream tasks
@@ -134,6 +146,93 @@ pub enum RuntimeEvent {
     },
 }
 
+impl Clone for RuntimeEvent {
+    fn clone(&self) -> Self {
+        match self {
+            Self::ActivateAgent {
+                agent_id,
+                parent_id,
+            } => Self::ActivateAgent {
+                agent_id: *agent_id,
+                parent_id: *parent_id,
+            },
+            Self::ChildCompleted {
+                parent_id,
+                child_id,
+                result,
+            } => Self::ChildCompleted {
+                parent_id: *parent_id,
+                child_id: *child_id,
+                result: result.clone(),
+            },
+            Self::ReadyForAggregation { agent_id } => Self::ReadyForAggregation {
+                agent_id: *agent_id,
+            },
+            Self::AgentFailed { agent_id, error } => Self::AgentFailed {
+                agent_id: *agent_id,
+                error: error.clone(),
+            },
+            Self::AggregationCompleted { agent_id, result } => Self::AggregationCompleted {
+                agent_id: *agent_id,
+                result: result.clone(),
+            },
+            Self::InboxMessage {
+                agent_id,
+                from_name,
+                preview,
+                unread_count,
+            } => Self::InboxMessage {
+                agent_id: *agent_id,
+                from_name: from_name.clone(),
+                preview: preview.clone(),
+                unread_count: *unread_count,
+            },
+            Self::SpawnTask {
+                goal,
+                role,
+                parent_agent,
+            } => Self::SpawnTask {
+                goal: goal.clone(),
+                role: role.clone(),
+                parent_agent: *parent_agent,
+            },
+            // SpawnTaskWithConfirm carries a oneshot::Sender which can't be cloned.
+            // This variant should not be cloned in practice.
+            Self::SpawnTaskWithConfirm { .. } => {
+                panic!("SpawnTaskWithConfirm cannot be cloned")
+            }
+            Self::TaskCompleted { task_id, result } => Self::TaskCompleted {
+                task_id: *task_id,
+                result: result.clone(),
+            },
+            Self::TaskFailed { task_id, error } => Self::TaskFailed {
+                task_id: *task_id,
+                error: error.clone(),
+            },
+            Self::EscalateTask {
+                task_id,
+                reason,
+                target_role,
+                from_agent,
+            } => Self::EscalateTask {
+                task_id: *task_id,
+                reason: reason.clone(),
+                target_role: target_role.clone(),
+                from_agent: *from_agent,
+            },
+            Self::MergeTaskResult {
+                from_task,
+                into_task,
+                summary,
+            } => Self::MergeTaskResult {
+                from_task: *from_task,
+                into_task: *into_task,
+                summary: summary.clone(),
+            },
+        }
+    }
+}
+
 impl RuntimeEvent {
     /// Human-readable label for logging / TUI.
     pub fn label(&self) -> &'static str {
@@ -147,6 +246,7 @@ impl RuntimeEvent {
             RuntimeEvent::InboxMessage { .. } => "inbox-message",
             // Delegation
             RuntimeEvent::SpawnTask { .. } => "spawn-task",
+            RuntimeEvent::SpawnTaskWithConfirm { .. } => "spawn-task-confirm",
             RuntimeEvent::TaskCompleted { .. } => "task-completed",
             RuntimeEvent::TaskFailed { .. } => "task-failed",
             RuntimeEvent::EscalateTask { .. } => "escalate-task",

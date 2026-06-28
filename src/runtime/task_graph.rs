@@ -76,6 +76,9 @@ pub enum TaskStatus {
     Rejected,
     /// Explicitly blocked / escalated.
     Blocked,
+    /// Waiting for parent confirmation before execution (auto_confirm=false).
+    /// Transitions to `Created` when confirmed.
+    PendingConfirm,
     /// Skipped (e.g. a conditional task that was unnecessary).
     Skipped,
 }
@@ -118,9 +121,12 @@ impl TaskStatus {
             (Running, Completed) => true,
             (Running, Failed) => true,
             (Decomposed, Completed) => true,
-            (Decomposed, Failed) => true, // FailFast propagation
-            (_, Blocked) => true,         // always allow block
-            (_, Skipped) => true,         // always allow skip
+            (Decomposed, Failed) => true,      // FailFast propagation
+            (_, Blocked) => true,              // always allow block
+            (_, Skipped) => true,              // always allow skip
+            (PendingConfirm, Created) => true, // confirm → ready to execute
+            (Created, PendingConfirm) => true, // spawn with auto_confirm=false
+            (Ready, PendingConfirm) => true,   // spawn with auto_confirm=false
             _ => false,
         }
     }
@@ -211,6 +217,7 @@ impl TaskNode {
             TaskStatus::Completed => "done",
             TaskStatus::Failed => "failed",
             TaskStatus::Blocked => "blocked",
+            TaskStatus::PendingConfirm => "pending_confirm",
             TaskStatus::Skipped => "skipped",
         }
     }
@@ -703,6 +710,40 @@ impl TaskGraph {
         Ok(())
     }
 
+    /// Mark a task as PendingConfirm (auto_confirm=false child).
+    pub fn mark_pending_confirm(&mut self, id: TaskId) -> Result<(), String> {
+        let node = self
+            .nodes
+            .get_mut(&id)
+            .ok_or_else(|| format!("Task {:02x} not found", id[0]))?;
+
+        if !node.status.can_transition_to(TaskStatus::PendingConfirm) {
+            return Err(format!(
+                "Cannot transition from {:?} to PendingConfirm",
+                node.status
+            ));
+        }
+        node.status = TaskStatus::PendingConfirm;
+        Ok(())
+    }
+
+    /// Confirm a PendingConfirm task — transitions to Created so it can be dispatched.
+    pub fn mark_created_from_pending(&mut self, id: TaskId) -> Result<(), String> {
+        let node = self
+            .nodes
+            .get_mut(&id)
+            .ok_or_else(|| format!("Task {:02x} not found", id[0]))?;
+
+        if !node.status.can_transition_to(TaskStatus::Created) {
+            return Err(format!(
+                "Cannot transition from {:?} to Created",
+                node.status
+            ));
+        }
+        node.status = TaskStatus::Created;
+        Ok(())
+    }
+
     // ── DAG scheduling API ──
 
     /// Return all tasks whose dependencies are satisfied and that are
@@ -1046,7 +1087,7 @@ impl std::fmt::Display for TaskGraph {
         let total: usize = counts.values().sum();
         write!(
             f,
-            "TaskGraph: {} total (created:{}, ready:{}, running:{}, decomposed:{}, done:{}, failed:{}, rejected:{}, blocked:{}, skipped:{})",
+            "TaskGraph: {} total (created:{}, ready:{}, running:{}, decomposed:{}, done:{}, failed:{}, rejected:{}, blocked:{}, pending_confirm:{}, skipped:{})",
             total,
             counts.get(&TaskStatus::Created).unwrap_or(&0),
             counts.get(&TaskStatus::Ready).unwrap_or(&0),
@@ -1056,6 +1097,7 @@ impl std::fmt::Display for TaskGraph {
             counts.get(&TaskStatus::Failed).unwrap_or(&0),
             counts.get(&TaskStatus::Rejected).unwrap_or(&0),
             counts.get(&TaskStatus::Blocked).unwrap_or(&0),
+            counts.get(&TaskStatus::PendingConfirm).unwrap_or(&0),
             counts.get(&TaskStatus::Skipped).unwrap_or(&0),
         )
     }
