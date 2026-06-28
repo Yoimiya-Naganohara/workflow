@@ -696,8 +696,8 @@ mod tests {
                 tokens_output: 0,
                 tool_trace: VecDeque::from(vec![
                     ToolCallRecord {
-                        name: "grep".into(),
-                        args_preview: "pattern=fn auth".into(),
+                        name: "sh".into(),
+                        args_preview: "command=grep fn auth".into(),
                         status: ToolStatus::Success,
                         error_message: None,
                     },
@@ -734,7 +734,7 @@ mod tests {
         };
         assert_eq!(trace.len(), 2);
         assert!(trace[0].contains("read_file"));
-        assert!(trace[1].contains("grep"));
+        assert!(trace[1].contains("sh"));
     }
 
     /// Verify that [`render_agent_detail_popup`] does not panic for a

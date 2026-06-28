@@ -519,15 +519,15 @@ impl AgentRuntime {
             "read_file",     // bit 0
             "write_file",    // bit 1
             "sh",            // bit 2
-            "list_dir",      // bit 3
-            "grep",          // bit 4
-            "find_files",    // bit 5
-            "move_file",     // bit 6
-            "copy_file",     // bit 7
-            "delete_file",   // bit 8
-            "append_file",   // bit 9 (deprecated)
-            "patch_file",    // bit 10 (deprecated)
-            "glob",          // bit 11 (deprecated)
+            "",              // bit 3 (removed: list_dir)
+            "",              // bit 4 (removed: grep)
+            "",              // bit 5 (removed: find_files)
+            "",              // bit 6 (removed: move_file)
+            "",              // bit 7 (removed: copy_file)
+            "",              // bit 8 (removed: delete_file)
+            "",              // bit 9 (removed: append_file)
+            "",              // bit 10 (removed: patch_file)
+            "",              // bit 11 (removed: glob)
             "spawn_agent",   // bit 12
             "read_memo",     // bit 13
             "write_memo",    // bit 14
@@ -537,10 +537,10 @@ impl AgentRuntime {
             "list_agents",   // bit 18
             "send_message",  // bit 19
             "read_messages", // bit 20
-            "line_edit",     // bit 21 (deprecated)
-            "fetch",         // bit 22
+            "",              // bit 21 (removed: line_edit)
+            "",              // bit 22 (removed: fetch)
             "search_asset",  // bit 23
-            "extract_json",  // bit 24
+            "",              // bit 24 (removed: extract_json)
             "diff_edit",     // bit 25
         ];
         TOOL_NAMES

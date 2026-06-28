@@ -538,7 +538,7 @@ mod tests {
         {
             let mut p = pool.write().await;
             p.mark_execution_start(&aid);
-            p.record_tool_call(&aid, "grep");
+            p.record_tool_call(&aid, "sh");
             p.mark_execution_complete(&aid);
         }
         let log = pool
@@ -549,7 +549,7 @@ mod tests {
         assert!(msg.contains("agent-1"));
         assert!(msg.contains("tester"));
         assert!(msg.contains("calls=1"));
-        assert!(msg.contains("grep"));
+        assert!(msg.contains("sh"));
     }
 
     #[tokio::test]
@@ -563,8 +563,8 @@ mod tests {
                 args: serde_json::json!({"path": "/tmp/test.txt"}),
             },
             ToolEvent::ToolCall {
-                name: "grep".to_string(),
-                args: serde_json::json!({"pattern": "fn main"}),
+                name: "sh".to_string(),
+                args: serde_json::json!({"command": "grep fn main"}),
             },
             ToolEvent::Text("found it".to_string()),
             ToolEvent::Done {
@@ -577,7 +577,7 @@ mod tests {
         let m = p.agent_metrics.get(&aid).unwrap();
         assert_eq!(m.total_calls, 2);
         assert_eq!(m.tools.get("read_file").unwrap().call_count, 1);
-        assert_eq!(m.tools.get("grep").unwrap().call_count, 1);
+        assert_eq!(m.tools.get("sh").unwrap().call_count, 1);
         assert_eq!(m.total_errors, 0);
     }
 }

@@ -423,8 +423,8 @@ mod tests {
                     error_message: None,
                 },
                 ToolCallRecord {
-                    name: "grep".into(),
-                    args_preview: "\"pattern\": \"fn main\"".into(),
+                    name: "sh".into(),
+                    args_preview: "\"command\": \"grep fn main\"".into(),
                     status: ToolStatus::Success,
                     error_message: None,
                 },
