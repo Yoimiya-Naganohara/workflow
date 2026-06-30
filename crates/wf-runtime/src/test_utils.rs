@@ -2,10 +2,10 @@
 //!
 //! Only compiled in test builds (`#[cfg(test)]`).
 
-use wf_core::EMBEDDING_DIM;
-use wf_llm::EmbeddingService;
 use anyhow::Result;
 use async_trait::async_trait;
+use wf_core::EMBEDDING_DIM;
+use wf_llm::EmbeddingService;
 
 /// Mock embedding service returning deterministic vectors.
 pub struct MockEmbed;

@@ -23,8 +23,6 @@ use std::sync::Arc;
 
 use tokio::sync::{RwLock, mpsc};
 
-use wf_agent::{AgentPool, AgentStatus};
-use wf_core::AgentId;
 use crate::runtime::AgentRuntime;
 use crate::runtime::event::RuntimeEvent;
 use crate::runtime::graph_analytics::TemplateEvolution;
@@ -34,6 +32,8 @@ use crate::runtime::orchestration::{
 };
 use crate::runtime::scheduler::TaskScheduler;
 use crate::runtime::strategy_graph::{CompetitionProtocol, StrategyGraph};
+use wf_agent::{AgentPool, AgentStatus};
+use wf_core::AgentId;
 use wf_tools::ToolServerHandle;
 
 /// Background agent lifecycle loop.
@@ -630,12 +630,11 @@ impl RuntimeEventLoop {
                                         asset_id,
                                         preview,
                                     );
-                                    let payload =
-                                        Some(wf_agent::MessagePayload::AssetPointer {
-                                            asset_id,
-                                            tool_name: "agent_result".into(),
-                                            hint: format!("Agent produced {} bytes", result.len()),
-                                        });
+                                    let payload = Some(wf_agent::MessagePayload::AssetPointer {
+                                        asset_id,
+                                        tool_name: "agent_result".into(),
+                                        hint: format!("Agent produced {} bytes", result.len()),
+                                    });
                                     (summary, payload)
                                 }
                                 Err(_) => {
@@ -943,6 +942,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            loop_terminated: false,
             reasoning: String::new(),
         }
     }

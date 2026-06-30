@@ -313,8 +313,8 @@ impl Validator {
         use crate::runtime::orchestration::{
             DecompositionEngine, DefaultDecompositionEngine, MockGoalAnalyzer, TensionThreshold,
         };
-        use wf_core::task_graph::TaskGraph;
         use std::sync::Arc;
+        use wf_core::task_graph::TaskGraph;
 
         let mut graph = TaskGraph::new();
         let root_id = graph.spawn_root(task.goal);

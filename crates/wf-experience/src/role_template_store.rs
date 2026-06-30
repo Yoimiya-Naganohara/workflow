@@ -16,9 +16,9 @@ use std::sync::RwLock;
 
 use anyhow::{Context, Result};
 
-use wf_core::simd::cosine_similarity_384;
 use wf_core::EMBEDDING_DIM;
 use wf_core::RoleTemplate;
+use wf_core::simd::cosine_similarity_384;
 
 /// Thread-safe persistent store for [`RoleTemplate`]s.
 pub struct RoleTemplateStore {

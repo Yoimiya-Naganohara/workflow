@@ -1,5 +1,5 @@
-use wf_core::conflict::{ArbitrationResult, ConflictManifest, ConflictType};
 use wf_core::AgentId;
+use wf_core::conflict::{ArbitrationResult, ConflictManifest, ConflictType};
 
 /// If no successful audit happens within this many seconds, the
 /// collapse counter decays by one (allowing eventual recovery from
@@ -172,10 +172,7 @@ pub trait AuditEngine: Send + Sync {
     /// This method is **synchronous** so callers can hold a `std::sync::Mutex`
     /// lock.  Implementations that need async I/O should spawn their own task.
     /// Returns `None` if the request passes, or a rejection reason otherwise.
-    fn screen_request(
-        &mut self,
-        _: &wf_core::SpawnRequest,
-    ) -> Option<wf_core::SpawnRejection> {
+    fn screen_request(&mut self, _: &wf_core::SpawnRequest) -> Option<wf_core::SpawnRejection> {
         // Default: pass all requests (no screening).
         None
     }
@@ -250,10 +247,7 @@ mod tests {
             conflict_type: wf_core::conflict::ConflictType::ActionContradiction,
             contending_agents: SmallVec::from_vec(agents),
             trace_id: [0u8; 16],
-            context_embeddings: SmallVec::from_vec(vec![
-                [0.0f32; wf_core::EMBEDDING_DIM];
-                2
-            ]),
+            context_embeddings: SmallVec::from_vec(vec![[0.0f32; wf_core::EMBEDDING_DIM]; 2]),
             dynamic_priority_scores: SmallVec::from_vec(priorities),
         }
     }
@@ -306,10 +300,10 @@ mod tests {
     }
 }
 
-use wf_llm::LlmProvider;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use wf_llm::LlmProvider;
 
 /// Configuration for the LLM-powered audit engine.
 pub struct L2LlmConfig {
@@ -609,10 +603,7 @@ mod l2_llm_tests {
             conflict_type: ConflictType::ActionContradiction,
             contending_agents: SmallVec::from_vec(agents),
             trace_id: [0u8; 16],
-            context_embeddings: SmallVec::from_vec(vec![
-                [0.0f32; wf_core::EMBEDDING_DIM];
-                2
-            ]),
+            context_embeddings: SmallVec::from_vec(vec![[0.0f32; wf_core::EMBEDDING_DIM]; 2]),
             dynamic_priority_scores: SmallVec::from_vec(priorities),
         }
     }

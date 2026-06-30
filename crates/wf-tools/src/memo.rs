@@ -49,10 +49,7 @@ impl MemoToolDeps {
 }
 
 /// Register all memo tools on a `ToolServer`.
-pub fn register_memo_tools(
-    server: crate::ToolServer,
-    deps: MemoToolDeps,
-) -> crate::ToolServer {
+pub fn register_memo_tools(server: crate::ToolServer, deps: MemoToolDeps) -> crate::ToolServer {
     let deps = Arc::new(deps);
     server
         .tool(WriteMemo { deps: deps.clone() })

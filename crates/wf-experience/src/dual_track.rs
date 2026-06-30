@@ -23,10 +23,10 @@ use anyhow::Result;
 use std::collections::VecDeque;
 use tracing::trace;
 
-use wf_core::simd::cosine_similarity_384;
-use wf_core::{EMBEDDING_DIM, ExperienceEntry, SpawnRejection};
 use crate::clustering::ClusterConsolidator;
 use crate::pool::ExperiencePool;
+use wf_core::simd::cosine_similarity_384;
+use wf_core::{EMBEDDING_DIM, ExperienceEntry, SpawnRejection};
 use wf_l1::L1Assessment;
 
 // ---------------------------------------------------------------------------

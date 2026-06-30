@@ -60,32 +60,19 @@ mod tests {
     #[test]
     fn test_default_config() {
         let cfg = AgentRuntimeConfig::default();
-        assert_eq!(
-            cfg.max_concurrent_agents,
-            wf_core::DEFAULT_MAX_AGENTS
-        );
+        assert_eq!(cfg.max_concurrent_agents, wf_core::DEFAULT_MAX_AGENTS);
         assert_eq!(
             cfg.admission_timeout_ms,
             wf_core::DEFAULT_ADMISSION_TIMEOUT_MS
         );
         assert_eq!(cfg.max_depth, wf_core::DEFAULT_MAX_DEPTH);
-        assert_eq!(
-            cfg.initial_budget,
-            wf_core::DEFAULT_RUNTIME_BUDGET
-        );
+        assert_eq!(cfg.initial_budget, wf_core::DEFAULT_RUNTIME_BUDGET);
         let eps = f32::EPSILON;
+        assert!((cfg.l1_confidence_threshold - wf_core::DEFAULT_L1_CONFIDENCE).abs() < eps);
         assert!(
-            (cfg.l1_confidence_threshold - wf_core::DEFAULT_L1_CONFIDENCE).abs() < eps
+            (cfg.semantic_conflict_threshold - wf_core::DEFAULT_SEMANTIC_THRESHOLD).abs() < eps
         );
-        assert!(
-            (cfg.semantic_conflict_threshold - wf_core::DEFAULT_SEMANTIC_THRESHOLD)
-                .abs()
-                < eps
-        );
-        assert_eq!(
-            cfg.suspend_timeout_ms,
-            wf_core::DEFAULT_SUSPEND_TIMEOUT_MS
-        );
+        assert_eq!(cfg.suspend_timeout_ms, wf_core::DEFAULT_SUSPEND_TIMEOUT_MS);
         assert!(cfg.bedrock_path.is_none());
     }
 
@@ -234,8 +221,7 @@ mod tests {
 
     #[test]
     fn test_opt_big_array_serialize_some() {
-        let arr: Option<[f32; wf_core::EMBEDDING_DIM]> =
-            Some([0.5; wf_core::EMBEDDING_DIM]);
+        let arr: Option<[f32; wf_core::EMBEDDING_DIM]> = Some([0.5; wf_core::EMBEDDING_DIM]);
         let mut buf = Vec::new();
         let mut ser = serde_json::Serializer::new(&mut buf);
         wf_core::types::opt_big_array_384::serialize(&arr, &mut ser).unwrap();
@@ -255,10 +241,7 @@ mod tests {
 
     #[test]
     fn test_opt_big_array_deserialize_some() {
-        let json = format!(
-            "[{}]",
-            "0.5,".repeat(wf_core::EMBEDDING_DIM - 1) + "0.5"
-        );
+        let json = format!("[{}]", "0.5,".repeat(wf_core::EMBEDDING_DIM - 1) + "0.5");
         let mut de = serde_json::Deserializer::from_str(&json);
         let arr: Option<[f32; wf_core::EMBEDDING_DIM]> =
             wf_core::types::opt_big_array_384::deserialize(&mut de).unwrap();

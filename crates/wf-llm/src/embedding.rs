@@ -16,9 +16,9 @@ use ort::execution_providers::{
 };
 use tokio::sync::Mutex;
 
-use wf_core::simd::cosine_similarity_384;
-use wf_core::EMBEDDING_DIM;
 use crate::{LlmProvider, ProviderProtocol};
+use wf_core::EMBEDDING_DIM;
+use wf_core::simd::cosine_similarity_384;
 
 // ============================================================================
 //  EmbeddingStrategy

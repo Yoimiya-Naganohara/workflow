@@ -1,10 +1,10 @@
 //! Agent execution — run a single agent with LLM + tools.
 use super::AgentRuntime;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use wf_agent::{AgentPool, AgentStatus};
 use wf_core::*;
 use wf_llm::LlmProvider;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 impl AgentRuntime {
     pub(crate) async fn execute_agent_detached(
@@ -145,7 +145,37 @@ Messages may contain important context from sibling agents.",
                     return (format!("LLM error: {}", e), AgentStatus::Failed);
                 }
             };
-            let (text, tools_used) = Self::process_tool_stream(stream, agent_id, &agent_pool).await;
+            let (mut text, tools_used) =
+                Self::process_tool_stream(stream, agent_id, &agent_pool).await;
+
+            // If the tool loop was terminated (tool call limit hit), make a
+            // follow-up LLM call without tools so the agent can produce a
+            // proper summary response instead of cutting off abruptly.
+            let was_terminated = agent_pool
+                .read()
+                .await
+                .get_agent(&agent_id)
+                .map(|a| a.loop_terminated)
+                .unwrap_or(false);
+            if was_terminated {
+                // Reset the flag so agent reuse doesn't re-trigger.
+                if let Some(agent) = agent_pool.write().await.get_agent_mut(&agent_id) {
+                    agent.loop_terminated = false;
+                }
+                // The follow-up call has no tools — it can only summarise.
+                let summary_prompt = format!(
+                    "您的工具调用次数已达到上限。根据您已完成的工作，请提供一份全面的总结。\n\n\
+                     以下是您的部分工作输出：\n{}",
+                    text,
+                );
+                if let Ok(summary) = provider
+                    .chat(&config.model_id, &system_prompt, &summary_prompt)
+                    .await
+                {
+                    text = summary;
+                }
+            }
+
             (text, tools_used)
         } else {
             let text = match provider
@@ -182,23 +212,22 @@ Messages may contain important context from sibling agents.",
             let goal_for_emb = goal.clone();
             if let Ok(emb) = embedding_service.embed(&goal_for_emb).await {
                 let rt = runtime.read().await;
-                rt.pipeline
-                    .add_experience(wf_core::ExperienceEntry {
-                        embedding: emb,
-                        applicability_vector: [0.0f32; 128],
-                        tool_bitmap,
-                        role_template_id: role_template_store
-                            .get_by_role(&role)
-                            .map(|t| t.template_id),
-                        weight: 1.0,
-                        domain_version: 0,
-                        timestamp: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-                        l2_override_weight: 0.0,
-                        l2_override_created_at: 0,
-                    });
+                rt.pipeline.add_experience(wf_core::ExperienceEntry {
+                    embedding: emb,
+                    applicability_vector: [0.0f32; 128],
+                    tool_bitmap,
+                    role_template_id: role_template_store
+                        .get_by_role(&role)
+                        .map(|t| t.template_id),
+                    weight: 1.0,
+                    domain_version: 0,
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    l2_override_weight: 0.0,
+                    l2_override_created_at: 0,
+                });
             }
         }
 
@@ -260,6 +289,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            loop_terminated: false,
             reasoning: String::new(),
         };
         let id = agent.id;

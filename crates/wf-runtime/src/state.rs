@@ -9,13 +9,13 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
+use crate::runtime::AgentRuntime;
+use crate::runtime::event::RuntimeEvent;
 use wf_agent::AgentPool;
 use wf_core::{AgentId, ChatMessage, SelectedModel};
 use wf_models::models::ModelRegistry;
 use wf_models::provider::ProviderClient;
 use wf_reflection::ReflectionConfig;
-use crate::runtime::AgentRuntime;
-use crate::runtime::event::RuntimeEvent;
 use wf_tools::ToolServerHandle;
 
 /// Shared runtime state accessible from tools and TUI.

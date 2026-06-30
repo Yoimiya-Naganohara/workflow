@@ -8,10 +8,10 @@ use anyhow::Result;
 use super::config::{AgentRuntimeConfig, RoleTemplate};
 use super::pipeline::{DecisionPipeline, DecisionPipelineBuilder};
 
+use crate::l0::BudgetGuard;
 use wf_agent::plan::PlanRegistry as PlanRegistryConcrete;
 use wf_core::*;
 use wf_experience::RoleTemplateStore;
-use crate::l0::BudgetGuard;
 use wf_llm::EmbeddingService;
 use wf_llm::LlmProvider;
 
@@ -64,12 +64,12 @@ impl AgentRuntime {
     /// implementation tuned by `config`.
     pub fn new(config: AgentRuntimeConfig, embedding_service: Arc<dyn EmbeddingService>) -> Self {
         use crate::admission::AdmissionController;
-        use wf_agent::suspend::{SuspendConfig, SuspendQueue as SuspendQueueConcrete};
-        use wf_experience::DualTrackMemory;
         use crate::l0::L0CircuitBreaker;
         use crate::l0::TaskResourceState;
-        use wf_l2::L2RuleAuditEngine;
         use std::path::PathBuf;
+        use wf_agent::suspend::{SuspendConfig, SuspendQueue as SuspendQueueConcrete};
+        use wf_experience::DualTrackMemory;
+        use wf_l2::L2RuleAuditEngine;
 
         let state = TaskResourceState::new(config.initial_budget, config.max_depth);
 

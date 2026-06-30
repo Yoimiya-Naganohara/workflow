@@ -10,12 +10,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 
-use wf_core::simd::cosine_similarity_384;
-use wf_core::{
-    AgentId, ChildAgentConfig, EMBEDDING_DIM, SpawnDecision, SpawnRejection, TaskId,
-};
 use crate::runtime::AgentRuntime;
+use wf_core::simd::cosine_similarity_384;
 use wf_core::task_graph::{TaskGraph, TaskNode};
+use wf_core::{AgentId, ChildAgentConfig, EMBEDDING_DIM, SpawnDecision, SpawnRejection, TaskId};
 
 /// DispatchDecider — the **single authority** for task execution decisions.
 ///
@@ -329,8 +327,8 @@ impl DecompositionEngine for NoopDecompositionEngine {
 #[cfg(test)]
 mod dispatch_tests {
 
-    use wf_core::TaskId;
     use crate::runtime::orchestration::*;
+    use wf_core::TaskId;
     use wf_core::task_graph::{TaskGraph, TaskStatus};
 
     fn setup_task(goal: &str) -> (TaskGraph, TaskId) {

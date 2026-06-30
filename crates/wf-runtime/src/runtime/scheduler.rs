@@ -3,8 +3,6 @@
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 
-use wf_agent::{Agent, AgentConfig, AgentPool, AgentStatus};
-use wf_core::{AgentId, ChildAgentConfig};
 use crate::runtime::AgentRuntime;
 use crate::runtime::event::RuntimeEvent;
 use crate::runtime::graph_analytics::TemplateEvolution;
@@ -13,6 +11,8 @@ use crate::runtime::orchestration::{
     RoleSelector, TaskOutcome, TaskOutcomeStore,
 };
 use crate::runtime::strategy_graph::{StrategyGraph, StrategyId, StrategyType, TaskSignature};
+use wf_agent::{Agent, AgentConfig, AgentPool, AgentStatus};
+use wf_core::{AgentId, ChildAgentConfig};
 
 pub struct TaskScheduler {
     runtime: Arc<RwLock<AgentRuntime>>,
@@ -351,6 +351,7 @@ impl TaskScheduler {
             task_id: Some(task_id),
             sandbox,
             retry_count: 0,
+            loop_terminated: false,
             reasoning: String::new(),
         };
         {

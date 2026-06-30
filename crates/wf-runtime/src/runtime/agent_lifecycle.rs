@@ -81,6 +81,7 @@ impl AgentRuntime {
             task_id: Some(root_task_id),
             sandbox,
             retry_count: 0,
+            loop_terminated: false,
             reasoning: String::new(),
         };
         agent_pool.add_agent(agent);
@@ -172,6 +173,7 @@ impl AgentRuntime {
                     sandbox: sandbox.clone(),
                     task_id: None,
                     retry_count: 0,
+                    loop_terminated: false,
                     reasoning: String::new(),
                 };
                 agent_pool.add_agent(agent);
@@ -287,6 +289,7 @@ impl AgentRuntime {
                     task_id: None,
                     sandbox: sandbox.clone(),
                     retry_count: 0,
+                    loop_terminated: false,
                     reasoning: String::new(),
                 };
                 agent_pool.add_agent(agent);
@@ -434,8 +437,7 @@ impl AgentRuntime {
 
             // Drain both inbox (structured handoff) and child_results (legacy).
             let inbox_msgs: Vec<wf_agent::AgentMessage> = agent.inbox.drain(..).collect();
-            let cr_raw: Vec<(wf_core::AgentId, String)> =
-                agent.child_results.drain(..).collect();
+            let cr_raw: Vec<(wf_core::AgentId, String)> = agent.child_results.drain(..).collect();
 
             let cfg = agent.config.clone();
             let rl = agent.role.clone();
@@ -446,9 +448,9 @@ impl AgentRuntime {
                 .iter()
                 .map(|msg| {
                     let hint = match &msg.payload {
-                        Some(wf_agent::MessagePayload::AssetPointer {
-                            asset_id, hint, ..
-                        }) => format!(" (asset: {}, hint: {})", asset_id, hint),
+                        Some(wf_agent::MessagePayload::AssetPointer { asset_id, hint, .. }) => {
+                            format!(" (asset: {}, hint: {})", asset_id, hint)
+                        }
                         Some(wf_agent::MessagePayload::StateSummary { summary, .. }) => {
                             format!(" (summary: {})", summary)
                         }

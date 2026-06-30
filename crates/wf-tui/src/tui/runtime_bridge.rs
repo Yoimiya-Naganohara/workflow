@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use wf_core::event::RuntimeEvent;
 use crate::tui::state::AppState;
+use wf_core::event::RuntimeEvent;
 
 /// Run the bridge event loop.
 ///
@@ -162,8 +162,8 @@ pub async fn runtime_event_broker(
 
 #[cfg(test)]
 mod tests {
-    use wf_core::event::RuntimeEvent;
     use crate::tui::effect::AppEvent;
+    use wf_core::event::RuntimeEvent;
 
     use super::*;
 

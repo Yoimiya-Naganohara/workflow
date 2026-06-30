@@ -317,6 +317,8 @@ impl LlmProvider {
             let mut per_tool_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
             // ── Total tool calls in this stream ──
             let mut total_tool_calls: usize = 0;
+            // Whether the pre-limit warning has been issued (fires once at 80%).
+            let mut warned_about_limit: bool = false;
 
             // Build a human-readable tool call summary from the counters.
             let tool_summary = |total: usize, per_tool: &std::collections::HashMap<String, usize>| -> String {
@@ -351,6 +353,20 @@ impl LlmProvider {
 
                         // ── Bounding check 1: absolute total tool calls ──
                         total_tool_calls += 1;
+
+                        // Pre-limit warning at 80% threshold — fires once so the
+                        // accumulated text (used by the follow-up summary call)
+                        // includes context about the approaching limit.
+                        if !warned_about_limit
+                            && total_tool_calls * 100 / wf_core::MAX_TOOL_CALLS_PER_STREAM >= 80
+                        {
+                            warned_about_limit = true;
+                            yield ToolEvent::Text(format!(
+                                "\n\n<system>⚠️ 已使用 {}/{} 次工具调用，请注意剩余次数。</system>\n",
+                                total_tool_calls, wf_core::MAX_TOOL_CALLS_PER_STREAM,
+                            ));
+                        }
+
                         if total_tool_calls > wf_core::MAX_TOOL_CALLS_PER_STREAM {
                             let summary = tool_summary(total_tool_calls, &per_tool_count);
                             tracing::warn!(
@@ -360,7 +376,7 @@ impl LlmProvider {
                                 summary,
                             );
                             yield ToolEvent::Text(format!(
-                                "\n\n<system>Tool call limit reached: {}. The assistant cannot make further tool calls. Summarize what you have found so far.</system>\n",
+                                "\n\n<system>工具调用次数已达上限：{}。无法继续调用工具，请根据已有结果进行总结。</system>\n",
                                 summary,
                             ));
                             yield ToolEvent::Done {
@@ -386,7 +402,7 @@ impl LlmProvider {
                                 summary,
                             );
                             yield ToolEvent::Text(format!(
-                                "\n\n<system>Tool loop detected: '{}' called {} times (max {}). Tool calls stopped. Tool summary — {}. Summarize what you have found so far.</system>\n",
+                                "\n\n<system>工具循环检测：'{}' 已被调用 {} 次（上限 {}）。工具调用已停止。工具摘要 — {}。请根据已有结果进行总结。</system>\n",
                                 tool_name, next_count, wf_core::MAX_CALLS_PER_TOOL, summary,
                             ));
                             yield ToolEvent::Done {
@@ -409,7 +425,7 @@ impl LlmProvider {
                                 summary,
                             );
                             yield ToolEvent::Text(format!(
-                                "\n\n<system>Tool loop detected: '{}' called {} times with identical arguments. Tool calls stopped. Tool summary — {}. Summarize what you have found so far.</system>\n",
+                                "\n\n<system>工具循环检测：'{}' 已使用完全相同参数调用 {} 次。工具调用已停止。工具摘要 — {}。请根据已有结果进行总结。</system>\n",
                                 tool_name, count, summary,
                             ));
                             yield ToolEvent::Done {

@@ -312,8 +312,8 @@ pub async fn restore_checkpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wf_agent::{Agent, AgentConfig, AgentStatus};
     use std::collections::VecDeque;
+    use wf_agent::{Agent, AgentConfig, AgentStatus};
 
     fn stub_agent(id: u8) -> Agent {
         Agent {
@@ -338,6 +338,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            loop_terminated: false,
             reasoning: String::new(),
         }
     }

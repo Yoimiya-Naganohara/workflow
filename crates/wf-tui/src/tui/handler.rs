@@ -245,8 +245,10 @@ impl Tui {
                         // Select provider from filtered list.
                         // Clone all needed data BEFORE any mutable access.
                         let selected: Option<(String, String, bool)> = {
-                            let filtered =
-                                wf_models::models::filter_providers(core.models.providers(), &ui.input);
+                            let filtered = wf_models::models::filter_providers(
+                                core.models.providers(),
+                                &ui.input,
+                            );
                             filtered.get(state.popup_selected).copied().map(|provider| {
                                 (
                                     provider.id.clone(),
@@ -265,11 +267,8 @@ impl Tui {
                                     core,
                                     &provider_id,
                                 );
-                                let _ = wf_persistence::save_configured_provider(
-                                    &provider_id,
-                                    "",
-                                    "",
-                                );
+                                let _ =
+                                    wf_persistence::save_configured_provider(&provider_id, "", "");
                                 core.messages
                                     .push(ChatMessage::system(format!("{} configured", name)));
                             } else {

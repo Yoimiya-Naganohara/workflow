@@ -57,8 +57,8 @@ pub enum AppMode {
 
 pub use wf_core::{ChatMessage, MessageRole, MessageStatus, SelectedModel, StreamChunk};
 
-pub use wf_runtime::state::CoreState;
 pub use wf_core::{AgentEntry, AgentStatus};
+pub use wf_runtime::state::CoreState;
 
 /// Transient UI state — reset on restart.
 pub struct UiState {
@@ -718,11 +718,7 @@ impl AppState {
         &self,
         _: &Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
         _: &str,
-    ) -> (
-        Option<std::sync::Arc<wf_llm::LlmProvider>>,
-        String,
-        String,
-    ) {
+    ) -> (Option<std::sync::Arc<wf_llm::LlmProvider>>, String, String) {
         let default_tool_prompt =
             "Must follow user instructions and use available tools. Remember preferences";
 
@@ -797,8 +793,6 @@ fn find_streaming_slot_response(messages: &[ChatMessage], preferred: usize) -> O
     // 3. Return None — don't overwrite completed messages
 }
 
-
-
 impl Default for UiState {
     fn default() -> Self {
         Self {
@@ -851,8 +845,6 @@ impl Default for UiState {
 // ============================================================================
 //  Full-chain integration tests
 // ============================================================================
-
-
 
 #[cfg(test)]
 mod tests {

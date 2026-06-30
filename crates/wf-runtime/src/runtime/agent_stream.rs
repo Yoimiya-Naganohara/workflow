@@ -1,9 +1,9 @@
 //! Agent stream processing — consume ToolEvent stream.
 use super::AgentRuntime;
-use wf_agent::AgentPool;
-use wf_core::*;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use wf_agent::AgentPool;
+use wf_core::*;
 
 impl AgentRuntime {
     pub(crate) async fn process_tool_stream(
@@ -84,6 +84,15 @@ impl AgentRuntime {
                     if reason == wf_llm::DoneReason::LoopTerminated
                         || reason == wf_llm::DoneReason::StreamError
                     {
+                        if reason == wf_llm::DoneReason::LoopTerminated {
+                            // Record that the loop was terminated so the runtime
+                            // can make a follow-up LLM call asking for a summary.
+                            if let Ok(mut pool) = agent_pool.try_write() {
+                                if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                                    agent.loop_terminated = true;
+                                }
+                            }
+                        }
                         tracing::info!(
                             "Agent {:02x}.. completed with {} ({} bytes)",
                             agent_id[0],
@@ -179,8 +188,8 @@ impl AgentRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wf_llm::{DoneReason, ToolChatStream, ToolEvent};
     use futures::stream;
+    use wf_llm::{DoneReason, ToolChatStream, ToolEvent};
 
     /// Helper: create a mock stream from a vec of ToolEvents.
     fn mock_stream(events: Vec<ToolEvent>) -> ToolChatStream {
@@ -212,6 +221,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            loop_terminated: false,
             reasoning: String::new(),
         };
         let id = agent.id;

@@ -1,5 +1,5 @@
-use wf_core::simd::cosine_similarity_384;
 use wf_core::EMBEDDING_DIM;
+use wf_core::simd::cosine_similarity_384;
 use wf_core::{ExperienceEntry, SpawnRejection};
 
 pub struct L1Retriever {
@@ -280,9 +280,9 @@ mod tests {
         assert!(result.is_ok());
     }
 }
-use wf_core::conflict::{ConflictManifest, ConflictType};
-use wf_core::AgentId;
 use smallvec::SmallVec;
+use wf_core::AgentId;
+use wf_core::conflict::{ConflictManifest, ConflictType};
 
 pub struct L1Arbitrator {
     semantic_threshold: f32,

@@ -5,8 +5,8 @@ pub mod chat;
 pub mod embedding;
 pub mod types;
 
-use wf_core::EMBEDDING_DIM;
 pub use types::*;
+use wf_core::EMBEDDING_DIM;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -707,4 +707,3 @@ mod tests {
         assert!(json.contains("gpt-4"));
     }
 }
-

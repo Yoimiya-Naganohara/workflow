@@ -5,9 +5,9 @@
 //! Phase 4C: WorkflowTemplate + TemplateRegistry + TemplateMatcher + Instantiation
 //! Phase 4D: TemplateEvolution (evaluate + compete + retire)
 
+use std::collections::HashMap;
 use wf_core::TaskId;
 use wf_core::task_graph::{TaskGraph, TaskStatus};
-use std::collections::HashMap;
 
 // ============================================================================
 //  GraphMetrics

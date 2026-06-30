@@ -9,7 +9,6 @@ pub mod builtin;
 pub mod diff_edit;
 pub mod memo;
 
-
 pub use rig::tool::server::{ToolServer, ToolServerHandle};
 
 pub use memo::MemoToolDeps;
@@ -117,9 +116,7 @@ mod tests {
         let n = TEST_IDX.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut id = [0u8; 16];
         id[0..8].copy_from_slice(&n.to_le_bytes());
-        std::sync::Arc::new(
-            wf_agent::sandbox::SandboxHandle::new(&id).expect("sandbox creation"),
-        )
+        std::sync::Arc::new(wf_agent::sandbox::SandboxHandle::new(&id).expect("sandbox creation"))
     }
 
     /// Simulate an agent using sandboxed MCP tools.
@@ -357,7 +354,12 @@ mod tests {
 
     /// Build a populated agent pool for tests.
     /// Returns `(pool, responsible_agent_id)`.
-    fn make_pool(agent_count: usize) -> (std::sync::Arc<tokio::sync::RwLock<wf_agent::AgentPool>>, Option<wf_core::AgentId>) {
+    fn make_pool(
+        agent_count: usize,
+    ) -> (
+        std::sync::Arc<tokio::sync::RwLock<wf_agent::AgentPool>>,
+        Option<wf_core::AgentId>,
+    ) {
         let mut pool = wf_agent::AgentPool::new();
         let mut responsible_id: Option<wf_core::AgentId> = None;
 
@@ -401,15 +403,22 @@ mod tests {
                 task_id: None,
                 sandbox: None,
                 retry_count: 0,
+                loop_terminated: false,
                 reasoning: String::new(),
             });
         }
 
-        (std::sync::Arc::new(tokio::sync::RwLock::new(pool)), responsible_id)
+        (
+            std::sync::Arc::new(tokio::sync::RwLock::new(pool)),
+            responsible_id,
+        )
     }
 
     /// Build a pool with one agent for memo tool tests.
-    fn make_memo_pool() -> (std::sync::Arc<tokio::sync::RwLock<wf_agent::AgentPool>>, Option<wf_core::AgentId>) {
+    fn make_memo_pool() -> (
+        std::sync::Arc<tokio::sync::RwLock<wf_agent::AgentPool>>,
+        Option<wf_core::AgentId>,
+    ) {
         let mut pool = wf_agent::AgentPool::new();
         let responsible_id: wf_core::AgentId =
             [0xAA, 0xBB, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -435,9 +444,13 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            loop_terminated: false,
             reasoning: String::new(),
         });
-        (std::sync::Arc::new(tokio::sync::RwLock::new(pool)), Some(responsible_id))
+        (
+            std::sync::Arc::new(tokio::sync::RwLock::new(pool)),
+            Some(responsible_id),
+        )
     }
 
     /// Simulate an agent calling `list_agents` via MCP.
@@ -483,8 +496,7 @@ mod tests {
         // but we verify the message was enqueued in agent-1's inbox.
         if send_result.is_ok() {
             let pool_guard = pool.read().await;
-            let target_id: wf_core::AgentId =
-                [2, 0xAA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+            let target_id: wf_core::AgentId = [2, 0xAA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
             if let Some(agent1) = pool_guard.get_agent(&target_id) {
                 assert!(!agent1.inbox.is_empty(), "message must be in inbox");
             }
@@ -726,4 +738,3 @@ mod tests {
         }
     }
 }
-

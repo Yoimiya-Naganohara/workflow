@@ -4,8 +4,8 @@
 
 #![allow(clippy::module_inception)]
 
-pub mod constants;
 pub mod conflict;
+pub mod constants;
 pub mod event;
 pub mod guard;
 pub mod metrics;

@@ -4,8 +4,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use wf_core::metrics::AgentMetrics;
 use tokio::sync::Notify;
+use wf_core::metrics::AgentMetrics;
 
 pub fn now_secs() -> u64 {
     SystemTime::now()
@@ -14,10 +14,10 @@ pub fn now_secs() -> u64 {
         .as_secs()
 }
 
+use crate::sandbox::SandboxHandle;
 use wf_core::AgentId;
 use wf_core::guard::BudgetGuard;
 use wf_llm::types::Message;
-use crate::sandbox::SandboxHandle;
 
 // ── MemoEntry ──
 
@@ -175,6 +175,12 @@ pub struct Agent {
     /// Displayed in the agent detail popup; not sent to the parent agent.
     #[serde(default)]
     pub reasoning: String,
+    /// Whether the agent's tool-calling loop was terminated due to hitting a
+    /// tool call limit (total calls, per-tool, or duplicate detection).
+    /// When `true`, the runtime should make a follow-up LLM call to produce a
+    /// proper summary since the agent was cut off mid-execution.
+    #[serde(default)]
+    pub loop_terminated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -611,9 +617,7 @@ impl AgentPool {
                 match a.status {
                     crate::AgentStatus::Completed
                     | crate::AgentStatus::Failed
-                    | crate::AgentStatus::Idle => {
-                        now.saturating_sub(a.last_active_at) >= ttl
-                    }
+                    | crate::AgentStatus::Idle => now.saturating_sub(a.last_active_at) >= ttl,
                     _ => false,
                 }
             })
@@ -676,8 +680,7 @@ impl AgentPool {
                         .map(|c| {
                             !matches!(
                                 c.status,
-                                crate::AgentStatus::Completed
-                                    | crate::AgentStatus::Failed
+                                crate::AgentStatus::Completed | crate::AgentStatus::Failed
                             )
                         })
                         .unwrap_or(false)
@@ -756,6 +759,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            loop_terminated: false,
             reasoning: String::new(),
         };
         let id = pool.add_agent(agent);
@@ -788,6 +792,7 @@ mod tests {
             task_id: None,
             sandbox: None,
             retry_count: 0,
+            loop_terminated: false,
             reasoning: String::new(),
         };
         pool.add_agent(agent);

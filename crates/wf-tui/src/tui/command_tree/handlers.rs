@@ -222,7 +222,9 @@ pub fn think_status(_: &CommandInvocation, state: &mut AppState) -> CommandResul
 
 fn with_runtime<F, R>(state: &mut AppState, f: F) -> Result<R, String>
 where
-    F: FnOnce(&tokio::sync::RwLockReadGuard<wf_runtime::runtime::AgentRuntime>) -> Result<R, String>,
+    F: FnOnce(
+        &tokio::sync::RwLockReadGuard<wf_runtime::runtime::AgentRuntime>,
+    ) -> Result<R, String>,
 {
     let runtime = state
         .core

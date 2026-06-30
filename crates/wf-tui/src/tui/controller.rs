@@ -10,14 +10,14 @@ use anyhow::Result;
 use rig::client::Nothing;
 use rig::providers::{llamafile, ollama};
 
-use wf_core::AgentId;
-use wf_llm::LlmProvider;
-use wf_models::models::CustomProvider;
-use wf_models::provider::ProviderClient;
 use crate::tui::state::{
     AgentEntry, AppState, ChatMessage, CoreState, MessageRole, MessageStatus, SelectedModel,
     UiState,
 };
+use wf_core::AgentId;
+use wf_llm::LlmProvider;
+use wf_models::models::CustomProvider;
+use wf_models::provider::ProviderClient;
 
 // ============================================================================
 //  Agent setup (sync, called from handler)

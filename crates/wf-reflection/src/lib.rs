@@ -10,9 +10,9 @@
 
 use std::collections::HashMap;
 
+use async_trait::async_trait;
 use wf_core::simd::cosine_similarity_384;
 use wf_llm::EmbeddingService;
-use async_trait::async_trait;
 
 // ═══════════════════════════════════════════════════════════════
 //  Types

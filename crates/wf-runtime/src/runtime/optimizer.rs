@@ -11,9 +11,9 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use crate::runtime::config::RoleTemplate;
 use wf_core::ExperienceEntry;
 use wf_llm::LlmProvider;
-use crate::runtime::config::RoleTemplate;
 
 /// Minimum number of experiences required before optimization is meaningful.
 pub const MIN_EXPERIENCES: usize = 5;

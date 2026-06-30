@@ -10,10 +10,10 @@ use ratatui::{
 use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::tui::agent_tree::build_tool_trace_preview;
 use wf_agent::AgentStatus;
 use wf_core::AgentId;
 use wf_models::models::filter_providers;
-use crate::tui::agent_tree::build_tool_trace_preview;
 
 use crate::tui::state::{AppState, PopupMode};
 
@@ -642,10 +642,10 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
 
-    use wf_agent::{Agent, AgentConfig, AgentStatus, ToolCallRecord, ToolStatus};
-    use wf_core::AgentId;
     use crate::tui::agent_tree::build_tool_trace_preview;
     use crate::tui::state::{AppState, PopupMode};
+    use wf_agent::{Agent, AgentConfig, AgentStatus, ToolCallRecord, ToolStatus};
+    use wf_core::AgentId;
 
     use super::{popup_height, render_agent_detail_popup};
 
@@ -707,6 +707,7 @@ mod tests {
                 task_id: None,
                 sandbox: None,
                 retry_count: 0,
+                loop_terminated: false,
                 reasoning: String::new(),
             });
         }
@@ -767,6 +768,7 @@ mod tests {
                 task_id: None,
                 sandbox: None,
                 retry_count: 0,
+                loop_terminated: false,
                 reasoning: String::new(),
             });
         }

@@ -11,12 +11,12 @@ use tokio::sync::RwLock;
 
 use crate::admission::AdmissionControl;
 use crate::admission::AdmissionPermit;
-use wf_agent::plan::PlanRegistry;
-use wf_agent::suspend::SuspendQueue;
-use wf_core::*;
 use crate::l0::BudgetGuard;
 use crate::l0::CircuitBreaker;
 use crate::l0::L0Permit;
+use wf_agent::plan::PlanRegistry;
+use wf_agent::suspend::SuspendQueue;
+use wf_core::*;
 use wf_l1::ExperienceRetrieval;
 use wf_l1::L1Assessment;
 use wf_l2::AuditEngine;
@@ -83,9 +83,7 @@ impl DecisionPipelineBuilder {
                 Box::new(crate::l0::L0CircuitBreaker::new(state))
             }),
             experience: Mutex::new(self.experience.unwrap_or_else(|| {
-                Box::new(wf_l1::L1Retriever::new(
-                    wf_core::DEFAULT_L1_CONFIDENCE,
-                ))
+                Box::new(wf_l1::L1Retriever::new(wf_core::DEFAULT_L1_CONFIDENCE))
             })),
             audit_engine: Mutex::new(self.audit_engine.unwrap_or_else(|| {
                 Box::new(wf_l2::L2RuleAuditEngine::new(
@@ -365,8 +363,8 @@ pub(crate) use builder_method;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wf_llm::embedding::EmbeddingService as EmbeddingServiceImpl;
     use std::sync::Arc;
+    use wf_llm::embedding::EmbeddingService as EmbeddingServiceImpl;
 
     fn dummy_embedding() -> Arc<dyn EmbeddingService> {
         Arc::new(EmbeddingServiceImpl::new())

@@ -547,10 +547,7 @@ impl GraphPlan {
     }
 
     /// Create a new graph plan with a specific root task ID (for replay/persistence).
-    pub fn from_graph(
-        graph: wf_core::task_graph::TaskGraph,
-        root_id: wf_core::TaskId,
-    ) -> Self {
+    pub fn from_graph(graph: wf_core::task_graph::TaskGraph, root_id: wf_core::TaskId) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -605,11 +602,7 @@ impl GraphPlan {
     }
 
     /// Mark a task as completed.  May trigger parent completion.
-    pub fn mark_complete(
-        &mut self,
-        task_id: wf_core::TaskId,
-        result: &str,
-    ) -> Result<(), String> {
+    pub fn mark_complete(&mut self, task_id: wf_core::TaskId, result: &str) -> Result<(), String> {
         if let Some(node) = self.graph.get_mut(&task_id) {
             node.result = Some(result.to_string());
         }
@@ -623,11 +616,7 @@ impl GraphPlan {
     }
 
     /// Mark a task as failed.
-    pub fn mark_failed(
-        &mut self,
-        task_id: wf_core::TaskId,
-        error: &str,
-    ) -> Result<(), String> {
+    pub fn mark_failed(&mut self, task_id: wf_core::TaskId, error: &str) -> Result<(), String> {
         self.graph.mark_failed(task_id, error)?;
         self.status = PlanStatus::Failed;
         Ok(())

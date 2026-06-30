@@ -275,11 +275,8 @@ impl Tui {
             let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
             let _ = wf_persistence::save_session_as(&ts, &state.core.messages);
             if let Some(ref prompt) = state.ui.cached_system_prompt {
-                let _ = wf_persistence::save_session_prompt(
-                    &ts,
-                    prompt,
-                    &state.ui.cached_prompt_role,
-                );
+                let _ =
+                    wf_persistence::save_session_prompt(&ts, prompt, &state.ui.cached_prompt_role);
             }
             self.last_session_message_count = msg_count;
         }

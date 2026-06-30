@@ -13,11 +13,11 @@ use ratatui::{
 };
 
 use super::{Tui, style};
-use wf_agent::AgentStatus;
 use crate::tui::agent_tree::{build_agent_tree_lines, has_active_delegations};
 use crate::tui::chat::render_chat;
 use crate::tui::chat_lines::build_chat_content;
 use crate::tui::status::render_status_bar;
+use wf_agent::AgentStatus;
 
 impl Tui {
     pub(crate) async fn draw(&mut self) -> Result<()> {
