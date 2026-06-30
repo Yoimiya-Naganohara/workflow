@@ -101,6 +101,7 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
     // ── 7. Token metrics (from cached tokenizer values) ──
     let in_tokens = state.ui.cached_input_tokens;
     let out_tokens = state.ui.cached_output_tokens;
+    let reasoning_tokens = state.ui.cached_reasoning_tokens;
     if in_tokens > 0 || out_tokens > 0 {
         spans.push(Span::styled("  ", Style::default()));
         if in_tokens > 0 {
@@ -116,6 +117,13 @@ pub(crate) fn render_status_bar<'a>(f: &mut Frame, area: Rect, state: &'a AppSta
             spans.push(Span::styled(
                 format!("{}{:0.1}k", prefix, out_k),
                 Style::default().fg(style::TEXT_SECONDARY),
+            ));
+        }
+        if reasoning_tokens > 0 {
+            let r_k = reasoning_tokens as f64 / 1000.0;
+            spans.push(Span::styled(
+                format!(" 🧠{:0.1}k", r_k),
+                Style::default().fg(style::YELLOW),
             ));
         }
     }

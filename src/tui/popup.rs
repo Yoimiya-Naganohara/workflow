@@ -113,15 +113,10 @@ fn render_command_palette_popup(f: &mut Frame, area: Rect, state: &AppState) {
         .iter()
         .map(|item| {
             // 用 path + id 作为过滤匹配，后续支持 highlight
-            let display_text = if item.has_children {
-                format!("> {}", item.display)
-            } else {
-                item.display.clone()
-            };
 
             Row::new(vec![
                 ratatui::text::Line::from(Span::styled(
-                    display_text,
+                    &item.display,
                     Style::default().fg(style::ACTIVE),
                 )),
                 ratatui::text::Line::from(Span::styled(&item.help, style::hint_style())),

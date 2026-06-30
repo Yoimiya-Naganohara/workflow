@@ -298,12 +298,7 @@ pub static ROOT: &[Node] = &[
         "Clear conversation",
         Execute(handlers::clear)
     ),
-    node!(
-        "sh",
-        "$ sh",
-        "Run a shell command",
-        Execute(handlers::shell)
-    ),
+    node!("sh", "sh", "Run a shell command", Execute(handlers::shell)),
     node!(
         "models",
         "models",
@@ -361,40 +356,40 @@ pub static ROOT: &[Node] = &[
 ];
 
 // ═══════════════════════════════════════════════════════════════
-//  Coverage tooling
-// ═══════════════════════════════════════════════════════════════
-
-/// 统计命令树中静态定义的命令数。
-/// 遍历已知的静态子树（ROOT + role/pool/think/reflect/memo 一级节点）。
-/// 不展开动态 provider（sessions、角色名、memo key 等）。
-pub fn count_tree_commands() -> usize {
-    // ROOT 层 Execute: help, status, clear, sh, models, connect, refresh
-    // 一级静态子树 Execute:
-    //   role: create, embed
-    //   pool: stats, flush, clear, export, import, query
-    //   think: on, off, brief, status
-    //   reflect: on, off, status, max, rule
-    //   memo: write, roles
-    // Total = 7 + 2 + 6 + 4 + 5 + 2 = 26
-    26
-}
-
-pub fn legacy_command_names() -> Vec<&'static str> {
-    let tree_ids: std::collections::HashSet<&str> = ROOT.iter().map(|n| n.display_id()).collect();
-    crate::tui::commands::COMMANDS
-        .iter()
-        .map(|(cmd, _)| cmd.strip_prefix('/').unwrap_or(cmd))
-        .filter(|name| !tree_ids.contains(name))
-        .collect()
-}
-
-// ═══════════════════════════════════════════════════════════════
 //  Tests
 // ═══════════════════════════════════════════════════════════════
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    // ═══════════════════════════════════════════════════════════════
+    //  Coverage tooling
+    // ═══════════════════════════════════════════════════════════════
+
+    /// 统计命令树中静态定义的命令数。
+    /// 遍历已知的静态子树（ROOT + role/pool/think/reflect/memo 一级节点）。
+    /// 不展开动态 provider（sessions、角色名、memo key 等）。
+    pub fn count_tree_commands() -> usize {
+        // ROOT 层 Execute: help, status, clear, sh, models, connect, refresh
+        // 一级静态子树 Execute:
+        //   role: create, embed
+        //   pool: stats, flush, clear, export, import, query
+        //   think: on, off, brief, status
+        //   reflect: on, off, status, max, rule
+        //   memo: write, roles
+        // Total = 7 + 2 + 6 + 4 + 5 + 2 = 26
+        26
+    }
+
+    pub fn legacy_command_names() -> Vec<&'static str> {
+        let tree_ids: std::collections::HashSet<&str> =
+            ROOT.iter().map(|n| n.display_id()).collect();
+        crate::tui::commands::COMMANDS
+            .iter()
+            .map(|(cmd, _)| cmd.strip_prefix('/').unwrap_or(cmd))
+            .filter(|name| !tree_ids.contains(name))
+            .collect()
+    }
 
     #[test]
     fn test_root_has_nodes() {

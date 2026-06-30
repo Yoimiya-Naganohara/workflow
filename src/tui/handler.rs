@@ -81,6 +81,11 @@ impl Tui {
             Action::OpenProviderPicker => {
                 state.popup_mode = PopupMode::Providers;
                 state.popup_selected = 0;
+                // Pre-load cache instantly so popup shows providers immediately
+                if let Some(cached) = crate::persistence::load_provider_cache() {
+                    state.core.models = cached;
+                }
+                // Background-refresh remote (will update cache + models when done)
                 state.effects.push(Effect::FetchModelRegistry);
                 ui.input.clear();
                 ui.input_cursor = 0;

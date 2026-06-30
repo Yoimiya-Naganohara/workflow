@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 
 use crate::core::types::ExperienceEntry;
 use crate::llm::{LlmProvider, ToolEvent};
-use crate::models::ModelRegistry;
+use crate::models::{LocalFileSource, ModelRegistry, ProviderSource};
 use crate::persistence;
 use crate::reflection::{build_self_check_prompt, check_rules};
 use crate::runtime::AgentRuntime;
@@ -118,6 +118,8 @@ pub enum AppEvent {
         cached_input: u32,
         /// Input tokens written to provider-managed cache.
         cache_creation_input: u32,
+        /// Tokens used for internal reasoning/chain-of-thought.
+        reasoning_tokens: u32,
     },
     ChatToolCall {
         response_index: usize,
@@ -189,6 +191,7 @@ pub enum AppEvent {
 pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>) {
     match effect {
         Effect::FetchModelRegistry => {
+            // Background refresh — cache already loaded by handler
             let mut registry = ModelRegistry::new();
             match registry.fetch().await {
                 Ok(()) => {
@@ -197,15 +200,27 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                     let _ = tx.send(AppEvent::ModelRegistryFetched { count });
                 }
                 Err(_) => {
-                    // On failure, fall back to cached data or built-in defaults
-                    if let Some(cached) = persistence::load_provider_cache() {
-                        let _ = persistence::save_provider_cache(&cached);
-                    } else {
-                        registry.ensure_builtin_defaults();
-                        let _ = persistence::save_provider_cache(&registry);
+                    // Remote failed — try local api.json
+                    let local_source = LocalFileSource::new(std::path::PathBuf::from("api.json"));
+                    match local_source.fetch().await {
+                        Ok(providers) if !providers.is_empty() => {
+                            registry = ModelRegistry::with_providers(providers);
+                            let count = registry.providers().len();
+                            let _ = persistence::save_provider_cache(&registry);
+                            let _ = tx.send(AppEvent::ModelRegistryFetched { count });
+                        }
+                        _ => {
+                            // Both remote and local failed.
+                            // If no cache exists at all, fall back to built-in defaults.
+                            if persistence::load_provider_cache().is_none() {
+                                registry.ensure_builtin_defaults();
+                                let count = registry.providers().len();
+                                let _ = persistence::save_provider_cache(&registry);
+                                let _ = tx.send(AppEvent::ModelRegistryFetched { count });
+                            }
+                            // Otherwise keep existing cache silently.
+                        }
                     }
-                    let count = registry.providers().len();
-                    let _ = tx.send(AppEvent::ModelRegistryFetched { count });
                 }
             }
         }
@@ -374,6 +389,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                                 output,
                                 cached_input,
                                 cache_creation_input,
+                                reasoning_tokens,
                             } => {
                                 let _ = tx.send(AppEvent::ChatTokenUsage {
                                     response_index,
@@ -381,6 +397,7 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                                     output,
                                     cached_input,
                                     cache_creation_input,
+                                    reasoning_tokens,
                                 });
                             }
                             ToolEvent::Done { .. } => {

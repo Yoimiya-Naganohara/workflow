@@ -60,6 +60,7 @@ impl AgentRuntime {
                     output,
                     cached_input,
                     cache_creation_input,
+                    reasoning_tokens: _,
                 } => {
                     // Accumulate token counts on the agent for UI display.
                     if input > 0 || output > 0 || cached_input > 0 || cache_creation_input > 0 {
@@ -281,12 +282,14 @@ mod tests {
                 output: 50,
                 cached_input: 0,
                 cache_creation_input: 0,
+                reasoning_tokens: 30,
             },
             ToolEvent::TokenUsage {
                 input: 200,
                 output: 75,
                 cached_input: 0,
                 cache_creation_input: 0,
+                reasoning_tokens: 60,
             },
             ToolEvent::Done {
                 reason: DoneReason::Normal,
@@ -308,6 +311,7 @@ mod tests {
                 output: 0,
                 cached_input: 0,
                 cache_creation_input: 0,
+                reasoning_tokens: 0,
             },
             ToolEvent::Done {
                 reason: DoneReason::Normal,

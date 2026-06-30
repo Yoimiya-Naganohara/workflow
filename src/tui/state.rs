@@ -103,6 +103,8 @@ pub struct UiState {
     /// Cached token counts (recalculated on message changes).
     pub cached_input_tokens: u32,
     pub cached_output_tokens: u32,
+    /// Cached reasoning/chain-of-thought tokens from API response.
+    pub cached_reasoning_tokens: u32,
     /// Number of messages at last token recalc (to detect new messages).
     pub cached_message_count: usize,
     /// Whether the tiktoken BPE file has been downloaded.
@@ -427,10 +429,12 @@ impl AppState {
                 output,
                 cached_input,
                 cache_creation_input,
+                reasoning_tokens,
             } => {
                 // API reports per-request cumulative — trust it over local estimate
                 self.ui.cached_input_tokens = input;
                 self.ui.cached_output_tokens = output;
+                self.ui.cached_reasoning_tokens = reasoning_tokens;
                 self.ui.has_api_tokens = true;
                 self.ui.llm_cache_read += cached_input as u64;
                 self.ui.llm_cache_write += cache_creation_input as u64;
@@ -860,6 +864,7 @@ impl Default for UiState {
             active_chat_request_id: 0,
             cached_input_tokens: 0,
             cached_output_tokens: 0,
+            cached_reasoning_tokens: 0,
             cached_message_count: 0,
             tokenizer_initialized: false,
             has_api_tokens: false,

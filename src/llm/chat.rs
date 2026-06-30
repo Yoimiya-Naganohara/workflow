@@ -449,6 +449,7 @@ impl LlmProvider {
                                     output: usage.output_tokens as u32,
                                     cached_input: usage.cached_input_tokens as u32,
                                     cache_creation_input: usage.cache_creation_input_tokens as u32,
+                                    reasoning_tokens: usage.reasoning_tokens as u32,
                                 };
                             }
                         }
@@ -461,6 +462,7 @@ impl LlmProvider {
                                 output: usage.output_tokens as u32,
                                 cached_input: usage.cached_input_tokens as u32,
                                 cache_creation_input: usage.cache_creation_input_tokens as u32,
+                                reasoning_tokens: usage.reasoning_tokens as u32,
                             };
                         }
                         yield ToolEvent::Done {
@@ -501,6 +503,7 @@ mod tests {
             output: 75,
             cached_input: 10,
             cache_creation_input: 20,
+            reasoning_tokens: 40,
         };
         match event {
             ToolEvent::TokenUsage {
@@ -508,11 +511,13 @@ mod tests {
                 output,
                 cached_input,
                 cache_creation_input,
+                reasoning_tokens,
             } => {
                 assert_eq!(input, 150);
                 assert_eq!(output, 75);
                 assert_eq!(cached_input, 10);
                 assert_eq!(cache_creation_input, 20);
+                assert_eq!(reasoning_tokens, 40);
             }
             _ => panic!("expected TokenUsage"),
         }

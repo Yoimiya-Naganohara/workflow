@@ -178,6 +178,8 @@ pub enum ToolEvent {
         cached_input: u32,
         /// Input tokens written to provider-managed cache.
         cache_creation_input: u32,
+        /// Tokens used for internal reasoning/chain-of-thought.
+        reasoning_tokens: u32,
     },
     Done {
         reason: DoneReason,
@@ -235,11 +237,18 @@ mod tests {
             output: 50,
             cached_input: 10,
             cache_creation_input: 5,
+            reasoning_tokens: 30,
         };
         match event {
-            ToolEvent::TokenUsage { input, output, .. } => {
+            ToolEvent::TokenUsage {
+                input,
+                output,
+                reasoning_tokens,
+                ..
+            } => {
                 assert_eq!(input, 100);
                 assert_eq!(output, 50);
+                assert_eq!(reasoning_tokens, 30);
             }
             _ => panic!("expected TokenUsage"),
         }
