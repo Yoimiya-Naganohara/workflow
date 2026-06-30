@@ -42,7 +42,7 @@ pub fn role_names_delete_provider(ctx: &CommandContext) -> Vec<Node> {
 }
 
 use crate::node;
-pub fn role_provider(_ctx: &CommandContext) -> Vec<Node> {
+pub fn role_provider(_: &CommandContext) -> Vec<Node> {
     vec![
         node!(
             "show",
@@ -77,7 +77,7 @@ pub fn role_provider(_ctx: &CommandContext) -> Vec<Node> {
     ]
 }
 
-pub fn think_provider(_ctx: &CommandContext) -> Vec<Node> {
+pub fn think_provider(_: &CommandContext) -> Vec<Node> {
     vec![
         node!(
             "on",
@@ -124,7 +124,7 @@ pub fn think_provider(_ctx: &CommandContext) -> Vec<Node> {
     ]
 }
 
-pub fn pool_provider(_ctx: &CommandContext) -> Vec<Node> {
+pub fn pool_provider(_: &CommandContext) -> Vec<Node> {
     vec![
         node!(
             "stats",
@@ -165,7 +165,7 @@ pub fn pool_provider(_ctx: &CommandContext) -> Vec<Node> {
     ]
 }
 
-pub fn sessions_provider(_ctx: &CommandContext) -> Vec<Node> {
+pub fn sessions_provider(_: &CommandContext) -> Vec<Node> {
     let sessions = crate::persistence::list_sessions();
     sessions
         .into_iter()
@@ -222,7 +222,7 @@ pub fn memo_keys_delete_provider(ctx: &CommandContext) -> Vec<Node> {
     memo_keys_provider(ctx, super::handlers::memo_delete)
 }
 
-pub fn memo_provider(_ctx: &CommandContext) -> Vec<Node> {
+pub fn memo_provider(_: &CommandContext) -> Vec<Node> {
     vec![
         node!(
             "show",
@@ -251,7 +251,7 @@ pub fn memo_provider(_ctx: &CommandContext) -> Vec<Node> {
     ]
 }
 
-pub fn agent_provider(_ctx: &CommandContext) -> Vec<Node> {
+pub fn agent_provider(_: &CommandContext) -> Vec<Node> {
     vec![node!(
         "inspect",
         "inspect",
@@ -286,7 +286,7 @@ pub fn agent_inspect_provider(ctx: &CommandContext) -> Vec<Node> {
         .collect()
 }
 
-pub fn reflect_provider(_ctx: &CommandContext) -> Vec<Node> {
+pub fn reflect_provider(_: &CommandContext) -> Vec<Node> {
     vec![
         node!(
             "on",

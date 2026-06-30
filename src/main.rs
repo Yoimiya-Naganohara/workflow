@@ -85,7 +85,7 @@ async fn run_tui() -> Result<()> {
     register_panic_hook();
 
     // Register signal handler for graceful shutdown on Ctrl+C / SIGTERM.
-    let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+    let (shutdown_tx, _) = tokio::sync::watch::channel(false);
     {
         let shutdown_tx = shutdown_tx.clone();
         tokio::spawn(async move {
@@ -110,6 +110,8 @@ async fn run_tui() -> Result<()> {
     let mut flush_handle: Option<tokio::task::JoinHandle<()>> = None;
     #[allow(unused_assignments)]
     let mut evict_handle: Option<tokio::task::JoinHandle<()>> = None;
+    #[allow(unused_assignments)]
+    let mut provider_evict_handle: Option<tokio::task::JoinHandle<()>> = None;
 
     // Wrap TUI initialization and run in a retry loop for crash recovery.
     // If the TUI panics or returns an error non-fatally, we attempt to restart.
@@ -226,7 +228,36 @@ async fn run_tui() -> Result<()> {
                     }
                 }
             }
-            info!("Eviction background task stopped");
+            info!("Agent eviction background task stopped");
+        }));
+
+        // Background task: periodic provider client eviction (every 5 minutes).
+        // Removes unhealthy provider clients so they are re-created on next use.
+        let provider_state = state.clone();
+        let mut provider_shutdown_rx = shutdown_tx.subscribe();
+        provider_evict_handle = Some(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {}
+                    _ = provider_shutdown_rx.changed() => {
+                        break;
+                    }
+                }
+                let mut s = match provider_state.try_write() {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let before = s.core.provider_clients.len();
+                s.core
+                    .provider_clients
+                    .retain(|_, client| client.is_healthy());
+                let evicted = before - s.core.provider_clients.len();
+                if evicted > 0 {
+                    info!("Evicted {} unhealthy provider client(s)", evicted);
+                }
+            }
+            info!("Provider eviction background task stopped");
         }));
 
         // ── Run the TUI event loop ──
@@ -275,6 +306,9 @@ async fn run_tui() -> Result<()> {
         h.abort();
     }
     if let Some(h) = evict_handle {
+        h.abort();
+    }
+    if let Some(h) = provider_evict_handle {
         h.abort();
     }
 

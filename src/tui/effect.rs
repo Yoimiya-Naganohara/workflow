@@ -196,15 +196,16 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                     let _ = persistence::save_provider_cache(&registry);
                     let _ = tx.send(AppEvent::ModelRegistryFetched { count });
                 }
-                Err(e) => {
-                    // Preserve any cached data we might have
+                Err(_) => {
+                    // On failure, fall back to cached data or built-in defaults
                     if let Some(cached) = persistence::load_provider_cache() {
                         let _ = persistence::save_provider_cache(&cached);
+                    } else {
+                        registry.ensure_builtin_defaults();
+                        let _ = persistence::save_provider_cache(&registry);
                     }
-                    let _ = tx.send(AppEvent::ModelRegistryFailed {
-                        error: e.to_string(),
-                        is_empty: registry.providers().is_empty(),
-                    });
+                    let count = registry.providers().len();
+                    let _ = tx.send(AppEvent::ModelRegistryFetched { count });
                 }
             }
         }

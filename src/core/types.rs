@@ -37,6 +37,29 @@ pub struct ChildAgentConfig {
     pub role_template_id: Option<u32>,
 }
 
+impl Default for ChildAgentConfig {
+    fn default() -> Self {
+        Self {
+            agent_id: [0; 16],
+            task_id: [0; 16],
+            allocated_budget: 0,
+            allowed_tools: !0,
+            role_template_id: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubtaskDef {
+    pub id: String,
+    pub role: String,
+    pub goal: String,
+    #[serde(default)]
+    pub depend_on: Vec<String>,
+    #[serde(default)]
+    pub auto_confirm: bool,
+}
+
 pub enum SpawnDecision {
     Approved(ChildAgentConfig),
     Rejected(SpawnRejection),

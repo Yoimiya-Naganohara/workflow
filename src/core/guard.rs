@@ -62,7 +62,7 @@ impl AdmissionController {
         .await;
 
         match permit {
-            Ok(Ok(permit)) => Ok(AdmissionPermit { _permit: permit }),
+            Ok(Ok(permit)) => Ok(AdmissionPermit { permit }),
             Ok(Err(_)) => Err(SpawnRejection::SystemOverloaded),
             Err(_) => Err(SpawnRejection::SystemOverloaded),
         }
@@ -93,7 +93,8 @@ impl AdmissionControl for AdmissionController {
 
 /// A held admission permit.  Released on drop (returns permit to semaphore).
 pub struct AdmissionPermit {
-    _permit: tokio::sync::OwnedSemaphorePermit,
+    #[allow(dead_code)]
+    permit: tokio::sync::OwnedSemaphorePermit,
 }
 
 // ============================================================================
@@ -358,7 +359,7 @@ impl L0CircuitBreaker {
         requested_tools: u64,
     ) -> Result<L0Permit, SpawnRejection> {
         // Depth check
-        let _depth =
+        let _ =
             self.resource_state
                 .increment_depth()
                 .map_err(|_| SpawnRejection::DepthExceeded {
@@ -380,15 +381,18 @@ impl L0CircuitBreaker {
             })?;
 
         // Tool bitmap check
-        if requested_tools != 0 {
-            if let Err(_holder) = self.resource_state.try_acquire_tools(requested_tools) {
-                self.resource_state.release_budget(budget);
-                self.resource_state.decrement_depth();
-                return Err(SpawnRejection::ResourceConflict {
-                    tool_id: requested_tools,
-                    holder: [0u8; 16],
-                });
-            }
+        if requested_tools != 0
+            && self
+                .resource_state
+                .try_acquire_tools(requested_tools)
+                .is_err()
+        {
+            self.resource_state.release_budget(budget);
+            self.resource_state.decrement_depth();
+            return Err(SpawnRejection::ResourceConflict {
+                tool_id: requested_tools,
+                holder: [0u8; 16],
+            });
         }
 
         Ok(L0Permit {
@@ -489,10 +493,11 @@ mod tests {
         assert_eq!(controller.available_permits(), 9);
     }
 
+    #[allow(unused_variables)]
     #[tokio::test]
     async fn test_admission_timeout() {
         let controller = AdmissionController::new(1, 50);
-        let _permit = controller.acquire_owned().await.unwrap();
+        let p = controller.acquire_owned().await.unwrap();
         let result = controller.acquire_owned().await;
         assert!(matches!(result, Err(SpawnRejection::SystemOverloaded)));
     }
@@ -521,12 +526,13 @@ mod tests {
         assert_eq!(failures, 5);
     }
 
+    #[allow(unused_variables)]
     #[tokio::test]
     async fn test_admission_release_on_drop() {
         let controller = Arc::new(AdmissionController::new(2, 100));
         {
-            let _p1 = controller.acquire_owned().await.unwrap();
-            let _p2 = controller.acquire_owned().await.unwrap();
+            let p1 = controller.acquire_owned().await.unwrap();
+            let p2 = controller.acquire_owned().await.unwrap();
             assert_eq!(controller.available_permits(), 0);
         }
         assert_eq!(controller.available_permits(), 2);
@@ -618,6 +624,7 @@ mod tests {
         assert!(permit.is_ok());
     }
 
+    #[allow(unused_variables)]
     #[test]
     fn test_l0_depth_exceeded() {
         let state = TaskResourceState::new(1000, 2);
@@ -637,7 +644,7 @@ mod tests {
         );
         drop(p1);
         drop(p2);
-        let _p3 = breaker
+        let p3 = breaker
             .try_acquire(100, 2, 0)
             .expect("after drop should succeed");
     }
@@ -652,23 +659,25 @@ mod tests {
         ));
     }
 
+    #[allow(unused_variables)]
     #[test]
     fn test_l0_tool_conflict() {
         let state = TaskResourceState::new(1000, 10);
         let breaker = L0CircuitBreaker::new(state);
-        let _permit = breaker.try_acquire(100, 0, 0b101).unwrap();
+        let p = breaker.try_acquire(100, 0, 0b101).unwrap();
         assert!(matches!(
             breaker.try_acquire(100, 0, 0b100),
             Err(SpawnRejection::ResourceConflict { .. })
         ));
     }
 
+    #[allow(unused_variables)]
     #[test]
     fn test_l0_permit_drop_rollback() {
         let state = TaskResourceState::new(1000, 10);
         let breaker = L0CircuitBreaker::new(state.clone());
         {
-            let _permit = breaker.try_acquire(500, 0, 0b1).unwrap();
+            let p = breaker.try_acquire(500, 0, 0b1).unwrap();
             assert_eq!(state.remaining_budget.load(Ordering::Relaxed), 500);
         }
         assert_eq!(state.remaining_budget.load(Ordering::Relaxed), 1000);

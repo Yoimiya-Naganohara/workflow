@@ -1,12 +1,9 @@
-//! Provider client pool — cached LLM provider clients with health tracking.
+//! Provider client — LLM provider client with health tracking.
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use tokio::sync::RwLock;
 
 use crate::config::ProviderConfig;
 use crate::llm::{LlmProvider, LlmRequest, LlmResponse};
@@ -49,7 +46,6 @@ impl ProviderClient {
         if ns == 0 {
             None
         } else {
-            // last_used stores SystemTime epoch nanos — compute elapsed
             let stored = UNIX_EPOCH + Duration::from_nanos(ns);
             SystemTime::now().duration_since(stored).ok()
         }
@@ -86,24 +82,7 @@ impl ProviderClient {
         self.error_count.store(0, Ordering::Relaxed);
     }
 
-    /// Rebuild the underlying provider client (e.g. after API key change).
-    pub fn rebuild(&mut self) -> Result<()> {
-        let new_client = LlmProvider::from_protocol(
-            &self.config.api_key,
-            if self.config.base_url.is_empty() {
-                None
-            } else {
-                Some(&self.config.base_url)
-            },
-            self.config.protocol,
-        )?;
-        self.inner = new_client;
-        self.reset_health();
-        Ok(())
-    }
-
     /// Call complete() with health tracking.
-    /// On success: calls mark_success(). On failure: calls mark_failure().
     pub async fn complete(&self, request: LlmRequest) -> Result<LlmResponse> {
         let result = self.inner.complete(request).await;
         match &result {
@@ -125,127 +104,6 @@ impl ProviderClient {
 }
 
 // ============================================================================
-//  ClientPool — cached provider clients with TTL
-// ============================================================================
-
-/// A pool of LLM provider clients with TTL-based eviction.
-///
-/// Clients are created on first use and cached until TTL expiry or
-/// health failure.  The pool is thread-safe and cheaply cloneable via
-/// `Arc`.
-pub struct ClientPool {
-    clients: RwLock<HashMap<String, PoolEntry>>,
-    ttl: Duration,
-}
-
-struct PoolEntry {
-    client: Arc<ProviderClient>,
-    created_at: Instant,
-}
-
-impl ClientPool {
-    /// Create a new pool with the given TTL.
-    ///
-    /// After `ttl` of inactivity, an unused client is eligible for eviction.
-    pub fn new(ttl: Duration) -> Self {
-        Self {
-            clients: RwLock::new(HashMap::new()),
-            ttl,
-        }
-    }
-
-    /// Number of cached clients.
-    pub async fn len(&self) -> usize {
-        self.clients.read().await.len()
-    }
-
-    /// Whether the pool is empty.
-    pub async fn is_empty(&self) -> bool {
-        self.clients.read().await.is_empty()
-    }
-
-    /// Get a client by provider ID, creating it if necessary.
-    ///
-    /// If a cached client exists and is healthy, returns it.
-    /// If unhealthy but still within TTL, attempts to rebuild.
-    /// If TTL expired, rebuilds the client.
-    pub async fn get_or_create(&self, config: &ProviderConfig) -> Result<Arc<ProviderClient>> {
-        // Fast path — existing healthy client (no mark_success — that's for actual API calls only).
-        {
-            let clients = self.clients.read().await;
-            if let Some(entry) = clients.get(&config.id) {
-                if entry.client.is_healthy() {
-                    return Ok(entry.client.clone());
-                }
-            }
-        }
-
-        // Slow path — create or rebuild
-        let mut clients = self.clients.write().await;
-
-        // Re-check after acquiring write lock
-        if let Some(entry) = clients.get(&config.id) {
-            if entry.client.is_healthy() {
-                return Ok(entry.client.clone());
-            }
-            // Unhealthy — remove and recreate below
-            clients.remove(&config.id);
-        }
-
-        let inner = LlmProvider::from_protocol(
-            &config.api_key,
-            if config.base_url.is_empty() {
-                None
-            } else {
-                Some(&config.base_url)
-            },
-            config.protocol,
-        )?;
-
-        let client = Arc::new(ProviderClient::new(config.clone(), inner));
-        clients.insert(
-            config.id.clone(),
-            PoolEntry {
-                client: client.clone(),
-                created_at: Instant::now(),
-            },
-        );
-        Ok(client)
-    }
-
-    /// Remove and return a client by ID (e.g. on API key change).
-    pub async fn remove(&self, provider_id: &str) -> Option<Arc<ProviderClient>> {
-        self.clients
-            .write()
-            .await
-            .remove(provider_id)
-            .map(|e| e.client)
-    }
-
-    /// Evict clients whose TTL has expired and are not in use.
-    pub async fn evict_stale(&self) -> usize {
-        let mut clients = self.clients.write().await;
-        let before = clients.len();
-        clients.retain(|_, entry| {
-            // Keep only healthy clients within TTL (unhealthy clients are evicted).
-            entry.created_at.elapsed() < self.ttl && entry.client.is_healthy()
-        });
-        before - clients.len()
-    }
-
-    /// Remove all clients.
-    pub async fn clear(&self) {
-        self.clients.write().await.clear();
-    }
-}
-
-impl Default for ClientPool {
-    fn default() -> Self {
-        Self::new(Duration::from_secs(crate::core::types::SECONDS_PER_HOUR))
-    }
-}
-
-// ============================================================================
 //  Tests
 // ============================================================================
 
@@ -254,9 +112,8 @@ mod tests {
     use super::*;
     use crate::llm::ProviderProtocol;
 
-    #[tokio::test]
-    async fn test_pool_creates_client() {
-        let pool = ClientPool::new(Duration::from_secs(60));
+    #[test]
+    fn test_client_starts_healthy() {
         let config = ProviderConfig {
             id: "test".to_string(),
             name: "Test".to_string(),
@@ -264,14 +121,14 @@ mod tests {
             api_key: "sk-test".to_string(),
             ..Default::default()
         };
-        let client = pool.get_or_create(&config).await.unwrap();
+        let inner = LlmProvider::from_protocol(&config.api_key, None, config.protocol).unwrap();
+        let client = ProviderClient::new(config, inner);
         assert!(client.is_healthy());
-        assert_eq!(pool.len().await, 1);
+        assert_eq!(client.error_count(), 0);
     }
 
-    #[tokio::test]
-    async fn test_pool_returns_cached() {
-        let pool = ClientPool::new(Duration::from_secs(60));
+    #[test]
+    fn test_mark_failure_tracks_errors() {
         let config = ProviderConfig {
             id: "test".to_string(),
             name: "Test".to_string(),
@@ -279,15 +136,22 @@ mod tests {
             api_key: "sk-test".to_string(),
             ..Default::default()
         };
-        let a = pool.get_or_create(&config).await.unwrap();
-        let b = pool.get_or_create(&config).await.unwrap();
-        // Same Arc — cached
-        assert!(Arc::ptr_eq(&a, &b));
+        let inner = LlmProvider::from_protocol(&config.api_key, None, config.protocol).unwrap();
+        let client = ProviderClient::new(config, inner);
+        assert!(client.is_healthy());
+        client.mark_failure();
+        assert!(client.is_healthy());
+        assert_eq!(client.error_count(), 1);
+        client.mark_failure();
+        assert!(client.is_healthy());
+        assert_eq!(client.error_count(), 2);
+        client.mark_failure();
+        assert!(!client.is_healthy());
+        assert_eq!(client.error_count(), 3);
     }
 
-    #[tokio::test]
-    async fn test_pool_evict() {
-        let pool = ClientPool::new(Duration::from_nanos(1)); // immediate expiry
+    #[test]
+    fn test_mark_success_resets_errors() {
         let config = ProviderConfig {
             id: "test".to_string(),
             name: "Test".to_string(),
@@ -295,10 +159,32 @@ mod tests {
             api_key: "sk-test".to_string(),
             ..Default::default()
         };
-        let _ = pool.get_or_create(&config).await.unwrap();
-        // Yield to let time pass
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        let evicted = pool.evict_stale().await;
-        assert_eq!(evicted, 1);
+        let inner = LlmProvider::from_protocol(&config.api_key, None, config.protocol).unwrap();
+        let client = ProviderClient::new(config, inner);
+        client.mark_failure();
+        client.mark_failure();
+        client.mark_success();
+        assert!(client.is_healthy());
+        assert_eq!(client.error_count(), 0);
+    }
+
+    #[test]
+    fn test_reset_health() {
+        let config = ProviderConfig {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            protocol: ProviderProtocol::OpenAiCompatible,
+            api_key: "sk-test".to_string(),
+            ..Default::default()
+        };
+        let inner = LlmProvider::from_protocol(&config.api_key, None, config.protocol).unwrap();
+        let client = ProviderClient::new(config, inner);
+        client.mark_failure();
+        client.mark_failure();
+        client.mark_failure();
+        assert!(!client.is_healthy());
+        client.reset_health();
+        assert!(client.is_healthy());
+        assert_eq!(client.error_count(), 0);
     }
 }

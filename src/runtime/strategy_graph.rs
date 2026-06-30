@@ -240,7 +240,7 @@ impl ClusterDriftDetector {
     }
 
     /// Check whether a cluster's task distribution has drifted from its baseline.
-    pub fn is_drifting(&self, _cluster: ClusterId) -> bool {
+    pub fn is_drifting(&self, _: ClusterId) -> bool {
         // Phase 5: compare recent window mean vs historical baseline.
         // Simplified for schema: returns false when insufficient data.
         false
@@ -905,7 +905,7 @@ mod tests {
             true,
         ));
 
-        let _sig = TaskSignature {
+        let _ = TaskSignature {
             goal_length_chars: 100,
             domain_count: 3,
             estimated_complexity: 0.7,

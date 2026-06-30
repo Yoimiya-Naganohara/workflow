@@ -14,15 +14,14 @@
 //!
 //! See [`ARCHITECTURE.md`](../../ARCHITECTURE.md) for the full design.
 
-use crate::core::types::AgentId;
-use crate::core::types::TaskId;
+use crate::core::types::{AgentId, SubtaskDef, TaskId};
 
 /// Events emitted by the agent runtime and consumed by
 /// [`RuntimeEventLoop`](super::runtime_loop::RuntimeEventLoop).
 ///
 /// Every variant is also forwarded to the TUI broker (via
 /// `tui/runtime_bridge.rs`) so the UI can react to state changes.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RuntimeEvent {
     // ── Execution events ──
     /// Activate a (newly spawned) agent in the background.
@@ -77,36 +76,7 @@ pub enum RuntimeEvent {
     //  These mutate the TaskGraph and are the "write capability"
     //  that agents use to spawn, escalate, and merge work.
     // ════════════════════════════════════════════════════════════════
-    /// An agent requests spawning a new sub-task in the task graph.
-    ///
-    /// The parent agent is identified by `parent_agent`.  The event loop
-    /// (see [`RuntimeEventLoop`](super::runtime_loop::RuntimeEventLoop))
-    /// creates the task node via `TaskGraph::spawn_child`, updating the
-    /// parent agent's `task_id` if needed.
-    ///
-    /// After inserting the node, the loop calls `schedule_ready_tasks()`
-    /// which runs the pipeline for each ready task and may emit
-    /// `ActivateAgent` events.
-    SpawnTask {
-        /// The goal/purpose of the new task.
-        goal: String,
-        /// The role that should execute this task.
-        role: String,
-        /// The agent requesting the spawn (becomes the task's owner).
-        parent_agent: AgentId,
-    },
-
-    /// Spawn a sub-task with confirmation control.
-    ///
-    /// Used by the decompose tool. The response channel returns the
-    /// created task's ID so the caller can wire dependencies.
-    SpawnTaskWithConfirm {
-        goal: String,
-        role: String,
-        parent_agent: AgentId,
-        auto_confirm: bool,
-        response_tx: tokio::sync::oneshot::Sender<Result<TaskId, String>>,
-    },
+    /// [removed: SpawnTask — replaced by DecomposeTask]
 
     /// A task in the graph has completed successfully.
     ///
@@ -144,93 +114,19 @@ pub enum RuntimeEvent {
         /// Optional summary/synthesis text.
         summary: Option<String>,
     },
-}
 
-impl Clone for RuntimeEvent {
-    fn clone(&self) -> Self {
-        match self {
-            Self::ActivateAgent {
-                agent_id,
-                parent_id,
-            } => Self::ActivateAgent {
-                agent_id: *agent_id,
-                parent_id: *parent_id,
-            },
-            Self::ChildCompleted {
-                parent_id,
-                child_id,
-                result,
-            } => Self::ChildCompleted {
-                parent_id: *parent_id,
-                child_id: *child_id,
-                result: result.clone(),
-            },
-            Self::ReadyForAggregation { agent_id } => Self::ReadyForAggregation {
-                agent_id: *agent_id,
-            },
-            Self::AgentFailed { agent_id, error } => Self::AgentFailed {
-                agent_id: *agent_id,
-                error: error.clone(),
-            },
-            Self::AggregationCompleted { agent_id, result } => Self::AggregationCompleted {
-                agent_id: *agent_id,
-                result: result.clone(),
-            },
-            Self::InboxMessage {
-                agent_id,
-                from_name,
-                preview,
-                unread_count,
-            } => Self::InboxMessage {
-                agent_id: *agent_id,
-                from_name: from_name.clone(),
-                preview: preview.clone(),
-                unread_count: *unread_count,
-            },
-            Self::SpawnTask {
-                goal,
-                role,
-                parent_agent,
-            } => Self::SpawnTask {
-                goal: goal.clone(),
-                role: role.clone(),
-                parent_agent: *parent_agent,
-            },
-            // SpawnTaskWithConfirm carries a oneshot::Sender which can't be cloned.
-            // This variant should not be cloned in practice.
-            Self::SpawnTaskWithConfirm { .. } => {
-                panic!("SpawnTaskWithConfirm cannot be cloned")
-            }
-            Self::TaskCompleted { task_id, result } => Self::TaskCompleted {
-                task_id: *task_id,
-                result: result.clone(),
-            },
-            Self::TaskFailed { task_id, error } => Self::TaskFailed {
-                task_id: *task_id,
-                error: error.clone(),
-            },
-            Self::EscalateTask {
-                task_id,
-                reason,
-                target_role,
-                from_agent,
-            } => Self::EscalateTask {
-                task_id: *task_id,
-                reason: reason.clone(),
-                target_role: target_role.clone(),
-                from_agent: *from_agent,
-            },
-            Self::MergeTaskResult {
-                from_task,
-                into_task,
-                summary,
-            } => Self::MergeTaskResult {
-                from_task: *from_task,
-                into_task: *into_task,
-                summary: summary.clone(),
-            },
-        }
-    }
+    /// An agent decomposes its own task into subtasks via the `decompose_task` tool.
+    ///
+    /// The LLM decides the decomposition structure (roles, goals, dependencies)
+    /// rather than relying on the heuristic `DecompositionEngine`. The event loop
+    /// creates child task nodes in the graph with the specified dependencies and
+    /// optionally bypasses the pipeline (L1/L2) for subtasks with `auto_confirm`.
+    DecomposeTask {
+        /// The agent requesting decomposition.
+        parent_agent: AgentId,
+        /// List of subtask definitions.
+        subtasks: Vec<SubtaskDef>,
+    },
 }
 
 impl RuntimeEvent {
@@ -245,12 +141,12 @@ impl RuntimeEvent {
             RuntimeEvent::AggregationCompleted { .. } => "aggregation-completed",
             RuntimeEvent::InboxMessage { .. } => "inbox-message",
             // Delegation
-            RuntimeEvent::SpawnTask { .. } => "spawn-task",
-            RuntimeEvent::SpawnTaskWithConfirm { .. } => "spawn-task-confirm",
+            // SpawnTask removed — replaced by DecomposeTask
             RuntimeEvent::TaskCompleted { .. } => "task-completed",
             RuntimeEvent::TaskFailed { .. } => "task-failed",
             RuntimeEvent::EscalateTask { .. } => "escalate-task",
             RuntimeEvent::MergeTaskResult { .. } => "merge-task-result",
+            RuntimeEvent::DecomposeTask { .. } => "decompose-task",
         }
     }
 }
@@ -323,16 +219,6 @@ mod tests {
         };
         assert_eq!(e.label(), "inbox-message");
         assert!(format!("{:?}", e).contains("agent-1"));
-    }
-
-    #[test]
-    fn test_spawn_task_event() {
-        let e = RuntimeEvent::SpawnTask {
-            goal: "build".into(),
-            role: "developer".into(),
-            parent_agent: make_id(1),
-        };
-        assert_eq!(e.label(), "spawn-task");
     }
 
     #[test]
@@ -426,11 +312,6 @@ mod tests {
                 preview: String::new(),
                 unread_count: 0,
             },
-            RuntimeEvent::SpawnTask {
-                goal: String::new(),
-                role: String::new(),
-                parent_agent: make_id(1),
-            },
             RuntimeEvent::TaskCompleted {
                 task_id: make_id(1),
                 result: String::new(),
@@ -449,6 +330,10 @@ mod tests {
                 from_task: make_id(1),
                 into_task: make_id(2),
                 summary: None,
+            },
+            RuntimeEvent::DecomposeTask {
+                parent_agent: make_id(1),
+                subtasks: Vec::new(),
             },
         ];
         let mut names: Vec<&str> = variants.iter().map(|v| v.label()).collect();

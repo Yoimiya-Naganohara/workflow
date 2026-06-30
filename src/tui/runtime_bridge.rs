@@ -143,12 +143,11 @@ pub async fn runtime_event_broker(
             // These are infrastructure-level mutations.  They become
             // visible in the TUI once the delegation engine is wired
             // up (Phase 3).  For now they just bump the tree version.
-            RuntimeEvent::SpawnTask { .. }
-            | RuntimeEvent::SpawnTaskWithConfirm { .. }
-            | RuntimeEvent::TaskCompleted { .. }
+            RuntimeEvent::TaskCompleted { .. }
             | RuntimeEvent::TaskFailed { .. }
             | RuntimeEvent::EscalateTask { .. }
-            | RuntimeEvent::MergeTaskResult { .. } => {
+            | RuntimeEvent::MergeTaskResult { .. }
+            | RuntimeEvent::DecomposeTask { .. } => {
                 // Task graph mutation — the TUI diagnostic tree
                 // will reflect it on next render via the bumped
                 // agent_tree_version.
@@ -171,7 +170,7 @@ mod tests {
     #[tokio::test]
     async fn test_broker_bumps_tree_version_on_any_event() {
         let state = Arc::new(RwLock::new(AppState::default()));
-        let (app_tx, _app_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (app_tx, _) = tokio::sync::mpsc::unbounded_channel();
         let (runtime_tx, runtime_rx) = tokio::sync::mpsc::channel::<RuntimeEvent>(64);
 
         let state_clone = state.clone();
@@ -231,7 +230,7 @@ mod tests {
     #[tokio::test]
     async fn test_broker_resets_input_on_failure() {
         let state = Arc::new(RwLock::new(AppState::default()));
-        let (app_tx, _app_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (app_tx, _) = tokio::sync::mpsc::unbounded_channel();
         let (runtime_tx, runtime_rx) = tokio::sync::mpsc::channel::<RuntimeEvent>(64);
 
         let state_clone = state.clone();

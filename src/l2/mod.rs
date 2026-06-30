@@ -174,7 +174,7 @@ pub trait AuditEngine: Send + Sync {
     /// Returns `None` if the request passes, or a rejection reason otherwise.
     fn screen_request(
         &mut self,
-        _request: &crate::core::types::SpawnRequest,
+        _: &crate::core::types::SpawnRequest,
     ) -> Option<crate::core::types::SpawnRejection> {
         // Default: pass all requests (no screening).
         None
@@ -672,7 +672,7 @@ mod l2_llm_tests {
 
         // Verify no panic: empty agents should be handled gracefully
         let winner_idx = decision.winner_index.unwrap_or(0);
-        let _winner = manifest
+        let _ = manifest
             .contending_agents
             .get(winner_idx)
             .copied()

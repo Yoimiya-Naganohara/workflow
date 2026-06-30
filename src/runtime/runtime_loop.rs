@@ -6,7 +6,7 @@
 //! # Channel topology
 //!
 //! ```text
-//! Tool (spawn_agent) ──► event_tx (from AppState)
+//! Tool (decompose_task) ──► event_tx (from AppState)
 //!                           │
 //!                           ▼
 //!                    RuntimeEventLoop::run()
@@ -30,7 +30,7 @@ use crate::runtime::event::RuntimeEvent;
 use crate::runtime::graph_analytics::TemplateEvolution;
 use crate::runtime::orchestration::{
     CapabilityRegistry, DefaultEscalationPolicy, DefaultRoleSelector, EmbeddingGoalAnalyzer,
-    PipelineDispatchDecider, ReferenceEmbeddings, TaskOutcomeStore,
+    NoopDecompositionEngine, PipelineDispatchDecider, ReferenceEmbeddings, TaskOutcomeStore,
 };
 use crate::runtime::scheduler::TaskScheduler;
 use crate::runtime::strategy_graph::{CompetitionProtocol, StrategyGraph};
@@ -85,6 +85,7 @@ impl RuntimeEventLoop {
                     Box::new(DefaultEscalationPolicy::default()),
                     Arc::new(RwLock::new(TaskOutcomeStore::new())),
                 )
+                .with_decomposition(Box::new(NoopDecompositionEngine))
                 .with_routing(
                     Box::new(DefaultRoleSelector::new(goal_analyzer)),
                     Arc::new(RwLock::new(CapabilityRegistry::new())),
@@ -303,33 +304,19 @@ impl RuntimeEventLoop {
                         }
                     });
                 }
-                RuntimeEvent::SpawnTask {
-                    goal,
-                    role,
-                    parent_agent,
-                } => {
-                    self.handle_spawn_task(goal, role, parent_agent).await;
-                }
-
-                RuntimeEvent::SpawnTaskWithConfirm {
-                    goal,
-                    role,
-                    parent_agent,
-                    auto_confirm,
-                    response_tx,
-                } => {
-                    let result = self
-                        .handle_spawn_task_with_confirm(goal, role, parent_agent, auto_confirm)
-                        .await;
-                    let _ = response_tx.send(result);
-                }
-
                 RuntimeEvent::TaskCompleted { task_id, result } => {
                     self.handle_task_completed(task_id, &result).await;
                 }
 
                 RuntimeEvent::TaskFailed { task_id, error } => {
                     self.handle_task_failed(task_id, &error).await;
+                }
+
+                RuntimeEvent::DecomposeTask {
+                    parent_agent,
+                    subtasks,
+                } => {
+                    self.handle_decompose_task(parent_agent, subtasks).await;
                 }
 
                 other => {
@@ -341,136 +328,6 @@ impl RuntimeEventLoop {
     }
 
     // ── Phase 2A: Delegation handlers ──
-
-    /// Handle `SpawnTask` — create a task node in the DAG, then schedule.
-    ///
-    /// Precondition: parent agent MUST have a `task_id`.  Phase 2B guarantees
-    /// this because `bootstrap_root_agent` now creates a root task.
-    async fn handle_spawn_task(&self, goal: String, role: String, parent_agent: AgentId) {
-        // Step 1: Extract parent's task_id and clone task_graph Arc.
-        let (effective_parent_id, task_graph) = {
-            let p = self.pool.read().await;
-            let pid = p.get_agent(&parent_agent).and_then(|a| a.task_id);
-            let pid = match pid {
-                Some(id) => id,
-                None => {
-                    tracing::error!(
-                        "handle_spawn_task: parent {:02x}.. has no task_id — inconsistent",
-                        parent_agent[0]
-                    );
-                    return;
-                }
-            };
-            let rt = self.runtime.read().await;
-            let tg = rt.task_graph.clone();
-            (pid, tg)
-        };
-
-        // Step 2: Spawn child task in the graph.
-        let child_task_id: crate::core::types::TaskId = {
-            let mut g = task_graph.lock().expect("runtime_loop mutex poisoned");
-            match g.spawn_child(effective_parent_id, &goal) {
-                Some(cid) => {
-                    if let Some(node) = g.get_mut(&cid) {
-                        node.role = Some(role.clone());
-                    }
-                    // Ensure parent is marked Decomposed.
-                    if let Some(parent) = g.get(&effective_parent_id) {
-                        if parent.status == crate::runtime::task_graph::TaskStatus::Created
-                            || parent.status == crate::runtime::task_graph::TaskStatus::Ready
-                        {
-                            g.mark_decomposed(effective_parent_id).ok();
-                        }
-                    }
-                    cid
-                }
-                None => {
-                    tracing::error!(
-                        "handle_spawn_task: parent {:02x}.. not found in graph",
-                        effective_parent_id[0]
-                    );
-                    return;
-                }
-            }
-        };
-
-        tracing::info!(
-            "SpawnTask: created task {:02x}.. under parent {:02x}.. (role={}, goal={:.60})",
-            child_task_id[0],
-            effective_parent_id[0],
-            role,
-            goal
-        );
-
-        self.scheduler.dispatch().await;
-    }
-
-    /// Handle `SpawnTaskWithConfirm` — like `handle_spawn_task` but returns
-    /// the created task ID via a oneshot channel and supports PendingConfirm.
-    async fn handle_spawn_task_with_confirm(
-        &self,
-        goal: String,
-        role: String,
-        parent_agent: AgentId,
-        auto_confirm: bool,
-    ) -> Result<crate::core::types::TaskId, String> {
-        let (effective_parent_id, task_graph) = {
-            let p = self.pool.read().await;
-            let pid = p.get_agent(&parent_agent).and_then(|a| a.task_id);
-            let pid = pid.ok_or_else(|| {
-                format!(
-                    "parent {:02x}.. has no task_id — inconsistent",
-                    parent_agent[0]
-                )
-            })?;
-            let rt = self.runtime.read().await;
-            let tg = rt.task_graph.clone();
-            (pid, tg)
-        };
-
-        let child_task_id = {
-            let mut g = task_graph.lock().expect("runtime_loop mutex poisoned");
-            let cid = g.spawn_child(effective_parent_id, &goal).ok_or_else(|| {
-                format!("parent {:02x}.. not found in graph", effective_parent_id[0])
-            })?;
-
-            if let Some(node) = g.get_mut(&cid) {
-                node.role = Some(role.clone());
-            }
-
-            // Ensure parent is marked Decomposed.
-            if let Some(parent) = g.get(&effective_parent_id) {
-                if parent.status == crate::runtime::task_graph::TaskStatus::Created
-                    || parent.status == crate::runtime::task_graph::TaskStatus::Ready
-                {
-                    g.mark_decomposed(effective_parent_id).ok();
-                }
-            }
-
-            // If auto_confirm=false, mark as PendingConfirm.
-            if !auto_confirm {
-                g.mark_pending_confirm(cid)
-                    .map_err(|e| format!("mark_pending_confirm failed: {}", e))?;
-            }
-
-            cid
-        };
-
-        tracing::info!(
-            "SpawnTaskWithConfirm: created task {:02x}.. under {:02x}.. (role={}, auto_confirm={})",
-            child_task_id[0],
-            effective_parent_id[0],
-            role,
-            auto_confirm
-        );
-
-        // Schedule if auto_confirm (don't dispatch PendingConfirm tasks).
-        if auto_confirm {
-            self.scheduler.dispatch().await;
-        }
-
-        Ok(child_task_id)
-    }
 
     /// Handle `TaskCompleted` — mark a task done in the graph, then schedule.
     async fn handle_task_completed(&self, task_id: crate::core::types::TaskId, result: &str) {
@@ -509,6 +366,99 @@ impl RuntimeEventLoop {
                 tracing::info!("TaskFailed: task {:02x}.. failed", task_id[0]);
             }
         }
+        self.scheduler.dispatch().await;
+    }
+
+    /// Handle `DecomposeTask` — create child task nodes in the DAG from
+    /// LLM-defined subtask list. Replaces the heuristic DecompositionEngine.
+    async fn handle_decompose_task(
+        &self,
+        parent_agent: AgentId,
+        subtasks: Vec<crate::core::types::SubtaskDef>,
+    ) {
+        // Step 1: Extract parent's task_id and clone task_graph Arc.
+        let effective_parent_id = {
+            let p = self.pool.read().await;
+            match p.get_agent(&parent_agent).and_then(|a| a.task_id) {
+                Some(id) => id,
+                None => {
+                    tracing::error!(
+                        "handle_decompose_task: parent {:02x}.. has no task_id",
+                        parent_agent[0]
+                    );
+                    return;
+                }
+            }
+        };
+
+        let task_graph = {
+            let rt = self.runtime.read().await;
+            rt.task_graph.clone()
+        };
+
+        // Step 2: First pass — spawn all child task nodes.
+        let mut id_map: std::collections::HashMap<String, crate::core::types::TaskId> =
+            std::collections::HashMap::new();
+
+        {
+            let mut g = task_graph.lock().expect("runtime_loop mutex poisoned");
+            for sub in &subtasks {
+                let child_id = match g.spawn_child(effective_parent_id, &sub.goal) {
+                    Some(cid) => cid,
+                    None => {
+                        tracing::error!(
+                            "handle_decompose_task: spawn_child failed under {:02x}..",
+                            effective_parent_id[0]
+                        );
+                        return;
+                    }
+                };
+                if let Some(node) = g.get_mut(&child_id) {
+                    node.role = Some(sub.role.clone());
+                    if sub.auto_confirm {
+                        node.metadata.insert("auto_confirm".into(), "true".into());
+                    }
+                }
+                id_map.insert(sub.id.clone(), child_id);
+            }
+
+            // Step 3: Second pass — add dependency edges.
+            for sub in &subtasks {
+                let Some(&child_id) = id_map.get(&sub.id) else {
+                    continue;
+                };
+                for dep_id_str in &sub.depend_on {
+                    let Some(&dep_task_id) = id_map.get(dep_id_str) else {
+                        tracing::warn!(
+                            "handle_decompose_task: subtask '{}' depends on unknown '{}' — skipping",
+                            sub.id,
+                            dep_id_str
+                        );
+                        continue;
+                    };
+                    if let Err(e) = g.add_dependency(child_id, dep_task_id) {
+                        tracing::warn!("handle_decompose_task: add_dependency failed: {}", e);
+                    }
+                }
+            }
+
+            // Step 4: Mark parent as Decomposed.
+            if let Some(parent) = g.get(&effective_parent_id) {
+                if parent.status == crate::runtime::task_graph::TaskStatus::Created
+                    || parent.status == crate::runtime::task_graph::TaskStatus::Ready
+                {
+                    g.mark_decomposed(effective_parent_id).ok();
+                }
+            }
+
+            let child_count = subtasks.len();
+            tracing::info!(
+                "DecomposeTask: parent {:02x}.. → {} subtask(s)",
+                effective_parent_id[0],
+                child_count
+            );
+        }
+
         self.scheduler.dispatch().await;
     }
 
@@ -581,7 +531,7 @@ impl RuntimeEventLoop {
             };
             if should_retry {
                 // Increment retry count, reset status, and re-activate.
-                let (task_id, _max_retries) = {
+                let (task_id, _) = {
                     // Read max_retries before the mutable borrow.
                     let max_retries = pool.read().await.max_retries;
                     let mut p = pool.write().await;
@@ -949,11 +899,8 @@ impl RuntimeEventLoop {
                                 e
                             )
                         } else {
-                            let parts: Vec<String> = agent
-                                .child_results
-                                .iter()
-                                .map(|(_id, r)| r.clone())
-                                .collect();
+                            let parts: Vec<String> =
+                                agent.child_results.iter().map(|(_, r)| r.clone()).collect();
                             format!(
                                 "Aggregation synthesis failed ({}).  Raw sub-task results:\n\n---\n{}\n\n---\n*Degraded output*",
                                 e,
@@ -1053,7 +1000,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_maybe_advance_parent_not_done_yet() {
-        let (pool, parent, child_a, _child_b) = pool_with_parent_and_two_children();
+        let (pool, parent, child_a, _) = pool_with_parent_and_two_children();
         let pool = Arc::new(RwLock::new(pool));
 
         {

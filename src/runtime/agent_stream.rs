@@ -232,7 +232,7 @@ mod tests {
                 reason: DoneReason::Normal,
             },
         ]);
-        let (text, _tools) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
+        let (text, _) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         assert_eq!(text, "Hello World");
     }
 
@@ -248,7 +248,7 @@ mod tests {
                 reason: DoneReason::Normal,
             },
         ]);
-        let (_text, tools) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
+        let (_, tools) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         assert_eq!(tools, 1 << 0, "read_file = bit 0");
         // Verify tool trace on agent
         let pool_r = pool.read().await;
@@ -487,7 +487,7 @@ mod tests {
                 reason: DoneReason::Normal,
             },
         ]);
-        let (_text, tools) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
+        let (_, tools) = AgentRuntime::process_tool_stream(stream, aid, &pool).await;
         assert!(tools & (1 << 0) != 0, "read_file bit set"); // read_file = bit 0
         assert!(tools & (1 << 2) != 0, "sh bit set"); // sh = bit 2
         assert!(tools & (1 << 1) != 0, "write_file bit set"); // write_file = bit 1

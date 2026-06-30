@@ -719,7 +719,7 @@ mod tests {
         app.popup_mode = PopupMode::AgentDetail { agent_id };
 
         // Data extraction (same as render_agent_detail_popup).
-        let (_name, _role, trace) = match app.core.agent_pool.try_read() {
+        let (_, _, trace) = match app.core.agent_pool.try_read() {
             Ok(pool) => {
                 let (name, role) = pool
                     .agents()

@@ -46,8 +46,8 @@ impl L1Retriever {
         &self,
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
-        _role_template_id: Option<u32>,
-        _role_min_experiences: Option<usize>,
+        _: Option<u32>,
+        _: Option<usize>,
     ) -> Result<L1Assessment, SpawnRejection> {
         if self.experiences.is_empty() {
             return Ok(L1Assessment {
@@ -176,7 +176,7 @@ pub trait ExperienceRetrieval: Send + Sync {
     fn search_by_role(
         &self,
         query: &[f32; EMBEDDING_DIM],
-        _role_id: u32,
+        _: u32,
         k: usize,
     ) -> Vec<(ExperienceEntry, f32)> {
         // Default: fall back to regular search (no role filter).
@@ -184,7 +184,7 @@ pub trait ExperienceRetrieval: Send + Sync {
     }
 
     /// Collect all experiences belonging to a specific role.
-    fn get_experiences_by_role(&self, _role_id: u32) -> Vec<ExperienceEntry> {
+    fn get_experiences_by_role(&self, _: u32) -> Vec<ExperienceEntry> {
         Vec::new()
     }
 }

@@ -4,13 +4,13 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 
 use crate::agent::{Agent, AgentConfig, AgentPool, AgentStatus};
-use crate::core::types::AgentId;
+use crate::core::types::{AgentId, ChildAgentConfig};
 use crate::runtime::AgentRuntime;
 use crate::runtime::event::RuntimeEvent;
 use crate::runtime::graph_analytics::TemplateEvolution;
 use crate::runtime::orchestration::{
-    CapabilityRegistry, DispatchDecider, DispatchDecision, EscalationPolicy, RoleSelector,
-    TaskOutcome, TaskOutcomeStore,
+    CapabilityRegistry, DecompositionEngine, DispatchDecider, DispatchDecision, EscalationPolicy,
+    RoleSelector, TaskOutcome, TaskOutcomeStore,
 };
 use crate::runtime::strategy_graph::{StrategyGraph, StrategyId, StrategyType, TaskSignature};
 
@@ -19,6 +19,7 @@ pub struct TaskScheduler {
     pool: Arc<RwLock<AgentPool>>,
     broker_tx: mpsc::Sender<RuntimeEvent>,
     decider: Box<dyn DispatchDecider>,
+    decomposition: Option<Box<dyn DecompositionEngine>>,
     role_selector: Option<Box<dyn RoleSelector>>,
     capability_registry: Option<Arc<RwLock<CapabilityRegistry>>>,
     escalation: Option<Box<dyn EscalationPolicy>>,
@@ -41,6 +42,7 @@ impl TaskScheduler {
             pool,
             broker_tx,
             decider,
+            decomposition: None,
             role_selector: None,
             capability_registry: None,
             escalation: None,
@@ -48,6 +50,10 @@ impl TaskScheduler {
             strategy_graph: None,
             template_evolution: None,
         }
+    }
+    pub fn with_decomposition(mut self, engine: Box<dyn DecompositionEngine>) -> Self {
+        self.decomposition = Some(engine);
+        self
     }
     pub fn with_routing(
         mut self,
@@ -129,6 +135,43 @@ impl TaskScheduler {
                     continue;
                 }
             }
+            // ── Auto-confirm: skip pipeline for LLM-approved subtasks ──
+            let is_auto_confirm = {
+                let rt = self.runtime.read().await;
+                let g = rt.task_graph.lock().expect("scheduler mutex poisoned");
+                g.get(&task_id)
+                    .is_some_and(|n| n.metadata.get("auto_confirm").is_some_and(|v| v == "true"))
+            };
+            if is_auto_confirm {
+                tracing::debug!(
+                    "scheduler: task {:02x}.. auto-confirmed — skipping pipeline",
+                    task_id[0]
+                );
+                self.apply_approved(task_id, &task_goal, &role, ChildAgentConfig::default())
+                    .await;
+                continue;
+            }
+
+            if let Some(ref engine) = self.decomposition {
+                let should = {
+                    let rt = self.runtime.read().await;
+                    let g = rt.task_graph.lock().expect("scheduler mutex poisoned");
+                    engine.should_decompose(task_id, &g)
+                };
+                if should {
+                    let rt = self.runtime.read().await;
+                    let mut g = rt.task_graph.lock().expect("scheduler mutex poisoned");
+                    let children = engine.decompose(task_id, &mut g);
+                    if !children.is_empty() {
+                        tracing::info!(
+                            "scheduler: task {:02x}.. decomposed into {} subtask(s)",
+                            task_id[0],
+                            children.len()
+                        );
+                    }
+                    continue;
+                }
+            }
             let decision_is_approved = self.decider.decide(task_id, &task_goal, &role).await;
             let decision_success =
                 matches!(decision_is_approved, DispatchDecision::Approved { .. });
@@ -193,7 +236,7 @@ impl TaskScheduler {
                 }
             }
             // ── Phase 4: Record graph metrics for template evolution ──
-            if let Some(ref _evolution) = self.template_evolution {
+            if self.template_evolution.is_some() {
                 let rt = self.runtime.read().await;
                 let g = rt.task_graph.lock().expect("scheduler mutex poisoned");
                 let metrics = crate::runtime::graph_analytics::GraphMetrics::from_graph(&g);
@@ -364,9 +407,13 @@ mod tests {
             Arc::new(MockEmbed),
         )));
         let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
-        let (_tx, _rx) = mpsc::channel(16);
+        let (tx, _) = mpsc::channel(16);
         let decider = test_decider();
-        let _scheduler = TaskScheduler::new(rt, pool, _tx, decider);
+        let scheduler = TaskScheduler::new(rt, pool, tx, decider);
+        // Builder methods should chain
+        let _ = scheduler.with_decomposition(Box::new(
+            crate::runtime::orchestration::NoopDecompositionEngine,
+        ));
     }
 
     #[tokio::test]
@@ -376,9 +423,9 @@ mod tests {
             Arc::new(MockEmbed),
         )));
         let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
-        let (_tx, _rx) = mpsc::channel(16);
+        let (tx, _) = mpsc::channel(16);
         let decider = test_decider();
-        let scheduler = TaskScheduler::new(rt, pool, _tx, decider);
+        let scheduler = TaskScheduler::new(rt, pool, tx, decider);
         // With no tasks, dispatch should be a no-op
         scheduler.dispatch().await;
         // No panic = success
@@ -391,9 +438,9 @@ mod tests {
             Arc::new(MockEmbed),
         )));
         let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
-        let (_tx, mut _rx) = mpsc::channel(16);
+        let (tx, _) = mpsc::channel(16);
         let decider = test_decider();
-        let scheduler = TaskScheduler::new(rt.clone(), pool, _tx, decider);
+        let scheduler = TaskScheduler::new(rt.clone(), pool, tx, decider);
 
         // Add a ready task to the graph
         {
@@ -414,15 +461,19 @@ mod tests {
             Arc::new(MockEmbed),
         )));
         let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
-        let (_tx, _rx) = mpsc::channel(16);
+        let (tx, _) = mpsc::channel(16);
         let decider = test_decider();
 
-        let scheduler = TaskScheduler::new(rt.clone(), pool.clone(), _tx, decider).with_escalation(
-            Box::new(crate::runtime::orchestration::DefaultEscalationPolicy::default()),
-            Arc::new(RwLock::new(
-                crate::runtime::orchestration::TaskOutcomeStore::new(),
-            )),
-        );
+        let scheduler = TaskScheduler::new(rt.clone(), pool.clone(), tx, decider)
+            .with_decomposition(Box::new(
+                crate::runtime::orchestration::NoopDecompositionEngine,
+            ))
+            .with_escalation(
+                Box::new(crate::runtime::orchestration::DefaultEscalationPolicy::default()),
+                Arc::new(RwLock::new(
+                    crate::runtime::orchestration::TaskOutcomeStore::new(),
+                )),
+            );
 
         // Add a task
         {

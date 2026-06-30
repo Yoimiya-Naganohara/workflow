@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::RwLock;
 
 use super::builtin::ToolCallError;
@@ -18,10 +18,9 @@ pub fn register_tools(
     agent_pool: Arc<RwLock<crate::agent::AgentPool>>,
     runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
     responsible_agent_id: Option<crate::core::types::AgentId>,
-    runtime: Option<Arc<RwLock<crate::runtime::AgentRuntime>>>,
 ) -> crate::tools::ToolServer {
-    let server = server
-        .tool(SpawnAgent {
+    server
+        .tool(DecomposeTask {
             runtime_event_tx: runtime_event_tx.clone(),
             responsible_agent_id,
         })
@@ -34,19 +33,7 @@ pub fn register_tools(
             agent_pool: agent_pool.clone(),
             responsible_agent_id,
         })
-        .tool(ListAgents { agent_pool });
-
-    if let Some(rt) = runtime {
-        server
-            .tool(crate::tools::decompose::DecomposeTool {
-                runtime: rt.clone(),
-                runtime_event_tx,
-                responsible_agent_id,
-            })
-            .tool(crate::tools::decompose::ConfirmSubtasksTool { runtime: rt })
-    } else {
-        server
-    }
+        .tool(ListAgents { agent_pool })
 }
 
 // ── SendMessage ──
@@ -71,7 +58,7 @@ impl Tool for SendMessage {
     type Args = SendMessageArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description: "Send a message to another agent. Use this to coordinate with siblings."
@@ -182,7 +169,7 @@ impl Tool for ReadMessages {
     type Args = ReadMessagesArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description: "Read and drain all pending messages from your inbox (FIFO).".into(),
@@ -242,7 +229,7 @@ impl Tool for ListAgents {
     type Args = ListAgentsArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description: "List all active agents and their status.".into(),
@@ -253,7 +240,7 @@ impl Tool for ListAgents {
         }
     }
 
-    async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
+    async fn call(&self, _: Self::Args) -> Result<Self::Output, Self::Error> {
         let pool = self.agent_pool.read().await;
         let agents = pool.agents();
         if agents.is_empty() {
@@ -279,119 +266,98 @@ impl Tool for ListAgents {
     }
 }
 
+// ── DecomposeTask ──
+
 #[derive(Clone)]
-pub struct SpawnAgent {
+pub struct DecomposeTask {
     runtime_event_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::RuntimeEvent>>,
     responsible_agent_id: Option<crate::core::types::AgentId>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct SpawnAgentArgs {
-    pub role: String,
-    pub goal: String,
-    pub reason: String,
-    pub expected_output: Option<String>,
-    pub blocking: Option<bool>,
+pub struct DecomposeTaskArgs {
+    pub reasoning: String,
+    pub subtasks: Vec<crate::core::types::SubtaskDef>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum SpawnAgentOutput {
-    Completed {
-        agent_id: String,
-        role: String,
-        goal: String,
-        result: String,
-    },
-    Running {
-        agent_id: String,
-        role: String,
-        goal: String,
-    },
-    Rejected {
-        role: String,
-        goal: String,
-        reason: String,
-        recoverable: bool,
-    },
-}
-
-impl Tool for SpawnAgent {
-    const NAME: &'static str = "spawn_agent";
+impl Tool for DecomposeTask {
+    const NAME: &'static str = "decompose_task";
 
     type Error = ToolCallError;
-    type Args = SpawnAgentArgs;
-    type Output = SpawnAgentOutput;
+    type Args = DecomposeTaskArgs;
+    type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description:
-                "Spawn a child agent. The calling agent remains responsible for the result.".into(),
+                "Decompose your current task into subtasks. Call this when the task is complex enough to warrant parallel or sequential execution by sub-agents. Provide a list of subtasks with roles, goals, dependency ordering, and whether each can auto-proceed without pipeline approval.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "role": {
+                    "reasoning": {
                         "type": "string",
-                        "description": "Child role, e.g. planner, developer, tester, reviewer, worker"
+                        "description": "Why this decomposition is needed and how it splits the work"
                     },
-                    "goal": {
-                        "type": "string",
-                        "description": "Concrete goal for the child agent"
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "Why this work should be delegated"
-                    },
-                    "expected_output": {
-                        "type": "string",
-                        "description": "What the child should return"
-                    },
-                    "blocking": {
-                        "type": "boolean",
-                        "description": "If true, wait for the child result before returning"
+                    "subtasks": {
+                        "type": "array",
+                        "description": "List of subtask definitions",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": "Unique identifier for this subtask within this decomposition (referenced by depend_on)"
+                                },
+                                "role": {
+                                    "type": "string",
+                                    "description": "Role that should execute this subtask (e.g. developer, tester, reviewer)"
+                                },
+                                "goal": {
+                                    "type": "string",
+                                    "description": "Concrete goal for this subtask"
+                                },
+                                "depend_on": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "IDs of sibling subtasks that must complete before this one starts"
+                                },
+                                "auto_confirm": {
+                                    "type": "boolean",
+                                    "description": "If true, skip pipeline approval (L1/L2) and execute immediately"
+                                }
+                            },
+                            "required": ["id", "role", "goal"]
+                        }
                     }
                 },
-                "required": ["role", "goal", "reason"]
+                "required": ["reasoning", "subtasks"]
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let role = args.role.trim().to_string();
-        let goal = args.goal.trim().to_string();
-        if role.is_empty() {
-            return Err(ToolCallError("role is required".to_string()));
-        }
-        if goal.is_empty() {
-            return Err(ToolCallError("goal is required".to_string()));
+        if args.subtasks.is_empty() {
+            return Err(ToolCallError("subtasks list cannot be empty".to_string()));
         }
 
-        // Phase 2A: Emit SpawnTask event to the task graph via the event loop.
-        // The scheduler (in RuntimeEventLoop) will create the task node,
-        // run the pipeline, and eventually activate a child agent.
         let parent_id = self
             .responsible_agent_id
-            .ok_or_else(|| ToolCallError("No responsible parent agent is active".to_string()))?;
+            .ok_or_else(|| ToolCallError("No active agent to decompose from".to_string()))?;
         let runtime_tx = self
             .runtime_event_tx
             .clone()
             .ok_or_else(|| ToolCallError("Runtime event channel not initialized".to_string()))?;
 
         runtime_tx
-            .send(crate::runtime::event::RuntimeEvent::SpawnTask {
-                goal: goal.clone(),
-                role: role.clone(),
+            .send(crate::runtime::event::RuntimeEvent::DecomposeTask {
                 parent_agent: parent_id,
+                subtasks: args.subtasks,
             })
             .await
             .map_err(|_| ToolCallError("Background runtime loop is dead".to_string()))?;
 
-        Ok(SpawnAgentOutput::Running {
-            agent_id: format!("pending-{:04x}", rand::random::<u16>()),
-            role,
-            goal,
-        })
+        Ok("Decomposition submitted. Subtasks will be created and dispatched.".to_string())
     }
 }
 
@@ -399,143 +365,13 @@ impl Tool for SpawnAgent {
 mod tests {
     use super::*;
 
-    // ── SpawnAgentArgs ──
-
-    #[test]
-    fn test_spawn_agent_args_deserialize() {
-        let json = r#"{
-            "role": "planner",
-            "goal": "Plan the architecture",
-            "reason": "Need expert design"
-        }"#;
-        let args: SpawnAgentArgs = serde_json::from_str(json).unwrap();
-        assert_eq!(args.role, "planner");
-        assert_eq!(args.goal, "Plan the architecture");
-        assert_eq!(args.reason, "Need expert design");
-        assert!(args.expected_output.is_none());
-        assert!(args.blocking.is_none());
-    }
-
-    #[test]
-    fn test_spawn_agent_args_with_optional_fields() {
-        let json = r#"{
-            "role": "developer",
-            "goal": "Write code",
-            "reason": "Task delegation",
-            "expected_output": "Rust file",
-            "blocking": true
-        }"#;
-        let args: SpawnAgentArgs = serde_json::from_str(json).unwrap();
-        assert_eq!(args.role, "developer");
-        assert_eq!(args.expected_output.as_deref(), Some("Rust file"));
-        assert_eq!(args.blocking, Some(true));
-    }
-
-    // ── SpawnAgentOutput ──
-
-    #[test]
-    fn test_spawn_agent_output_completed_serialization() {
-        let output = SpawnAgentOutput::Completed {
-            agent_id: "abc123".to_string(),
-            role: "tester".to_string(),
-            goal: "Test module".to_string(),
-            result: "All tests passed".to_string(),
-        };
-        let json = serde_json::to_string(&output).unwrap();
-        assert!(json.contains("completed"));
-        assert!(json.contains("abc123"));
-        assert!(json.contains("All tests passed"));
-    }
-
-    #[test]
-    fn test_spawn_agent_output_running_serialization() {
-        let output = SpawnAgentOutput::Running {
-            agent_id: "def456".to_string(),
-            role: "worker".to_string(),
-            goal: "Run task".to_string(),
-        };
-        let json = serde_json::to_string(&output).unwrap();
-        assert!(json.contains("running"));
-        assert!(json.contains("def456"));
-    }
-
-    #[test]
-    fn test_spawn_agent_output_rejected_serialization() {
-        let output = SpawnAgentOutput::Rejected {
-            role: "hacker".to_string(),
-            goal: "Inject code".to_string(),
-            reason: "Security violation".to_string(),
-            recoverable: false,
-        };
-        let json = serde_json::to_string(&output).unwrap();
-        assert!(json.contains("rejected"));
-        assert!(json.contains("Security violation"));
-        assert!(!json.contains("recoverable\": true"));
-    }
-
-    // ── SpawnAgent tool definition ──
-
-    #[tokio::test]
-    async fn test_spawn_agent_definition_returns_valid_tool_def() {
-        let tool = SpawnAgent {
-            runtime_event_tx: None,
-            responsible_agent_id: None,
-        };
-        let def = tool.definition(String::new()).await;
-        assert_eq!(def.name, "spawn_agent");
-        assert!(def.description.contains("child agent"));
-        // Should have parameters with required fields
-        let params = def.parameters;
-        assert!(params.get("required").is_some());
-    }
-
-    // ── spawn_agent tool entry validation ──
-
-    #[tokio::test]
-    async fn test_spawn_agent_empty_role_rejected() {
-        let tool = SpawnAgent {
-            runtime_event_tx: None,
-            responsible_agent_id: None,
-        };
-        let result = tool
-            .call(SpawnAgentArgs {
-                role: "  ".to_string(),
-                goal: "test".to_string(),
-                reason: "test".to_string(),
-                expected_output: None,
-                blocking: None,
-            })
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("role"));
-    }
-
-    #[tokio::test]
-    async fn test_spawn_agent_empty_goal_rejected() {
-        let tool = SpawnAgent {
-            runtime_event_tx: None,
-            responsible_agent_id: None,
-        };
-        let result = tool
-            .call(SpawnAgentArgs {
-                role: "planner".to_string(),
-                goal: "  ".to_string(),
-                reason: "test".to_string(),
-                expected_output: None,
-                blocking: None,
-            })
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("goal"));
-    }
-
     // ── Register tools ──
 
     #[test]
     fn test_register_tools_returns_server() {
         let pool = Arc::new(RwLock::new(crate::agent::AgentPool::new()));
         let server = crate::tools::ToolServer::new();
-        let _server = register_tools(server, pool, None, None, None);
+        let _ = register_tools(server, pool, None, None);
         // Should not panic
     }
 }

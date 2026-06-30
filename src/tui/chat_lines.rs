@@ -587,7 +587,7 @@ fn render_md(text: &str, body_width: usize) -> MdRenderResult {
             Event::Rule => {
                 render_hr_into(&mut result, body_width);
             }
-            Event::Start(Tag::Table(_alignments)) => {
+            Event::Start(Tag::Table(_)) => {
                 render_table_into(&mut events, &mut result, body_width);
             }
             _ => {}
@@ -622,7 +622,7 @@ fn render_md(text: &str, body_width: usize) -> MdRenderResult {
 fn tool_call_lines(
     lines: &mut Vec<RenderedLine>,
     message: &crate::tui::state::ChatMessage,
-    _box_width: usize,
+    _: usize,
 ) {
     let content = &message.content;
 

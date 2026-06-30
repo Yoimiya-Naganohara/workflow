@@ -266,7 +266,7 @@ impl Tool for DiffEdit {
     type Args = DiffEditArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description: concat!(

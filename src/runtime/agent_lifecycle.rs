@@ -513,35 +513,21 @@ impl AgentRuntime {
     ///
     /// Bit positions are auto-assigned by position in `TOOL_NAMES`.
     /// Index order IS the bit assignment — add new tools at the end.
-    /// Deprecated tools stay in place (stored experience bitmaps reference them).
     pub(crate) fn tool_bit(name: &str) -> u64 {
         const TOOL_NAMES: &[&str] = &[
             "read_file",     // bit 0
             "write_file",    // bit 1
             "sh",            // bit 2
-            "",              // bit 3 (removed: list_dir)
-            "",              // bit 4 (removed: grep)
-            "",              // bit 5 (removed: find_files)
-            "",              // bit 6 (removed: move_file)
-            "",              // bit 7 (removed: copy_file)
-            "",              // bit 8 (removed: delete_file)
-            "",              // bit 9 (removed: append_file)
-            "",              // bit 10 (removed: patch_file)
-            "",              // bit 11 (removed: glob)
-            "spawn_agent",   // bit 12
-            "read_memo",     // bit 13
-            "write_memo",    // bit 14
-            "delete_memo",   // bit 15
-            "list_memos",    // bit 16
-            "call_agent",    // bit 17 (reserved)
-            "list_agents",   // bit 18
-            "send_message",  // bit 19
-            "read_messages", // bit 20
-            "",              // bit 21 (removed: line_edit)
-            "",              // bit 22 (removed: fetch)
-            "search_asset",  // bit 23
-            "",              // bit 24 (removed: extract_json)
-            "diff_edit",     // bit 25
+            "read_memo",     // bit 3
+            "write_memo",    // bit 4
+            "delete_memo",   // bit 5
+            "list_memos",    // bit 6
+            "call_agent",    // bit 7 (reserved)
+            "list_agents",   // bit 8
+            "send_message",  // bit 9
+            "read_messages", // bit 10
+            "search_asset",  // bit 11
+            "diff_edit",     // bit 12
         ];
         TOOL_NAMES
             .iter()

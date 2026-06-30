@@ -83,7 +83,7 @@ impl Tool for ReadFile {
     type Args = ReadFileArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description:
@@ -175,7 +175,7 @@ impl Tool for WriteFile {
     type Args = WriteFileArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description: "Write content to a file (creates or overwrites). Returns confirmation with preview.".into(),
@@ -269,7 +269,7 @@ impl Tool for Shell {
     type Args = ShellArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description: "Execute a shell command. Returns stdout/stderr with exit code.".into(),
@@ -358,7 +358,7 @@ impl Tool for SearchAsset {
     type Args = SearchAssetArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description: concat!(

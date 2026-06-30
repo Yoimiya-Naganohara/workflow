@@ -142,7 +142,7 @@ impl DecisionPipeline {
         role_min_experiences: Option<usize>,
     ) -> Result<SpawnDecision> {
         // ── L-1: Admission ──
-        let _permit: AdmissionPermit = self
+        let _: AdmissionPermit = self
             .admission
             .acquire()
             .await
@@ -153,7 +153,7 @@ impl DecisionPipeline {
             self.circuit_breaker
                 .try_acquire(request.requested_budget, request.current_depth, 0);
 
-        let _l0_permit: L0Permit = match l0_result {
+        let l0_permit: L0Permit = match l0_result {
             Ok(permit) => permit,
             Err(rejection) => {
                 if matches!(rejection, SpawnRejection::ResourceConflict { .. }) {
@@ -175,7 +175,7 @@ impl DecisionPipeline {
         let role_emb = &request.role_description_embedding;
 
         // ── L1: Experience retrieval & confidence check ──
-        let _l1_assessment: L1Assessment = {
+        let _: L1Assessment = {
             let exp = self.experience.lock().expect("pipeline mutex poisoned");
             exp.check_confidence(task_emb, role_emb, role_template_id, role_min_experiences)?
         };
@@ -192,11 +192,11 @@ impl DecisionPipeline {
 
         let agent_id: AgentId = rand::random();
         let task_id: TaskId = rand::random();
-        let allocated_budget = _l0_permit.budget_amount();
+        let allocated_budget = l0_permit.budget_amount();
 
         // Consume the L0 permit into a BudgetGuard (resource ownership
         // transfers to the guard; permit's Drop becomes a no-op).
-        let guard = _l0_permit.into_budget_guard(task_id);
+        let guard = l0_permit.into_budget_guard(task_id);
         if guard.is_none() {
             // Should never happen: the permit was just acquired.
             return Ok(SpawnDecision::Rejected(SpawnRejection::SystemOverloaded));

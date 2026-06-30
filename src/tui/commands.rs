@@ -13,7 +13,7 @@ use crate::tui::state::AppState;
 
 /// Dispatch a command via the CommandRuntime.
 /// Returns ``true`` if the command was handled, ``false`` if unrecognized.
-pub fn dispatch(trimmed: &str, state: &mut AppState, _now: &str) -> bool {
+pub fn dispatch(trimmed: &str, state: &mut AppState, _: &str) -> bool {
     let parsed = crate::tui::command_tree::parse(trimmed);
     let runtime = crate::tui::command_tree::CommandRuntime;
     matches!(

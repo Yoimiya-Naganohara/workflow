@@ -14,7 +14,7 @@ pub use MockEmbed as MockEmbedding;
 
 #[async_trait]
 impl EmbeddingService for MockEmbed {
-    async fn embed(&self, _text: &str) -> Result<[f32; EMBEDDING_DIM]> {
+    async fn embed(&self, _: &str) -> Result<[f32; EMBEDDING_DIM]> {
         let mut e = [0.0f32; EMBEDDING_DIM];
         e[0] = 1.0;
         Ok(e)

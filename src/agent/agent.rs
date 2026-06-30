@@ -562,7 +562,7 @@ impl AgentPool {
     /// This is safe to call multiple times — it only copies memos
     /// that haven't already been migrated for each role.
     pub fn migrate_legacy_memos(&mut self) {
-        for _agent in &self.agents {
+        for _ in &self.agents {
             // No-op after migration
         }
     }

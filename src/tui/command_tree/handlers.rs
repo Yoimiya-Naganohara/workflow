@@ -8,7 +8,7 @@ use crate::tui::state::{ChatMessage, MessageRole, PopupMode};
 
 // ── /help ──
 
-pub fn help(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn help(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let help_text = crate::tui::commands::COMMANDS
         .iter()
         .map(|(cmd, desc)| format!("  {:20} {}", cmd, desc))
@@ -20,7 +20,7 @@ pub fn help(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
 
 // ── /status ──
 
-pub fn status(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn status(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let core = &state.core;
     let lines = [
         format!("Providers:       {}", core.configured_providers.len()),
@@ -52,7 +52,7 @@ pub fn status(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
 
 // ── /clear ──
 
-pub fn clear(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn clear(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     state.core.messages.clear();
     state.core.messages.push(ChatMessage::system(
         "Workflow Agent — conversation cleared. Describe your goal and I'll help.",
@@ -93,7 +93,7 @@ pub fn shell(inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
 
 // ── /models ──
 
-pub fn models(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn models(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     if state.core.configured_providers.is_empty() {
         state.core.messages.push(ChatMessage::system(
             "No providers configured. Use `/connect` first.",
@@ -111,7 +111,7 @@ pub fn models(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
 
 // ── /connect ──
 
-pub fn connect(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn connect(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     state.ui.input.clear();
     state.ui.input_cursor = 0;
     state.popup_mode = PopupMode::Providers;
@@ -122,7 +122,7 @@ pub fn connect(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult 
 
 // ── /refresh ──
 
-pub fn refresh(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn refresh(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     state.ui.cached_system_prompt = None;
     state.ui.cached_prompt_role.clear();
     state.core.messages.push(ChatMessage::system(
@@ -198,7 +198,7 @@ pub fn think_set(inv: &CommandInvocation, state: &mut AppState) -> CommandResult
     CommandResult::handled()
 }
 
-pub fn think_status(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn think_status(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let effort = state
         .ui
         .reasoning_effort
@@ -229,7 +229,7 @@ where
         .map_err(|_| "Runtime locked".to_string())?)
 }
 
-pub fn pool_stats(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn pool_stats(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let msg = with_runtime(state, |rt| Ok(format!(
         "Experience Pool Statistics:\n\x20 Total entries:     {}\n\x20 Bedrock (A-track): {}\n\x20 Fluid  (B-track):  {}\n\x20 Pending suspend:   {}\n\x20 Remaining budget:  {}\n\x20 Available permits: {}",
         rt.experience_count(), rt.bedrock_count(), rt.fluid_count(), rt.pending_suspended(), rt.remaining_budget(), rt.available_permits()
@@ -238,7 +238,7 @@ pub fn pool_stats(_inv: &CommandInvocation, state: &mut AppState) -> CommandResu
     CommandResult::handled()
 }
 
-pub fn pool_flush(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn pool_flush(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let msg = match with_runtime(state, |rt| {
         rt.flush_experience_pool()
             .map_err(|e| format!("Flush failed: {}", e))
@@ -250,7 +250,7 @@ pub fn pool_flush(_inv: &CommandInvocation, state: &mut AppState) -> CommandResu
     CommandResult::handled()
 }
 
-pub fn pool_clear(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn pool_clear(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let msg = match with_runtime(state, |rt| {
         rt.clear_experience_pool()
             .map_err(|e| format!("Clear failed: {}", e))
@@ -496,7 +496,7 @@ pub fn memo_delete(inv: &CommandInvocation, state: &mut AppState) -> CommandResu
     CommandResult::handled()
 }
 
-pub fn memo_roles(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn memo_roles(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let pool = match state.core.agent_pool.try_read() {
         Ok(p) => p,
         Err(_) => {
@@ -543,14 +543,14 @@ fn role_arg(inv: &CommandInvocation) -> Option<&str> {
         .or_else(|| inv.command_path.last().map(|s| s.as_str()))
 }
 
-pub fn role_create(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn role_create(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     state.core.messages.push(ChatMessage::system(
         "Role creation — edit role templates in ~/.workflow/role_templates.json",
     ));
     CommandResult::handled()
 }
 
-pub fn role_embed(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn role_embed(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let n = (|| -> Option<usize> {
         let runtime = state.core.runtime.as_ref()?;
         let guard = runtime.try_read().ok()?;
@@ -709,7 +709,7 @@ pub fn agent_inspect(inv: &CommandInvocation, state: &mut AppState) -> CommandRe
 
 // ── /reflect ──
 
-pub fn reflect_on(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn reflect_on(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     state.core.reflection.auto_reflect = true;
     if let Err(e) = crate::persistence::save_reflection_config(&state.core.reflection) {
         tracing::warn!("Failed to persist reflection config: {}", e);
@@ -720,7 +720,7 @@ pub fn reflect_on(_inv: &CommandInvocation, state: &mut AppState) -> CommandResu
     CommandResult::handled()
 }
 
-pub fn reflect_off(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn reflect_off(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     state.core.reflection.auto_reflect = false;
     if let Err(e) = crate::persistence::save_reflection_config(&state.core.reflection) {
         tracing::warn!("Failed to persist reflection config: {}", e);
@@ -732,7 +732,7 @@ pub fn reflect_off(_inv: &CommandInvocation, state: &mut AppState) -> CommandRes
     CommandResult::handled()
 }
 
-pub fn reflect_status(_inv: &CommandInvocation, state: &mut AppState) -> CommandResult {
+pub fn reflect_status(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     let enabled = state.core.reflection.auto_reflect;
     let rule_names: &[(&str, &str)] = &[
         ("code", "code_complete"),

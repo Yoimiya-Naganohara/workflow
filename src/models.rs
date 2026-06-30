@@ -749,6 +749,89 @@ impl ModelRegistry {
         self.providers.retain(|p| p.id != id);
     }
 
+    /// Populate with well-known default providers if the registry is empty.
+    /// This ensures `/connect` always shows basic options even without network
+    /// or cached data.
+    pub fn ensure_builtin_defaults(&mut self) {
+        if !self.providers.is_empty() {
+            return;
+        }
+        let models = |ids: &[&str]| -> HashMap<String, Model> {
+            ids.iter()
+                .map(|id| {
+                    (
+                        id.to_string(),
+                        Model {
+                            id: id.to_string(),
+                            name: id.to_string(),
+                            family: None,
+                            attachment: false,
+                            reasoning: false,
+                            reasoning_options: vec![],
+                            tool_call: true,
+                            temperature: true,
+                            knowledge: None,
+                            release_date: None,
+                            last_updated: None,
+                            modalities: Modalities {
+                                input: vec!["text".to_string()],
+                                output: vec!["text".to_string()],
+                            },
+                            open_weights: false,
+                            limit: ModelLimit {
+                                context: 128000,
+                                output: 4096,
+                                input: None,
+                            },
+                            cost: default_cost(),
+                            status: None,
+                        },
+                    )
+                })
+                .collect()
+        };
+        let defaults: &[(&str, &str, &[&str])] = &[
+            (
+                "openai",
+                "OpenAI",
+                &["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+            ),
+            (
+                "anthropic",
+                "Anthropic",
+                &[
+                    "claude-sonnet-4-20250514",
+                    "claude-3.5-sonnet",
+                    "claude-3-haiku",
+                ],
+            ),
+            (
+                "ollama",
+                "Ollama",
+                &["llama3.1", "qwen2.5", "mistral", "codellama"],
+            ),
+        ];
+        for (id, name, model_ids) in defaults {
+            self.providers.push(Provider {
+                id: id.to_string(),
+                name: name.to_string(),
+                env: match *id {
+                    "openai" => vec!["OPENAI_API_KEY".to_string()],
+                    "anthropic" => vec!["ANTHROPIC_API_KEY".to_string()],
+                    _ => vec![],
+                },
+                api: match *id {
+                    "openai" => Some("https://api.openai.com/v1".to_string()),
+                    "anthropic" => Some("https://api.anthropic.com/v1".to_string()),
+                    "ollama" => Some("http://localhost:11434".to_string()),
+                    _ => None,
+                },
+                doc: None,
+                models: models(model_ids),
+            });
+        }
+    }
+
     fn sanitize_id(name: &str) -> String {
         name.to_lowercase()
             .chars()

@@ -95,7 +95,7 @@ impl CommandResult {
             effects: SmallVec::new(),
         }
     }
-    pub fn error(_msg: impl Into<String>) -> Self {
+    pub fn error(_: impl Into<String>) -> Self {
         Self {
             status: CommandStatus::Error,
             effects: SmallVec::new(),

@@ -163,7 +163,7 @@ fn render_chat_content(
     area: Rect,
     output: &ChatRenderOutput,
     scroll: usize,
-    _visible_height: usize,
+    _: usize,
 ) {
     let max_line = output.rendered.len();
     if max_line == 0 {

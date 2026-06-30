@@ -704,7 +704,24 @@ impl Tui {
                 }
             }
 
+            let was_unset = core.responsible_agent_id.is_none();
             let agent_id = crate::tui::controller::ensure_initial_agent_sync(core, &input);
+
+            // ── Rebuild tool server on first activation ──
+            // The tool server is created at startup before responsible_agent_id
+            // is set, so agent tools (decompose_task, etc.)
+            // have None for the agent ID. Rebuild once the ID is known.
+            if agent_id.is_some() && was_unset {
+                let pool = core.agent_pool.clone();
+                let tx = core.runtime_event_tx.clone();
+                let aid = core.responsible_agent_id;
+                let server = crate::tools::ToolServer::new();
+                let server = crate::tools::builtin::register_tools(server);
+                let server = crate::tools::agent::register_tools(server, pool.clone(), tx, aid);
+                let memo_deps = crate::tools::memo::MemoToolDeps::new(pool, aid);
+                let server = crate::tools::memo::register_memo_tools(server, memo_deps);
+                core.tool_server = server.run();
+            }
 
             // ── Compiler pipeline: Phase 1-5 passes ──
             // The Graph Compiler runs before the LLM, determining structure.

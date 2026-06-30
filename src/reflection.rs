@@ -313,7 +313,7 @@ fn rule_code_complete(input: &str, response: &str) -> RuleVerdict {
 }
 
 /// Rule 2: If any tool call returned an error, response must acknowledge it.
-fn rule_error_awareness(_input: &str, response: &str, tool_trace: &str) -> RuleVerdict {
+fn rule_error_awareness(_: &str, response: &str, tool_trace: &str) -> RuleVerdict {
     let has_error = tool_trace.to_lowercase().contains("error")
         || tool_trace.to_lowercase().contains("stderr")
         || tool_trace.to_lowercase().contains("fail")

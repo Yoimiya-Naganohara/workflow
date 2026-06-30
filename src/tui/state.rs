@@ -730,8 +730,8 @@ impl AppState {
     /// Get the chat context (provider, model_id, system_prompt) from current state.
     fn get_chat_context(
         &self,
-        _runtime: &Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
-        _input: &str,
+        _: &Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
+        _: &str,
     ) -> (
         Option<std::sync::Arc<crate::llm::LlmProvider>>,
         String,

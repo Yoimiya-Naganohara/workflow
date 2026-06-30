@@ -126,7 +126,7 @@ impl Tool for WriteMemo {
     type Args = WriteMemoArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description:
@@ -217,7 +217,7 @@ impl Tool for ReadMemo {
     type Args = ReadMemoArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description: "Read a memo entry by key. Returns value and timestamp.".into(),
@@ -290,7 +290,7 @@ impl Tool for ListMemos {
     type Args = ListMemosArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description: "List all memos for the current role. Optionally filter by prefix.".into(),
@@ -309,7 +309,7 @@ impl Tool for ListMemos {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let (_, _agent_name, role) = find_agent_info(&self.deps)
+        let (_, _, role) = find_agent_info(&self.deps)
             .ok_or_else(|| ToolCallError("No active agent".to_string()))?;
 
         let memos = get_role_memos_cloned(&self.deps, &role)
@@ -383,7 +383,7 @@ impl Tool for DeleteMemo {
     type Args = DeleteMemoArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
+    async fn definition(&self, _: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.into(),
             description: "Delete a memo entry by key.".into(),

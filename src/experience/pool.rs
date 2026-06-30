@@ -61,7 +61,7 @@ struct PoolHeader {
     capacity: u32,   // max entries the current file can hold
     count: u32,      // current entries
     checksum: u32,   // hash of header+entries — catches file corruption
-    _pad: [u8; 40],  // 64-byte header total (padding after checksum)
+    pad: [u8; 40],   // 64-byte header total (padding after checksum)
 }
 
 impl PoolHeader {
@@ -107,7 +107,7 @@ pub struct ExperiencePool {
     /// In-memory entries — fast reads without touching the mmap.
     entries: Vec<ExperienceEntry>,
     /// Mmap handle kept alive so the OS keeps the pages warm.
-    _mmap: Option<Mmap>,
+    mmap: Option<Mmap>,
     /// Write-mmap (re-created on every flush/grow).
     mmap_mut: Option<MmapMut>,
     /// Dirty flag — set when entries are added, cleared on flush.
@@ -123,7 +123,7 @@ impl ExperiencePool {
         Self {
             path: PathBuf::new(),
             entries: Vec::new(),
-            _mmap: None,
+            mmap: None,
             mmap_mut: None,
             dirty: AtomicBool::new(false),
             capacity: 0,
@@ -169,7 +169,7 @@ impl ExperiencePool {
                     capacity: cap as u32,
                     count: 0,
                     checksum: PoolHeader::compute_checksum(cap as u32, 0, &[]),
-                    _pad: [0u8; 40],
+                    pad: [0u8; 40],
                 };
                 unsafe {
                     std::ptr::copy_nonoverlapping(
@@ -187,7 +187,7 @@ impl ExperiencePool {
         Ok(Self {
             path,
             entries,
-            _mmap: mmap,
+            mmap,
             mmap_mut,
             capacity,
             dirty: AtomicBool::new(false),
@@ -402,7 +402,7 @@ impl ExperiencePool {
 
         // Close current mappings.
         self.mmap_mut.take();
-        self._mmap.take();
+        self.mmap.take();
 
         // Reopen file and set new length.
         let file = std::fs::OpenOptions::new()
@@ -432,7 +432,7 @@ impl ExperiencePool {
             capacity: new_capacity as u32,
             count: self.entries.len() as u32,
             checksum,
-            _pad: [0u8; 40],
+            pad: [0u8; 40],
         };
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -451,7 +451,7 @@ impl ExperiencePool {
         }
 
         let ro = mm.make_read_only()?;
-        self._mmap = Some(ro);
+        self.mmap = Some(ro);
 
         // Re-open mutable map for future flushes.
         let mm2 = unsafe { MmapMut::map_mut(&file)? };
@@ -625,7 +625,7 @@ mod tests {
             .write(true)
             .open(&path)
             .unwrap();
-        let _header_size = std::mem::size_of::<PoolHeader>();
+        let _ = std::mem::size_of::<PoolHeader>();
 
         // Write a bogus count (999999) at the count field offset
         // PoolHeader layout: magic(8) + version(4) + count(4) + capacity(4)

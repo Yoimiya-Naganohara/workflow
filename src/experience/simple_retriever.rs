@@ -43,8 +43,8 @@ impl ExperienceRetrieval for SimpleRetriever {
         &self,
         task_embedding: &[f32; EMBEDDING_DIM],
         role_embedding: &[f32; EMBEDDING_DIM],
-        _role_template_id: Option<u32>,
-        _role_min_experiences: Option<usize>,
+        _: Option<u32>,
+        _: Option<usize>,
     ) -> Result<L1Assessment, SpawnRejection> {
         // Note: `_role_template_id` and `_role_min_experiences` are intentionally
         // ignored here because SimpleRetriever does not store per-role metadata.

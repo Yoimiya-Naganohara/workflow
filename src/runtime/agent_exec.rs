@@ -273,7 +273,7 @@ mod tests {
             test_config(),
             Arc::new(MockEmbed),
         )));
-        let (pool, _aid) = pool_with_agent();
+        let (pool, _) = pool_with_agent();
         let unknown_id: AgentId = rand::random();
         let (result, status) =
             AgentRuntime::execute_agent_detached(runtime, unknown_id, pool, None).await;

@@ -5,7 +5,6 @@
 
 pub mod agent;
 pub mod builtin;
-pub mod decompose;
 pub mod diff_edit;
 pub mod memo;
 pub mod sandbox;
@@ -27,13 +26,12 @@ pub fn create_tool_server() -> ToolServerHandle {
 pub fn create_agent_tool_server(
     state: std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>,
 ) -> ToolServerHandle {
-    let (pool, tx, agent_id, runtime) = {
+    let (pool, tx, agent_id) = {
         let s = state.try_read().ok();
         (
             s.as_ref().map(|s| s.core.agent_pool.clone()),
             s.as_ref().and_then(|s| s.core.runtime_event_tx.clone()),
             s.as_ref().and_then(|s| s.core.responsible_agent_id),
-            s.as_ref().and_then(|s| s.core.runtime.clone()),
         )
     };
     let pool = pool.unwrap_or_else(|| {
@@ -41,7 +39,7 @@ pub fn create_agent_tool_server(
     });
 
     let server = builtin::register_tools(ToolServer::new());
-    let server = agent::register_tools(server, pool.clone(), tx, agent_id, runtime);
+    let server = agent::register_tools(server, pool.clone(), tx, agent_id);
     let memo_deps = memo::MemoToolDeps::new(pool, agent_id);
     memo::register_memo_tools(server, memo_deps).run()
 }
@@ -51,13 +49,12 @@ pub fn create_sandboxed_agent_tool_server(
     base_state: std::sync::Arc<tokio::sync::RwLock<crate::tui::state::AppState>>,
     sandbox: Option<std::sync::Arc<crate::tools::sandbox::SandboxHandle>>,
 ) -> ToolServerHandle {
-    let (pool, tx, agent_id, runtime) = {
+    let (pool, tx, agent_id) = {
         let s = base_state.try_read().ok();
         (
             s.as_ref().map(|s| s.core.agent_pool.clone()),
             s.as_ref().and_then(|s| s.core.runtime_event_tx.clone()),
             s.as_ref().and_then(|s| s.core.responsible_agent_id),
-            s.as_ref().and_then(|s| s.core.runtime.clone()),
         )
     };
     let pool = pool.unwrap_or_else(|| {
@@ -66,7 +63,7 @@ pub fn create_sandboxed_agent_tool_server(
 
     let with_search_asset = sandbox.is_some();
     let server = builtin::register_sandboxed_tools(ToolServer::new(), sandbox, with_search_asset);
-    let server = agent::register_tools(server, pool.clone(), tx, agent_id, runtime);
+    let server = agent::register_tools(server, pool.clone(), tx, agent_id);
     let memo_deps = memo::MemoToolDeps::new(pool, agent_id);
     memo::register_memo_tools(server, memo_deps).run()
 }
@@ -99,7 +96,7 @@ mod tests {
         let handle = create_tool_server();
         // Verify it can be sent across threads
         let result = std::thread::spawn(move || {
-            let _h = handle;
+            let _ = handle;
             true
         })
         .join();
@@ -109,10 +106,10 @@ mod tests {
     #[test]
     fn test_tool_server_types_are_public() {
         // Verify the re-exports compile correctly
-        let _server = ToolServer::new();
+        let _ = ToolServer::new();
         // ToolServerHandle::new is not public, but we can create via run()
         let handle = builtin::register_tools(ToolServer::new()).run();
-        let _cloned = handle.clone();
+        let _ = handle.clone();
     }
 
     // ────────────────────────────────────────────────────────
@@ -364,7 +361,7 @@ mod tests {
     }
 
     // ────────────────────────────────────────────────────────
-    // Agent Tool Simulation: spawn_agent, list_agents,
+    // Agent Tool Simulation: decompose_task, list_agents,
     // send_message, read_messages via MCP ToolServerHandle
     // ────────────────────────────────────────────────────────
 
@@ -452,7 +449,7 @@ mod tests {
         let state = make_agent_state(3);
         let (pool, tx, aid) = extract_core(&state);
         let server = crate::tools::ToolServer::new();
-        let server = crate::tools::agent::register_tools(server, pool, tx, aid, None);
+        let server = crate::tools::agent::register_tools(server, pool, tx, aid);
         let handle = server.run();
 
         let result = handle.call_tool("list_agents", "{}").await.unwrap();
@@ -469,7 +466,7 @@ mod tests {
         let state = make_agent_state(2);
         let (pool, tx, aid) = extract_core(&state);
         let server = crate::tools::ToolServer::new();
-        let server = crate::tools::agent::register_tools(server, pool, tx, aid, None);
+        let server = crate::tools::agent::register_tools(server, pool, tx, aid);
         let handle = server.run();
 
         // Send a message from responsible agent (agent-0) to agent-1
@@ -506,7 +503,7 @@ mod tests {
         let state = make_agent_state(0);
         let (pool, tx, aid) = extract_core(&state);
         let server = crate::tools::ToolServer::new();
-        let server = crate::tools::agent::register_tools(server, pool, tx, aid, None);
+        let server = crate::tools::agent::register_tools(server, pool, tx, aid);
         let handle = server.run();
 
         let result = handle.call_tool("list_agents", "{}").await.unwrap();
@@ -520,7 +517,7 @@ mod tests {
         let state = make_agent_state(1);
         let (pool, tx, aid) = extract_core(&state);
         let server = crate::tools::ToolServer::new();
-        let server = crate::tools::agent::register_tools(server, pool, tx, aid, None);
+        let server = crate::tools::agent::register_tools(server, pool, tx, aid);
         let handle = server.run();
 
         let send_args = serde_json::json!({
@@ -542,7 +539,7 @@ mod tests {
         let state = make_agent_state(1);
         let (pool, tx, aid) = extract_core(&state);
         let server = crate::tools::ToolServer::new();
-        let server = crate::tools::agent::register_tools(server, pool, tx, aid, None);
+        let server = crate::tools::agent::register_tools(server, pool, tx, aid);
         let handle = server.run();
 
         let result = handle
@@ -562,7 +559,7 @@ mod tests {
         // List tools available — should include both built-in and agent tools
         let defs = handle.get_tool_defs(None).await.unwrap();
         let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-        assert!(names.contains(&"spawn_agent"));
+        assert!(names.contains(&"decompose_task"));
         assert!(names.contains(&"send_message"));
         assert!(names.contains(&"read_messages"));
         assert!(names.contains(&"list_agents"));
@@ -570,14 +567,6 @@ mod tests {
         println!(
             "[AGENT TOOL] Full agent server has {} tools including agent tools",
             defs.len()
-        );
-
-        // Verify spawn_agent tool definition has correct params
-        let spawn_def = defs.iter().find(|d| d.name == "spawn_agent").unwrap();
-        assert!(spawn_def.parameters.get("required").is_some());
-        println!(
-            "[AGENT TOOL] spawn_agent definition: {}",
-            serde_json::to_string_pretty(&spawn_def.parameters).unwrap()
         );
     }
 
