@@ -1,0 +1,34 @@
+[package]
+name = "wf-tui"
+description = "Terminal UI"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+smallvec.workspace = true
+walkdir.workspace = true
+serde_json.workspace = true
+tiktoken-rs.workspace = true
+rig.workspace = true
+wf-core = { path = "../wf-core" }
+wf-llm = { path = "../wf-llm" }
+wf-l1 = { path = "../wf-l1" }
+wf-l2 = { path = "../wf-l2" }
+wf-experience = { path = "../wf-experience" }
+wf-models = { path = "../wf-models" }
+wf-agent = { path = "../wf-agent" }
+wf-tools = { path = "../wf-tools" }
+wf-persistence = { path = "../wf-persistence" }
+wf-reflection = { path = "../wf-reflection" }
+wf-runtime = { path = "../wf-runtime" }
+tokio.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+unicode-width.workspace = true
+chrono.workspace = true
+futures.workspace = true
+pulldown-cmark.workspace = true
+regex.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+serde.workspace = true

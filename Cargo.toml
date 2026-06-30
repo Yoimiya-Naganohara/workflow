@@ -1,17 +1,29 @@
-[package]
-name = "workflow"
+[workspace]
+resolver = "2"
+members = [
+    "crates/wf-core",
+    "crates/wf-llm",
+    "crates/wf-l1",
+    "crates/wf-l2",
+    "crates/wf-experience",
+    "crates/wf-models",
+    "crates/wf-agent",
+    "crates/wf-tools",
+    "crates/wf-persistence",
+    "crates/wf-reflection",
+    "crates/wf-runtime",
+    "crates/wf-tui",
+    "crates/wf-workflow",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "Holographic self-evolving multi-agent system with layered decision architecture"
+rust-version = "1.85"
 authors = ["Workflow Team"]
 license = "MIT"
-repository = "https://github.com/user/workflow"
-readme = "README.md"
-keywords = ["agent", "multi-agent", "workflow", "ai", "llm"]
-categories = ["command-line-utilities", "development-tools"]
-rust-version = "1.85"
 
-[dependencies]
+[workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 rayon = "1"
 smallvec = "1"
@@ -26,7 +38,7 @@ anyhow = "1"
 thiserror = "2"
 dashmap = "6"
 async-trait = "0.1"
-rig = { version = "0.38", features = ["rmcp"] }
+rig = { git = "https://github.com/Yoimiya-Naganohara/rig.git", version = "0.39", features = ["rmcp"] }
 ratatui = "0.30"
 crossterm = { version = "0.29", features = ["event-stream", "bracketed-paste"] }
 unicode-width = "0.2"
@@ -43,8 +55,6 @@ walkdir = "2"
 glob = "0.3"
 tiktoken-rs = "0.12"
 bincode = "1"
-
-[dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3"
 

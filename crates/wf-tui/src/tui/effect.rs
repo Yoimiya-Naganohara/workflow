@@ -1,0 +1,717 @@
+//! Effect system — explicit, traceable async operations.
+//!
+//! The handler never spawns tasks directly.  Instead it pushes
+//! [`Effect`] values onto a queue in `AppState`.  The event loop
+//! drains the queue and delegates execution to [`execute_effect`],
+//! which is a **stateless** async function — it takes an `Effect`,
+//! produces zero or more [`AppEvent`] values, and never touches
+//! `AppState` directly.
+//!
+//! Results arrive through an `mpsc` channel and are applied by
+//! `AppState::handle_event`.
+
+use futures::{StreamExt, future::Abortable};
+use tokio::sync::mpsc;
+
+use wf_core::ExperienceEntry;
+use wf_llm::{LlmProvider, ToolEvent};
+use wf_models::models::{LocalFileSource, ModelRegistry, ProviderSource};
+use wf_persistence;
+use wf_reflection::{build_self_check_prompt, check_rules};
+use wf_runtime::runtime::AgentRuntime;
+use wf_tools::ToolServerHandle;
+
+// ═══════════════════════════════════════════════════════════════
+//  Effect — an async operation requested by the UI
+// ═══════════════════════════════════════════════════════════════
+
+pub enum Effect {
+    FetchModelRegistry,
+    ExecuteShell {
+        command: String,
+    },
+    PoolQuery {
+        query_text: String,
+        runtime: std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>,
+        now: String,
+    },
+    StartChat {
+        input: String,
+        response_index: usize,
+        request_id: u64,
+        model_id: String,
+        system_prompt: String,
+        history: Vec<(String, String)>,
+        tool_server: ToolServerHandle,
+        provider: std::sync::Arc<LlmProvider>,
+        runtime: Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
+        abort_registration: futures::future::AbortRegistration,
+        reasoning_effort: Option<String>,
+        reasoning_options: Vec<wf_core::ReasoningOption>,
+    },
+    /// Compute embeddings for all roles missing them.
+    ComputeRoleEmbeddings,
+    /// Run prompt optimization for a role.
+    OptimizeRole {
+        role_name: String,
+        runtime: std::sync::Arc<tokio::sync::RwLock<wf_runtime::runtime::AgentRuntime>>,
+    },
+    /// Run self-check reflection on a completed chat.
+    SelfCheck {
+        response_index: usize,
+        request_id: u64,
+        attempt: u8,
+        full_response: String,
+        input: String,
+        system_prompt: String,
+        history: Vec<(String, String)>,
+        tool_server: ToolServerHandle,
+        provider: std::sync::Arc<LlmProvider>,
+        model_id: String,
+        runtime: Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
+        abort_registration: futures::future::AbortRegistration,
+    },
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  AppEvent — a completed async operation's result
+// ═══════════════════════════════════════════════════════════════
+
+pub enum AppEvent {
+    ModelRegistryFetched {
+        count: usize,
+    },
+    ModelRegistryFailed {
+        error: String,
+        is_empty: bool,
+    },
+    ShellOutput {
+        content: String,
+        timestamp: String,
+    },
+    ShellError {
+        error: String,
+        timestamp: String,
+    },
+    PoolQueryResult {
+        content: String,
+        timestamp: String,
+        is_error: bool,
+    },
+    ChatToken {
+        response_index: usize,
+        text: String,
+    },
+    /// Streamed reasoning/chain-of-thought content.
+    /// Rendered separately from ChatToken with distinct styling.
+    ChatReasoning {
+        response_index: usize,
+        text: String,
+    },
+    /// Per‑turn token usage reported by the LLM provider.
+    /// Accumulated by the state to show accurate ↑/↓ metrics.
+    ChatTokenUsage {
+        response_index: usize,
+        input: u32,
+        output: u32,
+        /// Input tokens served from provider-managed cache.
+        cached_input: u32,
+        /// Input tokens written to provider-managed cache.
+        cache_creation_input: u32,
+        /// Tokens used for internal reasoning/chain-of-thought.
+        reasoning_tokens: u32,
+    },
+    ChatToolCall {
+        response_index: usize,
+        name: String,
+        args: String,
+        timestamp: String,
+    },
+    ChatCompleted {
+        response_index: usize,
+        request_id: u64,
+        full_response: String,
+        input: String,
+        runtime: Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
+    },
+    ChatError {
+        response_index: usize,
+        request_id: u64,
+        error: String,
+    },
+    ChatCancelled {
+        response_index: usize,
+        request_id: u64,
+    },
+    /// Result of a role optimization.
+    OptimizationResult {
+        role_name: String,
+        original: String,
+        improved: String,
+        summary: String,
+        stats: wf_runtime::runtime::optimizer::OptimizationStats,
+    },
+    /// Error during role optimization.
+    OptimizationError {
+        role_name: String,
+        error: String,
+    },
+    /// A system-level log message (displayed in chat as grey system line).
+    SystemLog {
+        content: String,
+    },
+    /// The agent tree has converged; a parent is ready to aggregate
+    /// and a new LLM synthesis call should be scheduled.
+    AggregationStarting {
+        agent_id: wf_core::AgentId,
+    },
+    /// Result of a self-check reflection.
+    SelfCheckResult {
+        response_index: usize,
+        request_id: u64,
+        passed: bool,
+        attempt: u8,
+        // Data needed for retry if !passed
+        input: String,
+        system_prompt: String,
+        history: Vec<(String, String)>,
+        tool_server: ToolServerHandle,
+        provider: std::sync::Arc<LlmProvider>,
+        model_id: String,
+        runtime: Option<std::sync::Arc<tokio::sync::RwLock<AgentRuntime>>>,
+        abort_registration: futures::future::AbortRegistration,
+        feedback: String,
+    },
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Executor — stateless, never touches AppState
+// ═══════════════════════════════════════════════════════════════
+
+pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>) {
+    match effect {
+        Effect::FetchModelRegistry => {
+            // Background refresh — cache already loaded by handler
+            let mut registry = ModelRegistry::new();
+            match registry.fetch().await {
+                Ok(()) => {
+                    let count = registry.providers().len();
+                    let _ = wf_persistence::save_provider_cache(&registry);
+                    let _ = tx.send(AppEvent::ModelRegistryFetched { count });
+                }
+                Err(_) => {
+                    // Remote failed — try local api.json
+                    let local_source = LocalFileSource::new(std::path::PathBuf::from("api.json"));
+                    match local_source.fetch().await {
+                        Ok(providers) if !providers.is_empty() => {
+                            registry = ModelRegistry::with_providers(providers);
+                            let count = registry.providers().len();
+                            let _ = wf_persistence::save_provider_cache(&registry);
+                            let _ = tx.send(AppEvent::ModelRegistryFetched { count });
+                        }
+                        _ => {
+                            // Both remote and local failed.
+                            // If no cache exists at all, fall back to built-in defaults.
+                            if wf_persistence::load_provider_cache().is_none() {
+                                registry.ensure_builtin_defaults();
+                                let count = registry.providers().len();
+                                let _ = wf_persistence::save_provider_cache(&registry);
+                                let _ = tx.send(AppEvent::ModelRegistryFetched { count });
+                            }
+                            // Otherwise keep existing cache silently.
+                        }
+                    }
+                }
+            }
+        }
+
+        Effect::ExecuteShell { command } => {
+            let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+            match tokio::process::Command::new("sh")
+                .arg("-c")
+                .arg(&command)
+                .output()
+                .await
+            {
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    let mut content = String::new();
+                    if !stdout.is_empty() {
+                        content.push_str(&stdout);
+                    }
+                    if !stderr.is_empty() {
+                        if !content.is_empty() {
+                            content.push('\n');
+                        }
+                        content.push_str(&stderr);
+                    }
+                    if content.is_empty() {
+                        content = format!("(exit code: {})", out.status.code().unwrap_or(-1));
+                    }
+                    let _ = tx.send(AppEvent::ShellOutput { content, timestamp });
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::ShellError {
+                        error: e.to_string(),
+                        timestamp,
+                    });
+                }
+            }
+        }
+
+        Effect::PoolQuery {
+            query_text,
+            runtime,
+            now,
+        } => {
+            // Clone the embedding service to avoid holding the runtime read lock
+            // across the HTTP request in embed().
+            let embed_service = {
+                let guard = runtime.read().await;
+                guard.embedding_service()
+            };
+            let (content, is_error) = match embed_service.embed(&query_text).await {
+                Ok(emb) => {
+                    // Re-acquire read lock briefly for sync search (no .await).
+                    let guard = runtime.read().await;
+                    let results = guard.search_experience(&emb, 10);
+                    if results.is_empty() {
+                        ("No matching experiences found.".to_string(), false)
+                    } else {
+                        let lines: Vec<String> = results
+                            .iter()
+                            .enumerate()
+                            .map(|(i, (entry, score))| {
+                                let ts = entry.timestamp;
+                                format!(
+                                    "  #{:<3} score={:.4}  weight={:.2}  ts={}  tools={:016b}",
+                                    i + 1,
+                                    score,
+                                    entry.weight,
+                                    ts,
+                                    entry.tool_bitmap
+                                )
+                            })
+                            .collect();
+                        (
+                            format!(
+                                "Top {} experiences for \"{}\":\n{}",
+                                results.len(),
+                                query_text,
+                                lines.join("\n")
+                            ),
+                            false,
+                        )
+                    }
+                }
+                Err(e) => (format!("Embedding failed: {}", e), true),
+            };
+            let _ = tx.send(AppEvent::PoolQueryResult {
+                content,
+                timestamp: now,
+                is_error,
+            });
+        }
+
+        Effect::StartChat {
+            input,
+            response_index,
+            request_id,
+            model_id,
+            system_prompt,
+            history,
+            tool_server,
+            provider,
+            runtime,
+            abort_registration,
+            reasoning_effort,
+            reasoning_options,
+        } => {
+            let additional_params = reasoning_effort
+                .as_ref()
+                .and_then(|effort| provider.reasoning_params(effort, &reasoning_options));
+            let mut stream = match provider
+                .chat_with_tools_stream_mcp(
+                    &model_id,
+                    &system_prompt,
+                    &input,
+                    &history,
+                    &tool_server,
+                    additional_params.as_ref(),
+                )
+                .await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = tx.send(AppEvent::ChatError {
+                        response_index,
+                        request_id,
+                        error: e.to_string(),
+                    });
+                    return;
+                }
+            };
+
+            let mut full_response = String::new();
+            let mut done_received = false;
+
+            let stream_result = Abortable::new(
+                async {
+                    while let Some(event) = stream.next().await {
+                        match event {
+                            ToolEvent::Text(text) => {
+                                full_response.push_str(&text);
+                                let _ = tx.send(AppEvent::ChatToken {
+                                    response_index,
+                                    text,
+                                });
+                            }
+                            ToolEvent::Reasoning(text) => {
+                                // Reasoning is NOT added to full_response.
+                                let _ = tx.send(AppEvent::ChatReasoning {
+                                    response_index,
+                                    text,
+                                });
+                            }
+                            ToolEvent::ToolCall { name, args, .. } => {
+                                let args_str = format_tool_args(&args);
+                                let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+                                let _ = tx.send(AppEvent::ChatToolCall {
+                                    response_index,
+                                    name,
+                                    args: args_str,
+                                    timestamp,
+                                });
+                            }
+                            ToolEvent::TokenUsage {
+                                input,
+                                output,
+                                cached_input,
+                                cache_creation_input,
+                                reasoning_tokens,
+                            } => {
+                                let _ = tx.send(AppEvent::ChatTokenUsage {
+                                    response_index,
+                                    input,
+                                    output,
+                                    cached_input,
+                                    cache_creation_input,
+                                    reasoning_tokens,
+                                });
+                            }
+                            ToolEvent::Done { .. } => {
+                                done_received = true;
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                },
+                abort_registration,
+            )
+            .await;
+
+            match stream_result {
+                Ok(()) if !done_received => {
+                    // Stream ended without Done — treat as an error.
+                    let _ = tx.send(AppEvent::ChatError {
+                        response_index,
+                        request_id,
+                        error: "Stream ended unexpectedly without Done event.".to_string(),
+                    });
+                }
+                Ok(()) => {
+                    let _ = tx.send(AppEvent::ChatCompleted {
+                        response_index,
+                        request_id,
+                        full_response: full_response.clone(),
+                        input: input.clone(),
+                        runtime: runtime.clone(),
+                    });
+
+                    // Record experience (only for completed, not cancelled).
+                    if !full_response.is_empty() {
+                        if let Some(rt) = &runtime {
+                            // Clone the embedding service to avoid holding the lock
+                            // across the HTTP request in embed().
+                            let embed_service = {
+                                let guard = rt.read().await;
+                                guard.embedding_service()
+                            };
+                            if let Ok(emb) = embed_service.embed(&input).await {
+                                let guard = rt.read().await;
+                                // TUI chat lacks agent context — role_template_id is None
+                                // (agent-executed experiences set this in runtime.rs)
+                                guard.add_experience(ExperienceEntry {
+                                    embedding: emb,
+                                    applicability_vector: [0.0f32; 128],
+                                    tool_bitmap: 0,
+                                    role_template_id: None,
+                                    weight: 0.6,
+                                    domain_version: 0,
+                                    timestamp: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs(),
+                                    l2_override_weight: 0.0,
+                                    l2_override_created_at: 0,
+                                });
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Cancelled via Ctrl+X — do NOT record experience.
+                    let _ = tx.send(AppEvent::ChatCancelled {
+                        response_index,
+                        request_id,
+                    });
+                }
+            }
+        }
+
+        Effect::ComputeRoleEmbeddings => {
+            // ComputeRoleEmbeddings is handled directly in the TUI commands
+            // via runtime.compute_role_embeddings_async() — no async effect needed.
+            tracing::info!("Role embeddings computed via /role embed command");
+        }
+
+        Effect::OptimizeRole { role_name, runtime } => {
+            // ── Pre-optimization consolidation: drain fluid track to bedrock ──
+            // Ensures all accumulated experiences (even below high-water mark)
+            // are available for optimization analysis.
+            {
+                let mut rt = runtime.write().await;
+                rt.consolidate_experience_pool();
+            }
+
+            // Read role and experiences from runtime
+            let (role, experiences, provider, model_id) = {
+                let rt = runtime.read().await;
+                let role = match rt.get_role_template(&role_name) {
+                    Some(r) => r,
+                    None => {
+                        let _ = tx.send(AppEvent::OptimizationError {
+                            role_name: role_name.clone(),
+                            error: format!("Role '{}' not found", role_name),
+                        });
+                        return;
+                    }
+                };
+                let experiences = rt.get_experiences_by_role(role.template_id);
+                let provider = match &rt.provider {
+                    Some(p) => p.clone(),
+                    None => {
+                        let _ = tx.send(AppEvent::OptimizationError {
+                            role_name: role_name.clone(),
+                            error: "No LLM provider configured".to_string(),
+                        });
+                        return;
+                    }
+                };
+                (role, experiences, provider, rt.model_id.clone())
+            };
+
+            match wf_runtime::runtime::optimizer::optimize_role(
+                &role,
+                &experiences,
+                &provider,
+                &model_id,
+            )
+            .await
+            {
+                Ok(result) => {
+                    let _ = tx.send(AppEvent::OptimizationResult {
+                        role_name: result.role_name.clone(),
+                        original: result.original_prompt,
+                        improved: result.improved_prompt,
+                        summary: result.summary,
+                        stats: result.stats,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::OptimizationError {
+                        role_name: role_name.clone(),
+                        error: e.to_string(),
+                    });
+                }
+            }
+        }
+
+        Effect::SelfCheck {
+            response_index,
+            request_id,
+            attempt,
+            full_response,
+            input,
+            system_prompt,
+            history,
+            tool_server,
+            provider,
+            model_id,
+            runtime,
+            abort_registration,
+        } => {
+            let cfg = wf_reflection::ReflectionConfig::default();
+            let registry = wf_reflection::default_registry();
+            let tool_trace = ""; // tools are not tracked in this context yet
+
+            // Run rules. Semantic rules need the embedding service.
+            // Use read().await (not blocking_read()) to avoid panicking
+            // on current-thread tokio runtimes.
+            let report = {
+                let embed_guard = if let Some(ref rt) = runtime {
+                    Some(rt.read().await)
+                } else {
+                    None
+                };
+                let embed_service = embed_guard.as_ref().map(|guard| guard.embedding_service());
+                let embed_ref: Option<&dyn wf_llm::EmbeddingService> = embed_service
+                    .as_ref()
+                    .map(|s| s.as_ref() as &dyn wf_llm::EmbeddingService);
+                let ctx = wf_reflection::RuleContext {
+                    input: &input,
+                    response: &full_response,
+                    tool_trace,
+                    embedding: embed_ref,
+                    cfg: Some(&cfg),
+                };
+                check_rules(&cfg, &registry, &ctx).await
+            };
+
+            if !report.all_passed {
+                // Rules failed → map rule IDs to Chinese descriptions
+                let mut failed = Vec::new();
+                for r in report.failed_results() {
+                    let msg = match r.rule_id {
+                        "code_complete" => "代码不完整或括号不匹配",
+                        "error_awareness" => "未处理工具调用错误",
+                        "multi_question_coverage" => "多问题回复过短",
+                        "empty_promise" => "有空头承诺但无工具调用",
+                        "file_ref_used" => "未引用用户提供的 @file",
+                        "min_output" => "回复过短",
+                        "relevance" => "回复与问题语义不相关",
+                        "semantic_promise" => "承诺内容与工具调用语义不匹配",
+                        other => other,
+                    };
+                    failed.push(msg);
+                }
+
+                let feedback = wf_reflection::build_continuation_feedback(&failed);
+                let _ = tx.send(AppEvent::SelfCheckResult {
+                    response_index,
+                    request_id,
+                    passed: false,
+                    attempt,
+                    input,
+                    system_prompt,
+                    history,
+                    tool_server,
+                    provider,
+                    model_id,
+                    runtime,
+                    abort_registration,
+                    feedback,
+                });
+                return;
+            }
+
+            // Rules passed → do self-check via LLM
+            let self_check_prompt = build_self_check_prompt(&input, &full_response);
+
+            let result = provider
+                .chat(&model_id, &system_prompt, &self_check_prompt)
+                .await;
+
+            match result {
+                Ok(text) => {
+                    let trimmed = text.trim().to_lowercase();
+                    let passed = trimmed == "yes";
+                    let feedback = if passed {
+                        String::new()
+                    } else {
+                        "Please review and improve your previous response to fully address the user's request."
+                            .to_string()
+                    };
+                    let _ = tx.send(AppEvent::SelfCheckResult {
+                        response_index,
+                        request_id,
+                        passed,
+                        attempt,
+                        input,
+                        system_prompt,
+                        history,
+                        tool_server,
+                        provider,
+                        model_id,
+                        runtime,
+                        abort_registration,
+                        feedback,
+                    });
+                }
+                Err(e) => {
+                    // LLM call failed — treat as passed to avoid blocking the user
+                    tracing::warn!("Self-check LLM call failed: {}", e);
+                    let _ = tx.send(AppEvent::SelfCheckResult {
+                        response_index,
+                        request_id,
+                        passed: true,
+                        attempt,
+                        input,
+                        system_prompt,
+                        history,
+                        tool_server,
+                        provider,
+                        model_id,
+                        runtime,
+                        abort_registration,
+                        feedback: String::new(),
+                    });
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════════
+
+fn format_tool_args(args: &serde_json::Value) -> String {
+    // Flatten JSON object to key=value pairs, one per line.
+    // This is much more compact and readable than pretty-printed JSON.
+    match args {
+        serde_json::Value::Object(map) => {
+            let mut parts: Vec<String> = Vec::new();
+            for (key, val) in map {
+                let val_str = match val {
+                    serde_json::Value::String(s) => s.to_string(),
+                    serde_json::Value::Number(n) => format!("{}", n),
+                    serde_json::Value::Bool(b) => format!("{}", b),
+                    serde_json::Value::Null => String::new(),
+                    // Arrays/objects: stringify compactly, truncated to 60 chars
+                    other => {
+                        let s = serde_json::to_string(other).unwrap_or_default();
+                        if s.len() > 60 {
+                            format!("{}…", &s[..57])
+                        } else {
+                            s
+                        }
+                    }
+                };
+                let line = if val_str.is_empty() {
+                    key.clone()
+                } else if val_str.contains(char::is_whitespace) || val_str.contains('=') {
+                    format!("{}=\"{}\"", key, val_str)
+                } else {
+                    format!("{}={}", key, val_str)
+                };
+                parts.push(line);
+            }
+            parts.join("\n")
+        }
+        // Non-object args: stringify compactly.
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
+}

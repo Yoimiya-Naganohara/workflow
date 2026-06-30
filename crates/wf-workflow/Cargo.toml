@@ -1,0 +1,18 @@
+[package]
+name = "wf-workflow"
+description = "Holographic self-evolving multi-agent system — binary"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rig.workspace = true
+wf-tools = { path = "../wf-tools" }
+wf-persistence = { path = "../wf-persistence" }
+wf-core = { path = "../wf-core" }
+wf-runtime = { path = "../wf-runtime" }
+wf-tui = { path = "../wf-tui" }
+wf-llm = { path = "../wf-llm" }
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -1,0 +1,26 @@
+[package]
+name = "wf-tools"
+description = "MCP tool system, sandbox, memo, diff editor"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wf-persistence = { path = "../wf-persistence" }
+futures.workspace = true
+wf-core = { path = "../wf-core" }
+wf-llm = { path = "../wf-llm" }
+wf-agent = { path = "../wf-agent" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rand.workspace = true
+chrono.workspace = true
+walkdir.workspace = true
+regex.workspace = true
+rig.workspace = true
+[dev-dependencies]
+tempfile.workspace = true
+futures.workspace = true

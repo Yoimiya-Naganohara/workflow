@@ -49,15 +49,35 @@ Debug build (`cargo build`) works but TUI requires a real terminal.
 
 ```bash
 cargo test <test_name>                  # by exact name
-cargo test <module>::<test_name>        # scoped to a module
-cargo test -- --nocapture               # with stdout
+cargo test -p <crate> <test_name>       # scoped to a crate
+cargo test -p <crate> -- --nocapture    # with stdout
+cargo test -p wf-core                   # test a specific crate
+cargo test --workspace                  # test everything
 ```
 
-Tests live as `#[cfg(test)] mod tests` blocks inside their source files (45 modules). There are no separate `tests/` integration dirs.
+Tests live as `#[cfg(test)] mod tests` blocks inside their source files. Each crate has its own tests.
 
 ## Codebase structure
 
-Single Rust crate (edition 2024, MSRV 1.85). Not a workspace.
+**Cargo workspace** (edition 2024, MSRV 1.85). 13 crates:
+
+| Crate | Purpose |
+|-------|---------|
+| `crates/wf-core` | Foundation: types, constants, SIMD, guard, TaskGraph, RuntimeEvent |
+| `crates/wf-llm` | LLM provider abstraction, embedding, chat |
+| `crates/wf-l1` | L1 experience retrieval |
+| `crates/wf-l2` | L2 audit engine |
+| `crates/wf-experience` | Dual-track memory, clustering, role templates |
+| `crates/wf-models` | Model registry, provider config, provider client |
+| `crates/wf-agent` | Agent, pool, plan, suspend, sandbox |
+| `crates/wf-tools` | MCP tool server, built-in tools, diff editor, memo |
+| `crates/wf-persistence` | State/session persistence, keystore |
+| `crates/wf-reflection` | Self-check, rule engine |
+| `crates/wf-runtime` | Pipeline, lifecycle, scheduler, orchestration |
+| `crates/wf-tui` | Terminal UI (ratatui) |
+| `crates/wf-workflow` | Binary entry point |
+
+Dependency direction: **bottom-up**, no circular deps.
 
 | Directory | Purpose |
 |-----------|---------|
