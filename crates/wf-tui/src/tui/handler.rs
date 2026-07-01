@@ -298,27 +298,26 @@ impl Tui {
                                         let name = p.name.clone();
                                         (env_key, name)
                                     });
-                                if let Some((env_key, name)) = provider_info {
-                                    if !env_key.is_empty() {
-                                        core.api_keys.insert(env_key.clone(), key_value.clone());
-                                        core.models.select_provider(provider_id);
-                                        if !core.configured_providers.contains(provider_id) {
-                                            core.configured_providers.push(provider_id.clone());
-                                        }
-                                        core.provider_clients.remove(provider_id);
-                                        let _ =
-                                            crate::tui::controller::get_or_create_provider_client(
-                                                core,
-                                                provider_id,
-                                            );
-                                        core.messages
-                                            .push(ChatMessage::system(format!("{} key set", name)));
-                                        let _ = crate::tui::controller::save_api_key(
-                                            provider_id,
-                                            &env_key,
-                                            &key_value,
-                                        );
+                                if let Some((env_key, name)) = provider_info
+                                    && !env_key.is_empty()
+                                {
+                                    core.api_keys.insert(env_key.clone(), key_value.clone());
+                                    core.models.select_provider(provider_id);
+                                    if !core.configured_providers.contains(provider_id) {
+                                        core.configured_providers.push(provider_id.clone());
                                     }
+                                    core.provider_clients.remove(provider_id);
+                                    let _ = crate::tui::controller::get_or_create_provider_client(
+                                        core,
+                                        provider_id,
+                                    );
+                                    core.messages
+                                        .push(ChatMessage::system(format!("{} key set", name)));
+                                    let _ = crate::tui::controller::save_api_key(
+                                        provider_id,
+                                        &env_key,
+                                        &key_value,
+                                    );
                                 }
                             }
                         }
@@ -694,17 +693,14 @@ impl Tui {
             let selected_model = core.selected_models.first().cloned();
             if let Some(ref sel) = selected_model {
                 let pid = sel.provider_id.clone();
-                if core.configured_providers.iter().any(|id| id == &pid) {
-                    if let Ok(client) =
+                if core.configured_providers.iter().any(|id| id == &pid)
+                    && let Ok(client) =
                         crate::tui::controller::get_or_create_provider_client(core, &pid)
-                    {
-                        if let Some(rt) = &core.runtime {
-                            if let Ok(mut rt_guard) = rt.try_write() {
-                                rt_guard.set_provider_from_state(Arc::new(client.inner.clone()));
-                                rt_guard.set_default_model(&sel.model_id);
-                            }
-                        }
-                    }
+                    && let Some(rt) = &core.runtime
+                    && let Ok(mut rt_guard) = rt.try_write()
+                {
+                    rt_guard.set_provider_from_state(Arc::new(client.inner.clone()));
+                    rt_guard.set_default_model(&sel.model_id);
                 }
             }
 
@@ -730,27 +726,26 @@ impl Tui {
             // ── Compiler pipeline: Phase 1-5 passes ──
             // The Graph Compiler runs before the LLM, determining structure.
             // LLM is demoted from 'planner' to 'leaf executor'.
-            if let Some(aid) = agent_id {
-                if let Some(rt) = &core.runtime {
-                    if let Ok(r) = rt.try_read() {
-                        let mut graph = r.task_graph.lock().expect("handler mutex poisoned");
-                        let needs_task = core
-                            .agent_pool
-                            .try_read()
-                            .ok()
-                            .map(|p| p.get_agent(&aid).and_then(|a| a.task_id).is_none())
-                            .unwrap_or(false);
+            if let Some(aid) = agent_id
+                && let Some(rt) = &core.runtime
+                && let Ok(r) = rt.try_read()
+            {
+                let mut graph = r.task_graph.lock().expect("handler mutex poisoned");
+                let needs_task = core
+                    .agent_pool
+                    .try_read()
+                    .ok()
+                    .map(|p| p.get_agent(&aid).and_then(|a| a.task_id).is_none())
+                    .unwrap_or(false);
 
-                        if needs_task {
-                            // Create root task node and assign to agent.
-                            let root_id = graph.spawn_root(&input);
-                            if let Ok(mut pool) = core.agent_pool.try_write() {
-                                if let Some(agent) = pool.get_agent_mut(&aid) {
-                                    agent.task_id = Some(root_id);
-                                    agent.role = "planner".to_string();
-                                }
-                            }
-                        }
+                if needs_task {
+                    // Create root task node and assign to agent.
+                    let root_id = graph.spawn_root(&input);
+                    if let Ok(mut pool) = core.agent_pool.try_write()
+                        && let Some(agent) = pool.get_agent_mut(&aid)
+                    {
+                        agent.task_id = Some(root_id);
+                        agent.role = "planner".to_string();
                     }
                 }
             }
@@ -797,10 +792,9 @@ impl Tui {
                         .unwrap_or_default();
 
                     let new_prompt = format!(
-                        "{}\n\n{}\n\n{}{}",
+                        "{}\n\n{}\n\n{}",
                         agent_prompt,
                         wf_core::MEMO_INSTRUCTIONS,
-                        wf_core::ZERO_TOLERANCE_INSTRUCTIONS,
                         memos,
                     );
 

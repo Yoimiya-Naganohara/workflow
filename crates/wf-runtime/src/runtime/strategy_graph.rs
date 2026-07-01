@@ -775,30 +775,30 @@ impl StrategyGraph {
                     // Step 4: Promotion / retirement decisions.
                     if win_rate > self.protocol.promotion_threshold && confidence > 0.6 {
                         // Promote: ensure the winning strategy is active.
-                        if let Some(s) = self.strategies.get_mut(&a) {
-                            if !s.active {
-                                s.active = true;
-                                s.promoted_at_epoch = epoch;
-                                actions.push(CompetitionAction::Promote {
-                                    strategy_id: a,
-                                    cluster: cid,
-                                    win_rate,
-                                });
-                            }
+                        if let Some(s) = self.strategies.get_mut(&a)
+                            && !s.active
+                        {
+                            s.active = true;
+                            s.promoted_at_epoch = epoch;
+                            actions.push(CompetitionAction::Promote {
+                                strategy_id: a,
+                                cluster: cid,
+                                win_rate,
+                            });
                         }
                     }
 
                     if win_rate < self.protocol.retirement_threshold && confidence > 0.6 {
                         // Retire: deactivate the losing strategy in this cluster.
-                        if let Some(s) = self.strategies.get_mut(&b) {
-                            if s.active {
-                                s.active = false;
-                                actions.push(CompetitionAction::Retire {
-                                    strategy_id: b,
-                                    cluster: cid,
-                                    win_rate,
-                                });
-                            }
+                        if let Some(s) = self.strategies.get_mut(&b)
+                            && s.active
+                        {
+                            s.active = false;
+                            actions.push(CompetitionAction::Retire {
+                                strategy_id: b,
+                                cluster: cid,
+                                win_rate,
+                            });
                         }
                     }
                 }

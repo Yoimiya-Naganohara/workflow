@@ -61,10 +61,10 @@ impl Keymap {
             }
         }
         // Fallback: if a non-modified key is typed and no exact match, it's a char input
-        if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
-            if let KeyCode::Char(c) = key.code {
-                return Action::TypeChar(c);
-            }
+        if (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT)
+            && let KeyCode::Char(c) = key.code
+        {
+            return Action::TypeChar(c);
         }
         Action::None
     }

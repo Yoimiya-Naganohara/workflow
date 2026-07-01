@@ -176,12 +176,12 @@ async fn run_tui() -> Result<()> {
         {
             let state = state.write().await;
             let persisted_memos = wf_persistence::load_role_memos();
-            if !persisted_memos.is_empty() {
-                if let Ok(mut pool) = state.core.agent_pool.try_write() {
-                    for (role, memos) in persisted_memos {
-                        for entry in memos {
-                            pool.write_role_memo(&role, entry);
-                        }
+            if !persisted_memos.is_empty()
+                && let Ok(mut pool) = state.core.agent_pool.try_write()
+            {
+                for (role, memos) in persisted_memos {
+                    for entry in memos {
+                        pool.write_role_memo(&role, entry);
                     }
                 }
             }
@@ -202,12 +202,11 @@ async fn run_tui() -> Result<()> {
                     }
                 }
                 let s = flush_state.read().await;
-                if let Some(runtime) = &s.core.runtime {
-                    if let Ok(rt) = runtime.try_read() {
-                        if let Err(e) = rt.flush_experience_pool() {
-                            error!("Periodic flush failed: {}", e);
-                        }
-                    }
+                if let Some(runtime) = &s.core.runtime
+                    && let Ok(rt) = runtime.try_read()
+                    && let Err(e) = rt.flush_experience_pool()
+                {
+                    error!("Periodic flush failed: {}", e);
                 }
             }
             info!("Flush background task stopped");
@@ -320,12 +319,11 @@ async fn run_tui() -> Result<()> {
     // Flush experience pool on shutdown (best-effort).
     {
         let state = state.read().await;
-        if let Some(runtime) = &state.core.runtime {
-            if let Ok(rt) = runtime.try_read() {
-                if let Err(e) = rt.flush_experience_pool() {
-                    error!("Failed to flush experience pool on shutdown: {}", e);
-                }
-            }
+        if let Some(runtime) = &state.core.runtime
+            && let Ok(rt) = runtime.try_read()
+            && let Err(e) = rt.flush_experience_pool()
+        {
+            error!("Failed to flush experience pool on shutdown: {}", e);
         }
     }
 

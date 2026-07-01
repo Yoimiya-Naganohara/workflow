@@ -25,12 +25,11 @@ use wf_models::provider::ProviderClient;
 
 /// Ensure a root agent exists. Returns the agent ID if available.
 pub fn ensure_initial_agent_sync(core: &mut CoreState, goal_hint: &str) -> Option<AgentId> {
-    if let Some(agent_id) = core.responsible_agent_id {
-        if let Ok(pool) = core.agent_pool.try_read() {
-            if pool.get_agent(&agent_id).is_some() {
-                return Some(agent_id);
-            }
-        }
+    if let Some(agent_id) = core.responsible_agent_id
+        && let Ok(pool) = core.agent_pool.try_read()
+        && pool.get_agent(&agent_id).is_some()
+    {
+        return Some(agent_id);
     }
 
     let runtime = match &core.runtime {
@@ -130,22 +129,21 @@ pub fn switch_session(core: &mut CoreState, ui: &mut UiState, name: &str) {
     }
 
     // Inject into agent context if an agent already exists
-    if let Some(agent_id) = core.responsible_agent_id {
-        if let Ok(mut pool) = core.agent_pool.try_write() {
-            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                agent.context.clear();
-                for msg in &messages {
-                    let role = match msg.role {
-                        MessageRole::User => "user",
-                        MessageRole::Agent => "assistant",
-                        _ => continue,
-                    };
-                    agent.context.push(wf_llm::types::Message {
-                        role: role.to_string(),
-                        content: msg.content.clone(),
-                    });
-                }
-            }
+    if let Some(agent_id) = core.responsible_agent_id
+        && let Ok(mut pool) = core.agent_pool.try_write()
+        && let Some(agent) = pool.get_agent_mut(&agent_id)
+    {
+        agent.context.clear();
+        for msg in &messages {
+            let role = match msg.role {
+                MessageRole::User => "user",
+                MessageRole::Agent => "assistant",
+                _ => continue,
+            };
+            agent.context.push(wf_llm::types::Message {
+                role: role.to_string(),
+                content: msg.content.clone(),
+            });
         }
     }
 }
@@ -307,12 +305,12 @@ pub async fn load_initial_state(state: &mut AppState) {
     // ── Load persisted role memos into the agent pool (with dedup) ──
     {
         let persisted_memos = wf_persistence::load_role_memos();
-        if !persisted_memos.is_empty() {
-            if let Ok(mut pool) = state.core.agent_pool.try_write() {
-                for (role, memos) in persisted_memos {
-                    for entry in memos {
-                        pool.write_role_memo(&role, entry);
-                    }
+        if !persisted_memos.is_empty()
+            && let Ok(mut pool) = state.core.agent_pool.try_write()
+        {
+            for (role, memos) in persisted_memos {
+                for entry in memos {
+                    pool.write_role_memo(&role, entry);
                 }
             }
         }

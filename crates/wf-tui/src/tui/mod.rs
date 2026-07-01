@@ -39,7 +39,7 @@ pub struct Tui {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     state: Arc<RwLock<AppState>>,
     chat_lines_cache: ChatRenderOutput,
-    chat_cache_key: (usize, usize, bool, usize, Option<u8>, bool, usize),
+    chat_cache_key: (usize, usize, usize, bool, usize),
     app_event_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::effect::AppEvent>,
     app_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::tui::effect::AppEvent>,
     last_session_save: std::time::Instant,
@@ -71,7 +71,7 @@ impl Tui {
             chat_lines_cache: ChatRenderOutput {
                 rendered: Vec::new(),
             },
-            chat_cache_key: (0, 0, false, 0, None, true, 0),
+            chat_cache_key: (0, 0, 0, true, 0),
             app_event_tx,
             app_event_rx,
             last_session_save: std::time::Instant::now(),
@@ -288,13 +288,12 @@ impl Drop for Tui {
         // ── Graceful shutdown: consolidate fluid experiences to bedrock ──
         // This ensures all accumulated experiences (even those below the
         // high-water mark) are preserved to disk before the process exits.
-        if let Ok(state) = self.state.try_read() {
-            if let Some(runtime) = &state.core.runtime {
-                if let Ok(mut rt) = runtime.try_write() {
-                    rt.consolidate_experience_pool();
-                    let _ = rt.flush_experience_pool();
-                }
-            }
+        if let Ok(state) = self.state.try_read()
+            && let Some(runtime) = &state.core.runtime
+            && let Ok(mut rt) = runtime.try_write()
+        {
+            rt.consolidate_experience_pool();
+            let _ = rt.flush_experience_pool();
         }
 
         let _ = disable_raw_mode();

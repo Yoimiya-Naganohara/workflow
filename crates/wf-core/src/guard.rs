@@ -94,6 +94,7 @@ impl AdmissionControl for AdmissionController {
 /// A held admission permit.  Released on drop (returns permit to semaphore).
 pub struct AdmissionPermit {
     #[allow(dead_code)]
+    /// Held for RAII — returned to semaphore on drop. Not read directly.
     permit: tokio::sync::OwnedSemaphorePermit,
 }
 

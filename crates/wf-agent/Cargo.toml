@@ -14,3 +14,4 @@ thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 rand.workspace = true
+uuid.workspace = true

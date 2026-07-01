@@ -115,7 +115,7 @@ impl RuntimeEventLoop {
 
         while let Some(event) = self.event_rx.recv().await {
             eviction_tick += 1;
-            if eviction_tick % EVICTION_INTERVAL == 0 {
+            if eviction_tick.is_multiple_of(EVICTION_INTERVAL) {
                 let mut pool_guard = self.pool.write().await;
                 let stale = pool_guard.evict_stale(None);
                 let lru = pool_guard.evict_lru(None);
@@ -131,12 +131,12 @@ impl RuntimeEventLoop {
             }
             // Periodic checkpoint: save pool + graph at configured interval.
             // Two-phase: serialize under brief lock, write outside lock.
-            if eviction_tick % 10 == 0 {
+            if eviction_tick.is_multiple_of(10) {
                 let cp_interval = {
                     let p = self.pool.read().await;
                     p.checkpoint_interval
                 };
-                if cp_interval > 0 && self.checkpoint_tick % cp_interval == 0 {
+                if cp_interval > 0 && self.checkpoint_tick.is_multiple_of(cp_interval) {
                     // Phase 1: serialize under lock (fast, in-memory).
                     let serialized = {
                         let p = self.pool.read().await;
@@ -190,11 +190,11 @@ impl RuntimeEventLoop {
                             })
                         };
                         if needs_reactivation {
-                            if let Ok(mut p) = self.pool.try_write() {
-                                if let Some(agent) = p.get_agent_mut(agent_id) {
-                                    agent.status = wf_agent::AgentStatus::Planning;
-                                    agent.last_active_at = wf_agent::now_secs();
-                                }
+                            if let Ok(mut p) = self.pool.try_write()
+                                && let Some(agent) = p.get_agent_mut(agent_id)
+                            {
+                                agent.status = wf_agent::AgentStatus::Planning;
+                                agent.last_active_at = wf_agent::now_secs();
                             }
                             let rt = self.runtime.clone();
                             let pool = self.pool.clone();
@@ -216,39 +216,37 @@ impl RuntimeEventLoop {
                                 .await;
                             });
                             tokio::spawn(async move {
-                                if let Err(join_err) = work_handle.await {
-                                    if join_err.is_panic() {
-                                        let panic_payload = join_err.into_panic();
-                                        let msg = panic_payload
-                                            .downcast_ref::<&str>()
-                                            .map(|s| s.to_string())
-                                            .or_else(|| {
-                                                panic_payload.downcast_ref::<String>().cloned()
-                                            })
-                                            .unwrap_or_else(|| {
-                                                format!("Agent task panicked: {:?}", panic_payload)
-                                            });
-                                        tracing::error!(
-                                            agent_id = ?agent_id_mon,
-                                            "Agent task panicked: {}",
-                                            msg
-                                        );
-                                        let _ = bt_mon
-                                            .send(RuntimeEvent::AgentFailed {
-                                                agent_id: agent_id_mon,
-                                                error: format!("Agent panicked: {}", msg),
-                                            })
-                                            .await;
-                                    }
+                                if let Err(join_err) = work_handle.await
+                                    && join_err.is_panic()
+                                {
+                                    let panic_payload = join_err.into_panic();
+                                    let msg = panic_payload
+                                        .downcast_ref::<&str>()
+                                        .map(|s| s.to_string())
+                                        .or_else(|| panic_payload.downcast_ref::<String>().cloned())
+                                        .unwrap_or_else(|| {
+                                            format!("Agent task panicked: {:?}", panic_payload)
+                                        });
+                                    tracing::error!(
+                                        agent_id = ?agent_id_mon,
+                                        "Agent task panicked: {}",
+                                        msg
+                                    );
+                                    let _ = bt_mon
+                                        .send(RuntimeEvent::AgentFailed {
+                                            agent_id: agent_id_mon,
+                                            error: format!("Agent panicked: {}", msg),
+                                        })
+                                        .await;
                                 }
                             });
                         } else {
                             // Agent is already running — bump last_active_at
                             // so the inbox hint is visible on next LLM call.
-                            if let Ok(mut p) = self.pool.try_write() {
-                                if let Some(agent) = p.get_agent_mut(agent_id) {
-                                    agent.last_active_at = wf_agent::now_secs();
-                                }
+                            if let Ok(mut p) = self.pool.try_write()
+                                && let Some(agent) = p.get_agent_mut(agent_id)
+                            {
+                                agent.last_active_at = wf_agent::now_secs();
                             }
                         }
                     }
@@ -279,28 +277,28 @@ impl RuntimeEventLoop {
                             .await;
                     });
                     tokio::spawn(async move {
-                        if let Err(join_err) = work_handle.await {
-                            if join_err.is_panic() {
-                                let panic_payload = join_err.into_panic();
-                                let msg = panic_payload
-                                    .downcast_ref::<&str>()
-                                    .map(|s| s.to_string())
-                                    .or_else(|| panic_payload.downcast_ref::<String>().cloned())
-                                    .unwrap_or_else(|| {
-                                        format!("Agent task panicked: {:?}", panic_payload)
-                                    });
-                                tracing::error!(
-                                    agent_id = ?agent_id_mon,
-                                    "Agent task panicked: {}",
-                                    msg
-                                );
-                                let _ = bt_mon
-                                    .send(RuntimeEvent::AgentFailed {
-                                        agent_id: agent_id_mon,
-                                        error: format!("Agent panicked: {}", msg),
-                                    })
-                                    .await;
-                            }
+                        if let Err(join_err) = work_handle.await
+                            && join_err.is_panic()
+                        {
+                            let panic_payload = join_err.into_panic();
+                            let msg = panic_payload
+                                .downcast_ref::<&str>()
+                                .map(|s| s.to_string())
+                                .or_else(|| panic_payload.downcast_ref::<String>().cloned())
+                                .unwrap_or_else(|| {
+                                    format!("Agent task panicked: {:?}", panic_payload)
+                                });
+                            tracing::error!(
+                                agent_id = ?agent_id_mon,
+                                "Agent task panicked: {}",
+                                msg
+                            );
+                            let _ = bt_mon
+                                .send(RuntimeEvent::AgentFailed {
+                                    agent_id: agent_id_mon,
+                                    error: format!("Agent panicked: {}", msg),
+                                })
+                                .await;
                         }
                     });
                 }
@@ -443,12 +441,11 @@ impl RuntimeEventLoop {
             }
 
             // Step 4: Mark parent as Decomposed.
-            if let Some(parent) = g.get(&effective_parent_id) {
-                if parent.status == wf_core::task_graph::TaskStatus::Created
-                    || parent.status == wf_core::task_graph::TaskStatus::Ready
-                {
-                    g.mark_decomposed(effective_parent_id).ok();
-                }
+            if let Some(parent) = g.get(&effective_parent_id)
+                && (parent.status == wf_core::task_graph::TaskStatus::Created
+                    || parent.status == wf_core::task_graph::TaskStatus::Ready)
+            {
+                g.mark_decomposed(effective_parent_id).ok();
             }
 
             let child_count = subtasks.len();
@@ -658,23 +655,21 @@ impl RuntimeEventLoop {
 
                         // Copy asset indices from child sandbox → parent sandbox
                         // so the parent's SearchAsset tool can find child assets.
-                        if payload.is_some() {
-                            if let (Some(child_sb), Some(parent)) =
+                        if payload.is_some()
+                            && let (Some(child_sb), Some(parent)) =
                                 (&child_sandbox, p.get_agent_mut(&pid))
-                            {
-                                if let Some(ref parent_sb) = parent.sandbox {
-                                    let child_idx = child_sb
-                                        .asset_indices
-                                        .read()
-                                        .expect("runtime_loop mutex poisoned");
-                                    let mut parent_idx = parent_sb
-                                        .asset_indices
-                                        .write()
-                                        .expect("runtime_loop mutex poisoned");
-                                    for (k, v) in child_idx.iter() {
-                                        parent_idx.entry(k.clone()).or_insert_with(|| v.clone());
-                                    }
-                                }
+                            && let Some(ref parent_sb) = parent.sandbox
+                        {
+                            let child_idx = child_sb
+                                .asset_indices
+                                .read()
+                                .expect("runtime_loop mutex poisoned");
+                            let mut parent_idx = parent_sb
+                                .asset_indices
+                                .write()
+                                .expect("runtime_loop mutex poisoned");
+                            for (k, v) in child_idx.iter() {
+                                parent_idx.entry(k.clone()).or_insert_with(|| v.clone());
                             }
                         }
 

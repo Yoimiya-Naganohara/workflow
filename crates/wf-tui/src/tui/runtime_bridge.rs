@@ -72,13 +72,13 @@ pub async fn runtime_event_broker(
                         status: MessageStatus::Completed,
                     });
                     // Also inject into the agent's context directly.
-                    if let Ok(mut pool) = s.core.agent_pool.try_write() {
-                        if let Some(agent) = pool.get_agent_mut(&parent_id) {
-                            agent.context.push(wf_llm::types::Message {
-                                role: "system".to_string(),
-                                content: content.clone(),
-                            });
-                        }
+                    if let Ok(mut pool) = s.core.agent_pool.try_write()
+                        && let Some(agent) = pool.get_agent_mut(&parent_id)
+                    {
+                        agent.context.push(wf_llm::types::Message {
+                            role: "system".to_string(),
+                            content: content.clone(),
+                        });
                     }
                 } else {
                     let _ = app_tx.send(crate::tui::effect::AppEvent::SystemLog { content });

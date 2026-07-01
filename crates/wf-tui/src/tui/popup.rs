@@ -571,10 +571,10 @@ pub(crate) fn get_project_files_cached() -> Vec<String> {
         })
     });
 
-    if let Ok(guard) = cache.read() {
-        if guard.refreshed_at.elapsed() < FILE_CACHE_TTL {
-            return guard.files.clone();
-        }
+    if let Ok(guard) = cache.read()
+        && guard.refreshed_at.elapsed() < FILE_CACHE_TTL
+    {
+        return guard.files.clone();
     }
 
     let refreshed = scan_project_files();

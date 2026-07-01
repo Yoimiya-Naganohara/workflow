@@ -18,7 +18,7 @@ use tokio::sync::RwLock;
 use wf_agent::agent::{AgentPool, MemoEntry};
 use wf_core::AgentId;
 
-use super::builtin::ToolCallError;
+use crate::error::ToolCallError;
 
 /// Dependencies needed by the memo tools.
 ///

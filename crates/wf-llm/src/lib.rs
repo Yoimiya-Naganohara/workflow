@@ -250,28 +250,26 @@ impl LlmProvider {
                         "type": "enabled"
                     }
                 });
-                if let Some(obj) = params.as_object_mut() {
-                    if let Some(thinking) = obj.get_mut("thinking").and_then(|v| v.as_object_mut())
-                    {
-                        for opt in reasoning_options {
-                            match opt {
-                                ReasoningOption::Effort { values } => {
-                                    if values.is_empty() || values.contains(&effort.to_string()) {
-                                        thinking.insert("effort".into(), serde_json::json!(effort));
-                                    }
+                if let Some(obj) = params.as_object_mut()
+                    && let Some(thinking) = obj.get_mut("thinking").and_then(|v| v.as_object_mut())
+                {
+                    for opt in reasoning_options {
+                        match opt {
+                            ReasoningOption::Effort { values } => {
+                                if values.is_empty() || values.contains(&effort.to_string()) {
+                                    thinking.insert("effort".into(), serde_json::json!(effort));
                                 }
-                                ReasoningOption::BudgetTokens { .. } => {
-                                    let budget = match effort {
-                                        "low" => 8192,
-                                        "medium" => 16384,
-                                        "high" => 32768,
-                                        _ => 16384,
-                                    };
-                                    thinking
-                                        .insert("budget_tokens".into(), serde_json::json!(budget));
-                                }
-                                _ => {}
                             }
+                            ReasoningOption::BudgetTokens { .. } => {
+                                let budget = match effort {
+                                    "low" => 8192,
+                                    "medium" => 16384,
+                                    "high" => 32768,
+                                    _ => 16384,
+                                };
+                                thinking.insert("budget_tokens".into(), serde_json::json!(budget));
+                            }
+                            _ => {}
                         }
                     }
                 }

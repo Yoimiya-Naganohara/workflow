@@ -289,10 +289,10 @@ impl DecompositionEngine for DefaultDecompositionEngine {
         let mut children = Vec::new();
         for sg in &subtask_goals {
             if let Some(cid) = graph.spawn_child(task_id, sg) {
-                if let Some((role, _)) = self.analyzer.estimate_role(sg) {
-                    if let Some(child) = graph.get_mut(&cid) {
-                        child.role = Some(role);
-                    }
+                if let Some((role, _)) = self.analyzer.estimate_role(sg)
+                    && let Some(child) = graph.get_mut(&cid)
+                {
+                    child.role = Some(role);
                 }
                 children.push(cid);
             }
@@ -1021,15 +1021,15 @@ impl EscalationPolicy for DefaultEscalationPolicy {
                 last_error: last,
             });
         }
-        if let Some(last) = recent_outcomes.last() {
-            if last.latency_ms > self.latency_threshold_ms {
-                return Some(EscalationReason::HumanRequired {
-                    reason: format!(
-                        "Latency {}ms > {}ms",
-                        last.latency_ms, self.latency_threshold_ms
-                    ),
-                });
-            }
+        if let Some(last) = recent_outcomes.last()
+            && last.latency_ms > self.latency_threshold_ms
+        {
+            return Some(EscalationReason::HumanRequired {
+                reason: format!(
+                    "Latency {}ms > {}ms",
+                    last.latency_ms, self.latency_threshold_ms
+                ),
+            });
         }
         None
     }

@@ -189,18 +189,18 @@ impl TaskScheduler {
                     let rt = self.runtime.read().await;
                     let mut g = rt.task_graph.lock().expect("scheduler mutex poisoned");
                     g.mark_rejected(task_id, &format!("{}", reason)).ok();
-                    if let Some(ref store) = self.outcome_store {
-                        if let Ok(mut s) = store.try_write() {
-                            s.record(TaskOutcome {
-                                task_id,
-                                agent_id: None,
-                                role: role.clone(),
-                                success: false,
-                                latency_ms: 0,
-                                tokens_input: 0,
-                                tokens_output: 0,
-                            });
-                        }
+                    if let Some(ref store) = self.outcome_store
+                        && let Ok(mut s) = store.try_write()
+                    {
+                        s.record(TaskOutcome {
+                            task_id,
+                            agent_id: None,
+                            role: role.clone(),
+                            success: false,
+                            latency_ms: 0,
+                            tokens_input: 0,
+                            tokens_output: 0,
+                        });
                     }
                 }
                 DispatchDecision::RetryLater { reason } => {
@@ -248,19 +248,19 @@ impl TaskScheduler {
                 );
             }
             // ── Phase 5: Record trace in StrategyGraph ──
-            if let (Some(sg), Some(sid)) = (&self.strategy_graph, strategy_id_for_trace) {
-                if let Ok(mut g) = sg.lock() {
-                    g.record_trace(crate::runtime::strategy_graph::StrategyExecutionTrace {
-                        trace_id: rand::random(),
-                        strategy_id: sid,
-                        cluster_id: Some(0),
-                        task_signature: sig.clone(),
-                        output_decision: serde_json::json!({"approved": decision_success}),
-                        success: decision_success,
-                        latency_ms: 0,
-                        epoch: 0,
-                    });
-                }
+            if let (Some(sg), Some(sid)) = (&self.strategy_graph, strategy_id_for_trace)
+                && let Ok(mut g) = sg.lock()
+            {
+                g.record_trace(crate::runtime::strategy_graph::StrategyExecutionTrace {
+                    trace_id: rand::random(),
+                    strategy_id: sid,
+                    cluster_id: Some(0),
+                    task_signature: sig.clone(),
+                    output_decision: serde_json::json!({"approved": decision_success}),
+                    success: decision_success,
+                    latency_ms: 0,
+                    epoch: 0,
+                });
             }
         }
     }
@@ -303,18 +303,18 @@ impl TaskScheduler {
             role.to_string()
         };
 
-        if let Some(ref reg) = self.capability_registry {
-            if let Ok(mut r) = reg.try_write() {
-                r.record_outcome(&TaskOutcome {
-                    task_id,
-                    agent_id: None,
-                    role: effective_role.clone(),
-                    success: true,
-                    latency_ms: 0,
-                    tokens_input: 0,
-                    tokens_output: 0,
-                });
-            }
+        if let Some(ref reg) = self.capability_registry
+            && let Ok(mut r) = reg.try_write()
+        {
+            r.record_outcome(&TaskOutcome {
+                task_id,
+                agent_id: None,
+                role: effective_role.clone(),
+                success: true,
+                latency_ms: 0,
+                tokens_input: 0,
+                tokens_output: 0,
+            });
         }
 
         let agent_id: AgentId = rand::random();

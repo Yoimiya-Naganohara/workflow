@@ -31,7 +31,6 @@ impl Tui {
         let term_size = self.terminal.size()?;
 
         let msg_count = state.core.messages.len();
-        let is_streaming = state.ui.active_chat_requests > 0;
         let last_content_len = state
             .core
             .messages
@@ -45,9 +44,7 @@ impl Tui {
         let cache_key = (
             msg_count,
             last_content_len,
-            is_streaming,
             chat_width,
-            is_streaming.then_some(state.ui.think_frame),
             state.ui.auto_scroll,
             if state.ui.auto_scroll {
                 0

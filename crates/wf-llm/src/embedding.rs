@@ -287,10 +287,10 @@ impl EmbeddingRouter {
     }
 
     fn lookup_source(&self) -> String {
-        if self.use_remote() {
-            if let Some(remote) = self.remote.as_ref().filter(|remote| remote.is_available()) {
-                return Self::remote_cache_source(remote);
-            }
+        if self.use_remote()
+            && let Some(remote) = self.remote.as_ref().filter(|remote| remote.is_available())
+        {
+            return Self::remote_cache_source(remote);
         }
         "local".to_string()
     }

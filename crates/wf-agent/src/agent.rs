@@ -587,10 +587,10 @@ impl AgentPool {
         for id in evicted {
             // Find and clean up sandbox by checking all agents for the one being evicted.
             // Since we're called before removal, iterate the full list.
-            if let Some(agent) = self.agents.iter().find(|a| a.id == *id) {
-                if let Some(ref sb) = agent.sandbox {
-                    sb.cleanup();
-                }
+            if let Some(agent) = self.agents.iter().find(|a| a.id == *id)
+                && let Some(ref sb) = agent.sandbox
+            {
+                sb.cleanup();
             }
         }
     }

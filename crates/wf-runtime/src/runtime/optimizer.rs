@@ -43,10 +43,10 @@ impl OptimizationTracker {
                 return Some("optimized too recently");
             }
         }
-        if let Some(&prev_count) = self.experience_snapshot.get(&role_id) {
-            if current_count < prev_count + self.min_new_experiences {
-                return Some("not enough new experiences since last optimization");
-            }
+        if let Some(&prev_count) = self.experience_snapshot.get(&role_id)
+            && current_count < prev_count + self.min_new_experiences
+        {
+            return Some("not enough new experiences since last optimization");
         }
         None
     }

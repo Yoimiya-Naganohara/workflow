@@ -22,10 +22,10 @@ impl AgentRuntime {
             match event {
                 wf_llm::ToolEvent::Text(t) => text.push_str(&t),
                 wf_llm::ToolEvent::Reasoning(t) => {
-                    if let Ok(mut pool) = agent_pool.try_write() {
-                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                            agent.reasoning.push_str(&t);
-                        }
+                    if let Ok(mut pool) = agent_pool.try_write()
+                        && let Some(agent) = pool.get_agent_mut(&agent_id)
+                    {
+                        agent.reasoning.push_str(&t);
                     }
                 }
                 wf_llm::ToolEvent::ToolCall { name, args, .. } => {
@@ -63,13 +63,12 @@ impl AgentRuntime {
                     reasoning_tokens: _,
                 } => {
                     // Accumulate token counts on the agent for UI display.
-                    if input > 0 || output > 0 || cached_input > 0 || cache_creation_input > 0 {
-                        if let Ok(mut pool) = agent_pool.try_write() {
-                            if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                                agent.tokens_input = agent.tokens_input.saturating_add(input);
-                                agent.tokens_output = agent.tokens_output.saturating_add(output);
-                            }
-                        }
+                    if (input > 0 || output > 0 || cached_input > 0 || cache_creation_input > 0)
+                        && let Ok(mut pool) = agent_pool.try_write()
+                        && let Some(agent) = pool.get_agent_mut(&agent_id)
+                    {
+                        agent.tokens_input = agent.tokens_input.saturating_add(input);
+                        agent.tokens_output = agent.tokens_output.saturating_add(output);
                     }
                 }
                 // pi-agent-core lifecycle events — ignore in agent execution
@@ -87,10 +86,10 @@ impl AgentRuntime {
                         if reason == wf_llm::DoneReason::LoopTerminated {
                             // Record that the loop was terminated so the runtime
                             // can make a follow-up LLM call asking for a summary.
-                            if let Ok(mut pool) = agent_pool.try_write() {
-                                if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                                    agent.loop_terminated = true;
-                                }
+                            if let Ok(mut pool) = agent_pool.try_write()
+                                && let Some(agent) = pool.get_agent_mut(&agent_id)
+                            {
+                                agent.loop_terminated = true;
                             }
                         }
                         tracing::info!(
@@ -157,24 +156,23 @@ impl AgentRuntime {
                 let start = text.find(pat)?;
                 let end = (start + 120).min(text.len());
                 Some(text[start..end].to_string())
-            }) {
-                if let Ok(mut pool) = agent_pool.try_write() {
-                    // Record error in metrics
-                    if let Some(last_tool) = pool
-                        .get_agent(&agent_id)
-                        .and_then(|a| a.tool_trace.back())
-                        .map(|r| r.name.clone())
-                    {
-                        pool.record_tool_error(&agent_id, &last_tool);
-                    }
-                    // Mark error in tool trace
-                    if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                        for record in agent.tool_trace.iter_mut().rev().take(2) {
-                            if record.status == wf_agent::ToolStatus::Success {
-                                record.status = wf_agent::ToolStatus::Error;
-                                record.error_message = Some(error_line.clone());
-                                break;
-                            }
+            }) && let Ok(mut pool) = agent_pool.try_write()
+            {
+                // Record error in metrics
+                if let Some(last_tool) = pool
+                    .get_agent(&agent_id)
+                    .and_then(|a| a.tool_trace.back())
+                    .map(|r| r.name.clone())
+                {
+                    pool.record_tool_error(&agent_id, &last_tool);
+                }
+                // Mark error in tool trace
+                if let Some(agent) = pool.get_agent_mut(&agent_id) {
+                    for record in agent.tool_trace.iter_mut().rev().take(2) {
+                        if record.status == wf_agent::ToolStatus::Success {
+                            record.status = wf_agent::ToolStatus::Error;
+                            record.error_message = Some(error_line.clone());
+                            break;
                         }
                     }
                 }

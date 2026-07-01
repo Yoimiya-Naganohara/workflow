@@ -2,7 +2,6 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing;
 
 use wf_agent::MemoEntry;
 use wf_core::SelectedModel;
@@ -66,7 +65,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(hex: &str) -> Option<Vec<u8>> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return None;
     }
     (0..hex.len())
@@ -221,14 +220,12 @@ pub fn list_sessions() -> Vec<String> {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                    if let Ok(meta) = path.metadata() {
-                        if let Ok(modified) = meta.modified() {
-                            sessions.push((name.to_string(), modified));
-                        }
-                    }
-                }
+            if path.extension().and_then(|s| s.to_str()) == Some("json")
+                && let Some(name) = path.file_stem().and_then(|s| s.to_str())
+                && let Ok(meta) = path.metadata()
+                && let Ok(modified) = meta.modified()
+            {
+                sessions.push((name.to_string(), modified));
             }
         }
     }
@@ -399,10 +396,10 @@ pub fn load_role_memos() -> HashMap<String, Vec<MemoEntry>> {
             legacy.len()
         );
         // Write to the new file on first migration
-        if let Ok(p) = memos_file() {
-            if let Ok(json) = serde_json::to_string_pretty(&legacy) {
-                let _ = write_atomic(&p, &json);
-            }
+        if let Ok(p) = memos_file()
+            && let Ok(json) = serde_json::to_string_pretty(&legacy)
+        {
+            let _ = write_atomic(&p, &json);
         }
     }
     legacy

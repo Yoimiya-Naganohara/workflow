@@ -257,18 +257,17 @@ impl AppState {
             } => {
                 if let Some(slot) =
                     find_streaming_slot_response(&self.core.messages, response_index)
+                    && let Some(msg) = self.core.messages.get_mut(slot)
                 {
-                    if let Some(msg) = self.core.messages.get_mut(slot) {
-                        let was_thinking = msg.status == MessageStatus::Thinking;
-                        msg.content.push_str(&text);
-                        msg.chunks.push(StreamChunk::Text(text));
-                        msg.status = MessageStatus::Streaming;
-                        // On first token, recalc local estimate only if no API token
-                        // data has arrived yet.  Once ChatTokenUsage events are flowing,
-                        // those per-tick accumulations are more accurate and cheaper.
-                        if was_thinking && !self.ui.has_api_tokens {
-                            self.recalc_tokens();
-                        }
+                    let was_thinking = msg.status == MessageStatus::Thinking;
+                    msg.content.push_str(&text);
+                    msg.chunks.push(StreamChunk::Text(text));
+                    msg.status = MessageStatus::Streaming;
+                    // On first token, recalc local estimate only if no API token
+                    // data has arrived yet.  Once ChatTokenUsage events are flowing,
+                    // those per-tick accumulations are more accurate and cheaper.
+                    if was_thinking && !self.ui.has_api_tokens {
+                        self.recalc_tokens();
                     }
                 }
             }
@@ -278,11 +277,10 @@ impl AppState {
             } => {
                 if let Some(slot) =
                     find_streaming_slot_response(&self.core.messages, response_index)
+                    && let Some(msg) = self.core.messages.get_mut(slot)
                 {
-                    if let Some(msg) = self.core.messages.get_mut(slot) {
-                        msg.reasoning.push_str(&text);
-                        msg.chunks.push(StreamChunk::Reasoning(text));
-                    }
+                    msg.reasoning.push_str(&text);
+                    msg.chunks.push(StreamChunk::Reasoning(text));
                 }
             }
             AppEvent::ChatCompleted {
@@ -294,18 +292,17 @@ impl AppState {
             } => {
                 if let Some(slot) =
                     find_streaming_slot_response(&self.core.messages, response_index)
+                    && let Some(msg) = self.core.messages.get_mut(slot)
                 {
-                    if let Some(msg) = self.core.messages.get_mut(slot) {
-                        // Don't overwrite content — it was already accumulated via
-                        // ChatToken (text) and ChatToolCall (tool call lines) events
-                        // during streaming. Overwriting would erase the tool call
-                        // entries that were appended to the message content.
-                        if matches!(
-                            msg.status,
-                            MessageStatus::Thinking | MessageStatus::Streaming
-                        ) {
-                            msg.status = MessageStatus::Completed;
-                        }
+                    // Don't overwrite content — it was already accumulated via
+                    // ChatToken (text) and ChatToolCall (tool call lines) events
+                    // during streaming. Overwriting would erase the tool call
+                    // entries that were appended to the message content.
+                    if matches!(
+                        msg.status,
+                        MessageStatus::Thinking | MessageStatus::Streaming
+                    ) {
+                        msg.status = MessageStatus::Completed;
                     }
                 }
                 if self.ui.active_chat_requests > 0 {
@@ -325,35 +322,34 @@ impl AppState {
                 }
 
                 // ── Save exchange to responsible agent's context ──
-                if let Some(agent_id) = self.core.responsible_agent_id {
-                    if let Ok(mut pool) = self.core.agent_pool.try_write() {
-                        if let Some(agent) = pool.get_agent_mut(&agent_id) {
-                            agent.context.push(wf_llm::types::Message {
-                                role: "user".to_string(),
-                                content: input.clone(),
-                            });
-                            agent.context.push(wf_llm::types::Message {
-                                role: "assistant".to_string(),
-                                content: full_response.clone(),
-                            });
-                            // Prevent unbounded growth: keep last 100 exchanges
-                            if agent.context.len() > 200 {
-                                agent.context.drain(0..agent.context.len() - 200);
-                            }
-                            agent.last_active_at = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs();
-                        }
+                if let Some(agent_id) = self.core.responsible_agent_id
+                    && let Ok(mut pool) = self.core.agent_pool.try_write()
+                    && let Some(agent) = pool.get_agent_mut(&agent_id)
+                {
+                    agent.context.push(wf_llm::types::Message {
+                        role: "user".to_string(),
+                        content: input.clone(),
+                    });
+                    agent.context.push(wf_llm::types::Message {
+                        role: "assistant".to_string(),
+                        content: full_response.clone(),
+                    });
+                    // Prevent unbounded growth: keep last 100 exchanges
+                    if agent.context.len() > 200 {
+                        agent.context.drain(0..agent.context.len() - 200);
                     }
+                    agent.last_active_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
                 }
 
                 // ── Sync budget from runtime ──
-                if let Some(rt) = &runtime {
-                    if let Ok(r) = rt.try_read() {
-                        let remaining = r.remaining_budget() as u64;
-                        self.ui.budget_used = self.ui.budget_total.saturating_sub(remaining);
-                    }
+                if let Some(rt) = &runtime
+                    && let Ok(r) = rt.try_read()
+                {
+                    let remaining = r.remaining_budget() as u64;
+                    self.ui.budget_used = self.ui.budget_total.saturating_sub(remaining);
                 }
 
                 // ── Recalculate token cache (only if no API tokens received) ──
@@ -395,11 +391,10 @@ impl AppState {
             } => {
                 if let Some(slot) =
                     find_streaming_slot_response(&self.core.messages, response_index)
+                    && let Some(msg) = self.core.messages.get_mut(slot)
                 {
-                    if let Some(msg) = self.core.messages.get_mut(slot) {
-                        msg.content += " (cancelled)";
-                        msg.status = MessageStatus::Completed;
-                    }
+                    msg.content += " (cancelled)";
+                    msg.status = MessageStatus::Completed;
                 }
                 self.ui.active_chat_requests = 0;
                 self.ui.active_chat_abort = None;
@@ -429,20 +424,19 @@ impl AppState {
                 stats: _,
             } => {
                 // Auto-apply: update system_prompt, increment version, recompute embedding.
-                if let Some(runtime) = &self.core.runtime {
-                    if let Ok(rt) = runtime.try_read() {
-                        if let Some(mut tpl) = rt.get_role_template(&role_name) {
-                            tpl.system_prompt = improved.clone();
-                            tpl.version += 1;
-                            tpl.updated_at = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs();
-                            rt.save_role_template(tpl);
-                            // Recompute embedding in background.
-                            rt.compute_role_embeddings_async();
-                        }
-                    }
+                if let Some(runtime) = &self.core.runtime
+                    && let Ok(rt) = runtime.try_read()
+                    && let Some(mut tpl) = rt.get_role_template(&role_name)
+                {
+                    tpl.system_prompt = improved.clone();
+                    tpl.version += 1;
+                    tpl.updated_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    rt.save_role_template(tpl);
+                    // Recompute embedding in background.
+                    rt.compute_role_embeddings_async();
                 }
                 self.core.messages.push(ChatMessage::system(format!(
                     "Role '{}' optimization complete.\n\n{}  \n\nNew prompt applied (version ++).",
@@ -465,31 +459,30 @@ impl AppState {
                 // render in their original position relative to text/reasoning.
                 if let Some(slot) =
                     find_streaming_slot_response(&self.core.messages, response_index)
+                    && let Some(msg) = self.core.messages.get_mut(slot)
                 {
-                    if let Some(msg) = self.core.messages.get_mut(slot) {
-                        let args_trunc = if args.len() > 200 {
-                            let end = args
-                                .char_indices()
-                                .nth(197)
-                                .map(|(i, _)| i)
-                                .unwrap_or(args.len());
-                            format!("{}…", &args[..end])
-                        } else {
-                            args.clone()
-                        };
-                        msg.chunks.push(StreamChunk::ToolCall {
-                            name: name.clone(),
-                            args: args_trunc,
-                        });
-                        // Keep content in sync for legacy rendering / export
-                        let mut formatted = name;
-                        for arg_line in args.lines() {
-                            formatted.push('\n');
-                            formatted.push_str(arg_line);
-                        }
+                    let args_trunc = if args.len() > 200 {
+                        let end = args
+                            .char_indices()
+                            .nth(197)
+                            .map(|(i, _)| i)
+                            .unwrap_or(args.len());
+                        format!("{}…", &args[..end])
+                    } else {
+                        args.clone()
+                    };
+                    msg.chunks.push(StreamChunk::ToolCall {
+                        name: name.clone(),
+                        args: args_trunc,
+                    });
+                    // Keep content in sync for legacy rendering / export
+                    let mut formatted = name;
+                    for arg_line in args.lines() {
                         formatted.push('\n');
-                        msg.content.push_str(&formatted);
+                        formatted.push_str(arg_line);
                     }
+                    formatted.push('\n');
+                    msg.content.push_str(&formatted);
                 }
                 self.recalc_tokens();
             }
@@ -668,10 +661,9 @@ impl AppState {
         // Get provider and model_id from the current selection
         let (provider, model_id, system_prompt) = self.get_chat_context(runtime, input);
         let system_prompt = format!(
-            "{}\n\n{}\n\n{}",
+            "{}\n\n{}",
             system_prompt,
             wf_core::MEMO_INSTRUCTIONS,
-            wf_core::ZERO_TOLERANCE_INSTRUCTIONS,
         );
 
         let provider = match provider {
@@ -875,10 +867,9 @@ mod tests {
     /// Simulate the system-prompt construction from handler.rs (lines 704–710).
     fn build_system_prompt(agent_prompt: &str, memos: &str) -> String {
         format!(
-            "{}\n\n{}\n\n{}{}",
+            "{}\n\n{}\n\n{}",
             agent_prompt,
             wf_core::MEMO_INSTRUCTIONS,
-            wf_core::ZERO_TOLERANCE_INSTRUCTIONS,
             memos,
         )
     }

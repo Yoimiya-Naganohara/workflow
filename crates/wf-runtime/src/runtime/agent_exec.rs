@@ -86,9 +86,7 @@ impl AgentRuntime {
                     let count = a.inbox.len();
                     if count > 0 {
                         format!(
-                            "\n\nYou have {} unread message(s) in your inbox. \
-Use the `read_messages` tool to read them before proceeding. \
-Messages may contain important context from sibling agents.",
+                            "\n\nYou have {} unread message(s) in your inbox.",
                             count
                         )
                     } else {
@@ -99,15 +97,15 @@ Messages may contain important context from sibling agents.",
         };
 
         let system_prompt = format!(
-            "{}\n\n{}\n\n{}{}{}",
+            "{}\n\n{}\n\n{}{}",
             role_system_prompt,
             wf_core::MEMO_INSTRUCTIONS,
-            wf_core::ZERO_TOLERANCE_INSTRUCTIONS,
             memos,
             inbox_hint,
         );
         let leaf_goal = format!(
-            "Your goal: {}\n\nWork independently and produce a concrete result. Do not request sub-agents — you are a leaf agent.\n\nRULES:\n1. Use tools freely — there is no limit on how many times you can call them.\n2. Keep working until you have a complete, well-researched answer.\n3. When you have enough information, stop and provide your final answer.\n4. If you detect you are calling the same tool with the same arguments 3+ times, you are looping — stop and summarize what you have.\n\nYou are a capable engineer. Do not stop working until the goal is achieved.",
+            "{}{}",
+            wf_core::LEAF_GOAL_PROMPT_TEMPLATE,
             goal
         );
 
@@ -163,13 +161,11 @@ Messages may contain important context from sibling agents.",
                     agent.loop_terminated = false;
                 }
                 // The follow-up call has no tools — it can only summarise.
-                let summary_prompt = format!(
-                    "您的工具调用次数已达到上限。根据您已完成的工作，请提供一份全面的总结。\n\n\
-                     以下是您的部分工作输出：\n{}",
-                    text,
+                let message = format!(
+                    "SUMMARISE BEFORE NEXT CALL"
                 );
                 if let Ok(summary) = provider
-                    .chat(&config.model_id, &system_prompt, &summary_prompt)
+                    .chat(&config.model_id, &system_prompt, &message)
                     .await
                 {
                     text = summary;

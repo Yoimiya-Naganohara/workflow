@@ -305,10 +305,10 @@ impl Plan {
             return None;
         }
         let rest = &s[digit_end..];
-        if let Some(text) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
-            if !text.is_empty() {
-                return Some(text);
-            }
+        if let Some(text) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") "))
+            && !text.is_empty()
+        {
+            return Some(text);
         }
         None
     }
@@ -473,10 +473,10 @@ impl Plan {
                     }
                 }
                 // Store result if any
-                if let Some(ref result) = task.result {
-                    if let Some(node) = graph.get_mut(&child_id) {
-                        node.result = Some(result.clone());
-                    }
+                if let Some(ref result) = task.result
+                    && let Some(node) = graph.get_mut(&child_id)
+                {
+                    node.result = Some(result.clone());
                 }
             }
         }

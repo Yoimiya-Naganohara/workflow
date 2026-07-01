@@ -450,6 +450,19 @@ pub enum ReasoningOption {
     Unknown,
 }
 
+impl Default for ChatMessage {
+    fn default() -> Self {
+        Self {
+            role: MessageRole::System,
+            content: String::new(),
+            reasoning: String::new(),
+            chunks: vec![],
+            timestamp: String::new(),
+            status: MessageStatus::Completed,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -686,18 +699,5 @@ mod tests {
         assert_eq!(std::mem::size_of::<TraceId>(), 16);
         assert_eq!(std::mem::size_of::<AgentId>(), 16);
         assert_eq!(std::mem::size_of::<SpanId>(), 8);
-    }
-}
-
-impl Default for ChatMessage {
-    fn default() -> Self {
-        Self {
-            role: MessageRole::System,
-            content: String::new(),
-            reasoning: String::new(),
-            chunks: vec![],
-            timestamp: String::new(),
-            status: MessageStatus::Completed,
-        }
     }
 }

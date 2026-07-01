@@ -7,7 +7,9 @@
 pub mod agent;
 pub mod builtin;
 pub mod diff_edit;
+pub mod error;
 pub mod memo;
+pub mod search_asset;
 
 pub use rig::tool::server::{ToolServer, ToolServerHandle};
 

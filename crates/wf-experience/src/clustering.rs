@@ -98,10 +98,10 @@ impl Cluster {
         self.max_l2_weight = self.max_l2_weight.max(entry.l2_override_weight);
 
         // Track role template IDs (deduplicated).
-        if let Some(id) = entry.role_template_id {
-            if !self.role_template_ids.contains(&id) {
-                self.role_template_ids.push(id);
-            }
+        if let Some(id) = entry.role_template_id
+            && !self.role_template_ids.contains(&id)
+        {
+            self.role_template_ids.push(id);
         }
     }
 

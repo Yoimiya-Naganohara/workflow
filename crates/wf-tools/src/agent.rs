@@ -7,7 +7,7 @@ use rig::tool::Tool;
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-use super::builtin::ToolCallError;
+use crate::error::ToolCallError;
 
 /// Register agent-management and inter-agent communication tools.
 ///

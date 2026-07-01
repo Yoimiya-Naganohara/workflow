@@ -35,7 +35,7 @@ use rig::tool::Tool;
 use serde::Deserialize;
 use std::io::Write;
 
-use super::builtin::ToolCallError;
+use crate::error::ToolCallError;
 
 /// The delimiter that opens a SEARCH block.
 const SEARCH_MARKER: &str = "<<<<<<< SEARCH";

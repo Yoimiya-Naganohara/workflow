@@ -431,33 +431,33 @@ pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>
                     });
 
                     // Record experience (only for completed, not cancelled).
-                    if !full_response.is_empty() {
-                        if let Some(rt) = &runtime {
-                            // Clone the embedding service to avoid holding the lock
-                            // across the HTTP request in embed().
-                            let embed_service = {
-                                let guard = rt.read().await;
-                                guard.embedding_service()
-                            };
-                            if let Ok(emb) = embed_service.embed(&input).await {
-                                let guard = rt.read().await;
-                                // TUI chat lacks agent context — role_template_id is None
-                                // (agent-executed experiences set this in runtime.rs)
-                                guard.add_experience(ExperienceEntry {
-                                    embedding: emb,
-                                    applicability_vector: [0.0f32; 128],
-                                    tool_bitmap: 0,
-                                    role_template_id: None,
-                                    weight: 0.6,
-                                    domain_version: 0,
-                                    timestamp: std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_secs(),
-                                    l2_override_weight: 0.0,
-                                    l2_override_created_at: 0,
-                                });
-                            }
+                    if !full_response.is_empty()
+                        && let Some(rt) = &runtime
+                    {
+                        // Clone the embedding service to avoid holding the lock
+                        // across the HTTP request in embed().
+                        let embed_service = {
+                            let guard = rt.read().await;
+                            guard.embedding_service()
+                        };
+                        if let Ok(emb) = embed_service.embed(&input).await {
+                            let guard = rt.read().await;
+                            // TUI chat lacks agent context — role_template_id is None
+                            // (agent-executed experiences set this in runtime.rs)
+                            guard.add_experience(ExperienceEntry {
+                                embedding: emb,
+                                applicability_vector: [0.0f32; 128],
+                                tool_bitmap: 0,
+                                role_template_id: None,
+                                weight: 0.6,
+                                domain_version: 0,
+                                timestamp: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs(),
+                                l2_override_weight: 0.0,
+                                l2_override_created_at: 0,
+                            });
                         }
                     }
                 }

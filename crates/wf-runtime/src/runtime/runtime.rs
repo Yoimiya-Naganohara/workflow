@@ -518,10 +518,10 @@ impl AgentRuntime {
     /// Save (create or update) a role template.
     /// If the template has no valid embedding, computes one in background.
     pub fn save_role_template(&self, mut template: RoleTemplate) {
-        if let Some(existing) = self.role_template_store.get_by_role(&template.role) {
-            if existing.system_prompt != template.system_prompt {
-                template.embedding = None;
-            }
+        if let Some(existing) = self.role_template_store.get_by_role(&template.role)
+            && existing.system_prompt != template.system_prompt
+        {
+            template.embedding = None;
         }
         let needs_embedding = template.embedding.is_none();
         self.role_template_store.upsert(template);

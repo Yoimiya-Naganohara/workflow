@@ -356,10 +356,10 @@ impl TaskGraph {
             return Err("Adding this dependency would create a cycle".to_string());
         }
 
-        if let Some(node) = self.nodes.get_mut(&task_id) {
-            if !node.dependencies.contains(&depends_on_id) {
-                node.dependencies.push(depends_on_id);
-            }
+        if let Some(node) = self.nodes.get_mut(&task_id)
+            && !node.dependencies.contains(&depends_on_id)
+        {
+            node.dependencies.push(depends_on_id);
         }
         Ok(())
     }
@@ -399,17 +399,17 @@ impl TaskGraph {
 
         // Remove from old parent's children list
         let old_parent = self.nodes.get(&child_id).and_then(|n| n.parent);
-        if let Some(old_id) = old_parent {
-            if let Some(old) = self.nodes.get_mut(&old_id) {
-                old.children.retain(|c| *c != child_id);
-            }
+        if let Some(old_id) = old_parent
+            && let Some(old) = self.nodes.get_mut(&old_id)
+        {
+            old.children.retain(|c| *c != child_id);
         }
 
         // Add to new parent's children list
-        if let Some(new_parent) = self.nodes.get_mut(&new_parent_id) {
-            if !new_parent.children.contains(&child_id) {
-                new_parent.children.push(child_id);
-            }
+        if let Some(new_parent) = self.nodes.get_mut(&new_parent_id)
+            && !new_parent.children.contains(&child_id)
+        {
+            new_parent.children.push(child_id);
         }
 
         // Update child's parent pointer
@@ -483,14 +483,12 @@ impl TaskGraph {
         // Phase 3.5: record this child as completed in the parent.
         // Uses `completed_children` (a lightweight Vec<TaskId>)
         // instead of copying result strings.
-        if child_done_result.is_some() {
-            if let Some(pid) = parent_id {
-                if let Some(parent) = self.nodes.get_mut(&pid) {
-                    if !parent.completed_children.contains(&id) {
-                        parent.completed_children.push(id);
-                    }
-                }
-            }
+        if child_done_result.is_some()
+            && let Some(pid) = parent_id
+            && let Some(parent) = self.nodes.get_mut(&pid)
+            && !parent.completed_children.contains(&id)
+        {
+            parent.completed_children.push(id);
         }
 
         // Phase 4: check if parent can now transition (no borrow on node).
