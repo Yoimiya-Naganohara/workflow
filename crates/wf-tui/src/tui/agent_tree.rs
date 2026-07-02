@@ -60,7 +60,7 @@ fn build_diagnostic_tree(
 
     // Truncate long names for compact display
     let name = if agent.name.len() > 20 {
-        format!("{}…", &agent.name[..19])
+        format!("{}…", agent.name.chars().take(19).collect::<String>())
     } else {
         agent.name.clone()
     };

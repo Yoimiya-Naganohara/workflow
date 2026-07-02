@@ -26,6 +26,24 @@ impl Tui {
             return self.handle_popup_keys(state, key);
         }
 
+        // Resolve action once — used both for early-exit checks and the match.
+        let action = state.keymap.resolve(key);
+
+        // Handle OpenProviderPicker early to avoid borrow conflicts with `ui`/`core`.
+        if action == Action::OpenProviderPicker {
+            state.popup_mode = PopupMode::Providers;
+            state.popup_selected = 0;
+            if let Some(cached) = wf_persistence::load_provider_cache() {
+                state.core.models = cached;
+            }
+            state.core.models.ensure_builtin_defaults();
+            crate::tui::controller::merge_custom_providers(state);
+            state.effects.push(Effect::FetchModelRegistry);
+            state.ui.input.clear();
+            state.ui.input_cursor = 0;
+            return true;
+        }
+
         let ui = &mut state.ui;
         let core = &mut state.core;
 
@@ -40,7 +58,7 @@ impl Tui {
         }
 
         // ── Resolve through keymap ──
-        match state.keymap.resolve(key) {
+        match action {
             Action::Cancel => {
                 ui.focus = Focus::Input;
                 ui.input.clear();
@@ -76,19 +94,6 @@ impl Tui {
 
             Action::SendMessage if ui.focus == Focus::Input => {
                 return self.handle_input_submit(state);
-            }
-
-            Action::OpenProviderPicker => {
-                state.popup_mode = PopupMode::Providers;
-                state.popup_selected = 0;
-                // Pre-load cache instantly so popup shows providers immediately
-                if let Some(cached) = wf_persistence::load_provider_cache() {
-                    state.core.models = cached;
-                }
-                // Background-refresh remote (will update cache + models when done)
-                state.effects.push(Effect::FetchModelRegistry);
-                ui.input.clear();
-                ui.input_cursor = 0;
             }
 
             Action::OpenCommandPicker => {
@@ -221,6 +226,28 @@ impl Tui {
 
             KeyCode::Down => {
                 state.popup_selected += 1;
+                // Clamp to prevent out-of-bounds access when Enter is pressed.
+                let max = match &state.popup_mode {
+                    PopupMode::Providers => {
+                        wf_models::models::filter_providers(
+                            state.core.models.providers(),
+                            &state.ui.input,
+                        )
+                        .len() + 1 // +1 for "+ Add Custom Provider" row
+                    }
+                    PopupMode::ModelPicker => state
+                        .core
+                        .models
+                        .search_configured_models(
+                            &state.ui.input,
+                            &state.core.configured_providers,
+                        )
+                        .len(),
+                    _ => 0,
+                };
+                if max > 0 && state.popup_selected >= max {
+                    state.popup_selected = max.saturating_sub(1);
+                }
                 true
             }
 
@@ -242,22 +269,18 @@ impl Tui {
                         return self.handle_input_submit(state);
                     }
                     PopupMode::Providers => {
-                        // Select provider from filtered list.
-                        // Clone all needed data BEFORE any mutable access.
-                        let selected: Option<(String, String, bool)> = {
-                            let filtered = wf_models::models::filter_providers(
-                                core.models.providers(),
-                                &ui.input,
-                            );
-                            filtered.get(state.popup_selected).copied().map(|provider| {
-                                (
-                                    provider.id.clone(),
-                                    provider.name.clone(),
-                                    crate::tui::controller::is_no_auth_provider(&provider.id),
-                                )
-                            })
-                        };
-                        if let Some((provider_id, name, is_no_auth)) = selected {
+                        let filtered = wf_models::models::filter_providers(
+                            core.models.providers(),
+                            &ui.input,
+                        );
+                        if state.popup_selected < filtered.len() {
+                            // A regular provider was selected.
+                            let provider = filtered[state.popup_selected];
+                            let provider_id = provider.id.clone();
+                            let name = provider.name.clone();
+                            let is_no_auth =
+                                crate::tui::controller::is_no_auth_provider(&provider_id);
+
                             if is_no_auth {
                                 if !core.configured_providers.contains(&provider_id) {
                                     core.configured_providers.push(provider_id.clone());
@@ -267,8 +290,11 @@ impl Tui {
                                     core,
                                     &provider_id,
                                 );
-                                let _ =
-                                    wf_persistence::save_configured_provider(&provider_id, "", "");
+                                let _ = wf_persistence::save_configured_provider(
+                                    &provider_id,
+                                    "",
+                                    "",
+                                );
                                 core.messages
                                     .push(ChatMessage::system(format!("{} configured", name)));
                             } else {
@@ -279,6 +305,13 @@ impl Tui {
                                 ui.input_cursor = 0;
                                 return true;
                             }
+                        } else {
+                            // The "+ Add Custom Provider" row was selected.
+                            core.messages.push(ChatMessage::system(
+                                "To add a custom provider, edit \
+                                 ~/.workflow/providers_cache.json directly or \
+                                 use the `CustomProvider` API.",
+                            ));
                         }
                         state.popup_mode = PopupMode::None;
                     }
@@ -384,7 +417,7 @@ impl Tui {
                         {
                             // Replace text from last @ to cursor/end with @path
                             if let Some(at_pos) = ui.input.rfind('@') {
-                                let new_input = format!("{}@{}", &ui.input[..at_pos], path);
+                                let new_input = format!("{}@{}", ui.input.split_at(at_pos).0, path);
                                 ui.input = new_input;
                                 ui.input_cursor = Self::char_count(&ui.input);
                             }
@@ -605,11 +638,13 @@ impl Tui {
         // even when a paste marker is at the start of the input.
         let (input, paste_content) = if let Some(pc) = state.ui.pending_paste.take() {
             if let Some(start) = raw.find("[Pasted") {
-                let after = raw[start..]
+                let after = raw
+                    .get(start..)
+                    .unwrap_or("")
                     .find(']')
                     .map(|e| start + e + 1)
                     .unwrap_or(raw.len());
-                (format!("{}{}{}", &raw[..start], pc, &raw[after..]), None)
+                (format!("{}{}{}", raw.split_at(start).0, pc, raw.split_at(after).1), None)
             } else {
                 (raw, Some(pc))
             }

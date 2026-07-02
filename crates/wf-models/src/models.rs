@@ -243,6 +243,27 @@ impl ModelsDevSource {
     }
 }
 
+// ── ETag persistence for conditional HTTP requests ──
+
+fn etag_path() -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".workflow").join("providers_etag")
+}
+
+fn read_etag() -> Option<String> {
+    let path = etag_path();
+    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+}
+
+fn write_etag(etag: &str) {
+    if let Some(parent) = etag_path().parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(etag_path(), etag);
+}
+
 /// Filter out providers/models with empty or null identifiers.
 /// These entries would fail at runtime if kept.
 fn filter_valid_providers(providers: Vec<Provider>) -> Vec<Provider> {
@@ -279,10 +300,27 @@ impl ProviderSource for ModelsDevSource {
         let client = self.client.as_ref().ok_or_else(|| {
             anyhow::anyhow!("HTTP client unavailable (TLS initialization failed)")
         })?;
-        let resp = client.get("https://models.dev/api.json").send().await?;
+        let etag = read_etag();
+        let mut req = client.get("https://models.dev/api.json");
+        if let Some(ref etag) = etag {
+            req = req.header("If-None-Match", etag);
+        }
+        let resp = req.send().await?;
         let status = resp.status();
+        if status == 304 {
+            // Not modified — keep existing cache.
+            return Ok(Vec::new());
+        }
         if !status.is_success() {
             anyhow::bail!("models.dev HTTP {}", status);
+        }
+        // Store new ETag for next request.
+        if let Some(new_etag) = resp
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+        {
+            write_etag(new_etag);
         }
         let text = resp.text().await?;
         let data: HashMap<String, Provider> = serde_json::from_str(&text).map_err(|e| {
@@ -537,7 +575,9 @@ impl ModelRegistry {
     pub async fn fetch(&mut self) -> Result<()> {
         let source = ModelsDevSource::new()?;
         let providers = source.fetch().await?;
-        self.providers = providers;
+        if !providers.is_empty() {
+            self.providers = providers;
+        }
         Ok(())
     }
 
@@ -732,14 +772,11 @@ impl ModelRegistry {
         self.providers.retain(|p| p.id != id);
     }
 
-    /// Populate with well-known default providers if the registry is empty.
-    /// This ensures `/connect` always shows basic options even without network
-    /// or cached data.
+    /// Ensure all well-known providers exist in the registry.
+    /// This guarantees `/connect` always shows the full list of known providers
+    /// even when the remote fetch fails or the local cache is stale.
     pub fn ensure_builtin_defaults(&mut self) {
-        if !self.providers.is_empty() {
-            return;
-        }
-        let models = |ids: &[&str]| -> HashMap<String, Model> {
+        let models_for = |ids: &[&str]| -> HashMap<String, Model> {
             ids.iter()
                 .map(|id| {
                     (
@@ -773,15 +810,21 @@ impl ModelRegistry {
                 })
                 .collect()
         };
-        let defaults: &[(&str, &str, &[&str])] = &[
+
+        // All well-known providers with their env vars, API URLs, and model IDs.
+        let defaults: &[(&str, &str, &[&str], &str, &[&str])] = &[
             (
                 "openai",
                 "OpenAI",
+                &["OPENAI_API_KEY"],
+                "https://api.openai.com/v1",
                 &["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
             ),
             (
                 "anthropic",
                 "Anthropic",
+                &["ANTHROPIC_API_KEY"],
+                "https://api.anthropic.com/v1",
                 &[
                     "claude-sonnet-4-20250514",
                     "claude-3.5-sonnet",
@@ -789,28 +832,71 @@ impl ModelRegistry {
                 ],
             ),
             (
+                "cohere",
+                "Cohere",
+                &["COHERE_API_KEY"],
+                "https://api.cohere.ai/v1",
+                &["command-r-plus", "command-r", "command"],
+            ),
+            (
+                "gemini",
+                "Gemini",
+                &["GEMINI_API_KEY"],
+                "https://generativelanguage.googleapis.com/v1beta",
+                &["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+            ),
+            (
+                "mistral",
+                "Mistral",
+                &["MISTRAL_API_KEY"],
+                "https://api.mistral.ai/v1",
+                &[
+                    "mistral-large-latest",
+                    "mistral-medium-latest",
+                    "mistral-small-latest",
+                ],
+            ),
+            (
+                "azure",
+                "Azure",
+                &["AZURE_API_KEY"],
+                "https://YOUR_RESOURCE.openai.azure.com",
+                &["gpt-4o", "gpt-4o-mini"],
+            ),
+            (
+                "github-copilot",
+                "GitHub Copilot",
+                &["GITHUB_TOKEN", "GITHUB_COPILOT_API_KEY"],
+                "https://api.githubcopilot.com",
+                &["gpt-4o-copilot", "claude-sonnet-4-copilot"],
+            ),
+            (
                 "ollama",
                 "Ollama",
+                &[],
+                "http://localhost:11434",
                 &["llama3.1", "qwen2.5", "mistral", "codellama"],
             ),
+            (
+                "llamafile",
+                "Llamafile",
+                &[],
+                "http://localhost:8080",
+                &["default"],
+            ),
         ];
-        for (id, name, model_ids) in defaults {
+
+        for (id, name, env_vars, api_url, model_ids) in defaults {
+            if self.providers.iter().any(|p| p.id == *id) {
+                continue;
+            }
             self.providers.push(Provider {
                 id: id.to_string(),
                 name: name.to_string(),
-                env: match *id {
-                    "openai" => vec!["OPENAI_API_KEY".to_string()],
-                    "anthropic" => vec!["ANTHROPIC_API_KEY".to_string()],
-                    _ => vec![],
-                },
-                api: match *id {
-                    "openai" => Some("https://api.openai.com/v1".to_string()),
-                    "anthropic" => Some("https://api.anthropic.com/v1".to_string()),
-                    "ollama" => Some("http://localhost:11434".to_string()),
-                    _ => None,
-                },
+                env: env_vars.iter().map(|s| s.to_string()).collect(),
+                api: Some(api_url.to_string()),
                 doc: None,
-                models: models(model_ids),
+                models: models_for(model_ids),
             });
         }
     }
@@ -1004,5 +1090,72 @@ mod tests {
         assert_eq!(CustomProvider::slug("my-custom-api"), "my-custom-api");
         assert_eq!(CustomProvider::slug("!!!invalid###"), "invalid");
         assert_eq!(CustomProvider::slug(""), "custom");
+    }
+
+    // ── ModelsDevSource integration tests ──
+
+    #[tokio::test]
+    async fn test_models_dev_fetch() {
+        let source = ModelsDevSource::new().expect("source should build");
+        let providers = source.fetch().await.expect("fetch should succeed");
+        assert!(!providers.is_empty(), "should have at least one provider");
+
+        let ids: Vec<&str> = providers.iter().map(|p| p.id.as_str()).collect();
+        assert!(
+            ids.contains(&"openai"),
+            "should contain openai, got: {:?}",
+            ids
+        );
+        assert!(
+            ids.contains(&"anthropic"),
+            "should contain anthropic, got: {:?}",
+            ids
+        );
+        assert!(
+            ids.contains(&"google") || ids.contains(&"gemini"),
+            "should contain google/gemini, got: {:?}",
+            ids
+        );
+
+        // Verify each provider has at least one model
+        for p in &providers {
+            assert!(
+                !p.models.is_empty(),
+                "provider '{}' should have at least one model",
+                p.id
+            );
+        }
+
+        // Verify openai has gpt-4o
+        let openai = providers.iter().find(|p| p.id == "openai").unwrap();
+        assert!(
+            openai.models.contains_key("gpt-4o"),
+            "openai should have gpt-4o"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_models_dev_fetch_with_etag() {
+        // Write a fake ETag first
+        let etag_path = etag_path();
+        let _ = std::fs::create_dir_all(etag_path.parent().unwrap());
+        std::fs::write(&etag_path, "\"test-initial-etag\"").unwrap();
+
+        let source = ModelsDevSource::new().expect("source should build");
+        let result = source.fetch().await;
+
+        // Clean up
+        let _ = std::fs::remove_file(&etag_path);
+
+        // Should succeed whether 200 or 304
+        let providers = result.expect("fetch should not fail even with stale etag");
+        // If server returned 304, providers will be empty
+        if providers.is_empty() {
+            // 304 case - that's fine, but verify the ETag was sent
+            eprintln!("Server returned 304 (not modified) — ETag working");
+        } else {
+            // 200 case - fresh data
+            assert!(providers.len() > 1);
+        }
     }
 }

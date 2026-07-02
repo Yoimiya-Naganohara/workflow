@@ -149,7 +149,7 @@ impl Plan {
 
             // Detect markdown header as section context
             if let Some(level) = Self::header_level(trimmed) {
-                current_section = trimmed[level..].trim().to_string();
+                current_section = trimmed.chars().skip(level).collect::<String>().trim().to_string();
                 i += 1;
                 continue;
             }
@@ -275,40 +275,50 @@ impl Plan {
 
     /// Parse a checkbox/task list item: `- [ ] text` or `- [x] text`.
     /// Returns `Some((marker, text))` or `None`.
-    fn parse_checkbox(s: &str) -> Option<(String, &str)> {
+    fn parse_checkbox(s: &str) -> Option<(String, String)> {
         let s = s.trim_start();
-        if s.len() >= 6
-            && s.as_bytes()[0] == b'-'
-            && s.as_bytes()[1] == b' '
-            && s.as_bytes()[2] == b'['
-        {
-            let checked = s.as_bytes()[3] == b'x' || s.as_bytes()[3] == b'X';
-            if s.as_bytes().get(4) == Some(&b']') && s.as_bytes().get(5) == Some(&b' ') {
-                let marker = if checked { "☑" } else { "☐" };
-                Some((marker.to_string(), &s[6..]))
-            } else {
-                None
-            }
-        } else {
-            None
+        let mut chars = s.chars();
+        if chars.next()? != '-' {
+            return None;
         }
+        if chars.next()? != ' ' {
+            return None;
+        }
+        if chars.next()? != '[' {
+            return None;
+        }
+        let checked = matches!(chars.next(), Some('x') | Some('X'));
+        if chars.next()? != ']' {
+            return None;
+        }
+        if chars.next()? != ' ' {
+            return None;
+        }
+        let marker = if checked { "\u{2611}" } else { "\u{2610}" };
+        let text: String = chars.collect();
+        Some((marker.to_string(), text))
     }
 
     /// Parse an ordered list item: `1. text`, `1) text`, `10. text`, etc.
-    fn parse_ordered_item(s: &str) -> Option<&str> {
-        let bytes = s.as_bytes();
-        let mut digit_end = 0;
-        while digit_end < bytes.len() && bytes[digit_end].is_ascii_digit() {
-            digit_end += 1;
+    fn parse_ordered_item(s: &str) -> Option<String> {
+        let mut chars = s.chars().peekable();
+        let mut digit_count = 0;
+        while let Some(c) = chars.peek() {
+            if c.is_ascii_digit() {
+                digit_count += 1;
+                chars.next();
+            } else {
+                break;
+            }
         }
-        if digit_end == 0 {
+        if digit_count == 0 {
             return None;
         }
-        let rest = &s[digit_end..];
-        if let Some(text) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") "))
-            && !text.is_empty()
-        {
-            return Some(text);
+        let rest: String = chars.collect();
+        if let Some(text) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
         }
         None
     }
@@ -362,20 +372,20 @@ impl Plan {
         for role in Self::ROLES {
             let pattern = format!("@{}", role);
             if let Some(pos) = line.find(&pattern) {
-                let after_role = line[pos + pattern.len()..].trim();
+                let after_role = line.get(pos + pattern.len()..)?.trim();
                 let goal_start = after_role
                     .find('"')
                     .or_else(|| after_role.find('\u{201c}'))?;
                 // Use char-based advance — the found quote may be multi-byte UTF-8.
-                let quote = after_role[goal_start..].chars().next()?;
+                let quote = after_role.split_at(goal_start).1.chars().next()?;
                 let closing = match quote {
                     '"' => '"',
                     '\u{201c}' => '\u{201d}',
                     _ => return None,
                 };
-                let after_open = &after_role[goal_start + quote.len_utf8()..];
+                let after_open = after_role.split_at(goal_start + quote.len_utf8()).1;
                 let goal_end = after_open.find(closing)?;
-                let goal = after_open[..goal_end].to_string();
+                let goal = after_open.split_at(goal_end).0.to_string();
                 if !goal.is_empty() {
                     return Some((role.to_string(), goal));
                 }

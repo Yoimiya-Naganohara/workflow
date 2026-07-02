@@ -25,7 +25,9 @@ pub(crate) fn popup_height(state: &AppState) -> u16 {
         PopupMode::None => 0,
         PopupMode::Providers => {
             let count = filter_providers(state.core.models.providers(), &state.ui.input).len();
-            ((count.min(8) as u16 + 1) + 1).min(12)
+            // Show at least 3 rows: hint (or a provider) + Add Custom row + header
+            let rows = if count == 0 { 3 } else { (count + 1).min(9) };
+            (rows as u16 + 1).min(12)
         }
         PopupMode::KeyInput => 5,
         PopupMode::ModelPicker => {
@@ -158,31 +160,34 @@ fn render_command_palette_popup(f: &mut Frame, area: Rect, state: &AppState) {
 
 fn render_provider_popup(f: &mut Frame, area: Rect, state: &AppState) {
     let filtered = filter_providers(state.core.models.providers(), &state.ui.input);
-    let total_items = filtered.len() + 1;
+    let total_items = filtered.len() + 1; // +1 for "+ Add Custom Provider"
 
-    if total_items == 0 {
-        let block = style::panel("Providers");
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        f.render_widget(
-            Paragraph::new("No matching providers.").style(style::hint_style()),
-            inner,
-        );
-        return;
-    }
-
-    let max_name = filtered.iter().map(|p| p.name.len()).max().unwrap_or(0);
+    let max_name = if filtered.is_empty() {
+        20
+    } else {
+        filtered.iter().map(|p| p.name.len()).max().unwrap_or(0)
+    };
     let max_count = filtered
         .iter()
         .map(|p| format!("{} models", p.models.len()).len())
         .max()
         .unwrap_or(8);
 
-    let mut rows: Vec<Row> = filtered
-        .iter()
-        .map(|p| {
-            let is_configured = state.core.configured_providers.iter().any(|id| id == &p.id);
-            let needs_key = !p.env.is_empty();
+    let mut rows: Vec<Row> = Vec::new();
+
+    // Show hint when filter matches no providers.
+    if filtered.is_empty() {
+        rows.push(Row::new(vec![
+            Span::raw(""),
+            Span::styled("(no matching providers)", style::hint_style()),
+            Span::raw(""),
+            Span::raw(""),
+        ]));
+    } else {
+        for p in &filtered {
+            let is_configured =
+                state.core.configured_providers.iter().any(|id| id == &p.id);
+            let needs_key = wf_llm::ProviderProtocol::from_id(&p.id).requires_api_key();
             let (icon, status_label, status_style) = if is_configured {
                 (
                     "\u{2713}",
@@ -194,14 +199,14 @@ fn render_provider_popup(f: &mut Frame, area: Rect, state: &AppState) {
             } else {
                 ("", "no auth", Style::default().fg(style::ACTIVE))
             };
-            Row::new(vec![
+            rows.push(Row::new(vec![
                 Span::styled(icon, Style::default().fg(style::SUCCESS)),
                 Span::styled(&p.name, style::value_style()),
                 Span::styled(format!("{} models", p.models.len()), style::hint_style()),
                 Span::styled(status_label, status_style),
-            ])
-        })
-        .collect();
+            ]));
+        }
+    }
 
     rows.push(Row::new(vec![
         Span::raw(""),

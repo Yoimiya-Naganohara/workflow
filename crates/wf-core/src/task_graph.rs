@@ -193,7 +193,7 @@ impl TaskNode {
             .collect::<Vec<_>>()
             .join("");
         let goal_short = if self.goal.len() > 40 {
-            format!("{}…", &self.goal[..40])
+            format!("{}…", self.goal.chars().take(40).collect::<String>())
         } else {
             self.goal.clone()
         };

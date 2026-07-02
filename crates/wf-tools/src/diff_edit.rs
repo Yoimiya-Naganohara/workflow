@@ -70,20 +70,26 @@ fn parse_hunk_block(block: &str) -> Result<EditHunk, String> {
         .rfind(SEPARATOR)
         .ok_or_else(|| format!("Missing `{}` separator in SEARCH/REPLACE block", SEPARATOR))?;
 
-    let before_sep = &block[..sep_pos];
-    let after_sep = &block[sep_pos + SEPARATOR.len()..];
+    let (before_sep, after_sep_raw) = block.split_at(sep_pos);
+    let after_sep = after_sep_raw.get(SEPARATOR.len()..).unwrap_or("");
 
     // Find SEARCH marker at the start
     let search_start = before_sep
         .find(SEARCH_MARKER)
         .ok_or_else(|| format!("Missing `{}` marker", SEARCH_MARKER))?;
-    let search_text = before_sep[search_start + SEARCH_MARKER.len()..].trim();
+    let search_text = before_sep
+        .split_at(search_start + SEARCH_MARKER.len())
+        .1
+        .trim();
 
     // Find REPLACE marker at the end of after_sep
     let replace_end = after_sep
         .rfind(REPLACE_MARKER)
         .ok_or_else(|| format!("Missing `{}` marker", REPLACE_MARKER))?;
-    let replace_text = after_sep[..replace_end].trim();
+    let replace_text = after_sep
+        .split_at(replace_end)
+        .0
+        .trim();
 
     if search_text.is_empty() && replace_text.is_empty() {
         return Err("SEARCH/REPLACE block contains empty search and replace".to_string());
@@ -156,11 +162,9 @@ fn apply_hunks(content: &str, hunks: &[EditHunk]) -> Result<String, String> {
         if !result.contains(&hunk.search) {
             // Provide a helpful error with context
             let search_preview = if hunk.search.len() > 120 {
-                format!(
-                    "{}...{}",
-                    &hunk.search[..60],
-                    &hunk.search[hunk.search.len() - 60..]
-                )
+                let start: String = hunk.search.chars().take(60).collect();
+                let end: String = hunk.search.chars().rev().take(60).collect::<Vec<_>>().into_iter().rev().collect();
+                format!("{}...{}", start, end)
             } else {
                 hunk.search.clone()
             };
@@ -183,8 +187,8 @@ fn apply_hunks(content: &str, hunks: &[EditHunk]) -> Result<String, String> {
         // Replace ONLY the first occurrence (safety: each hunk targets one location)
         match result.find(&hunk.search) {
             Some(pos) => {
-                let before = &result[..pos];
-                let after = &result[pos + hunk.search.len()..];
+                let before = result.split_at(pos).0;
+                let after = result.split_at(pos + hunk.search.len()).1;
                 result = format!("{}{}{}", before, hunk.replace, after);
             }
             None => {

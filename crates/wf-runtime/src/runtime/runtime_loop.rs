@@ -615,8 +615,9 @@ impl RuntimeEventLoop {
                                     let asset_id = handle
                                         .find("ID: ")
                                         .and_then(|i| {
-                                            let rest = &handle[i + 4..];
-                                            rest.find(']').map(|j| rest[..j].trim().to_string())
+                                            let rest = handle.split_at(i + 4).1;
+                                            let j = rest.find(']')?;
+                                            Some(rest.split_at(j).0.trim().to_string())
                                         })
                                         .unwrap_or_default();
                                     // Compact summary (first 200 chars + size)

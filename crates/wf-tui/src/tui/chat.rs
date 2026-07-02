@@ -125,17 +125,24 @@ pub(crate) fn render_chat(
         if !state.ui.input.is_empty() {
             let byte_idx =
                 super::chat_lines::char_idx_to_byte_idx(&state.ui.input, state.ui.input_cursor);
-            let line_start_byte = state.ui.input[..byte_idx]
+            let prefix = state.ui.input.split_at(byte_idx).0;
+            let line_start_byte = prefix
                 .rfind('\n')
                 .map(|pos| pos + 1)
                 .unwrap_or(0);
-            let chars_on_this_line = state.ui.input[line_start_byte..byte_idx].chars().count();
+            let chars_on_this_line = state
+                .ui
+                .input
+                .split_at(byte_idx).0
+                .split_at(line_start_byte).1
+                .chars()
+                .count();
             let line_width = super::chat_lines::display_width_up_to(
-                &state.ui.input[line_start_byte..],
+                state.ui.input.split_at(line_start_byte).1,
                 chars_on_this_line,
             );
             let cursor_x = input_area.x + 2 + line_width as u16;
-            let line_no = state.ui.input[..byte_idx].lines().count().saturating_sub(1);
+            let line_no = prefix.lines().count().saturating_sub(1);
             let wrap_width = input_area.width.saturating_sub(2) as usize;
             let wrap_offset = if wrap_width > 0 {
                 line_width / wrap_width

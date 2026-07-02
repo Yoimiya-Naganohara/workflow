@@ -325,7 +325,7 @@ impl Tool for ListMemos {
                     .nth(60)
                     .map(|(i, _)| i)
                     .unwrap_or(entry.value.len());
-                format!("{}...", &entry.value[..end])
+                format!("{}...", entry.value.split_at(end).0)
             } else {
                 entry.value.clone()
             };

@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 
 use wf_core::ExperienceEntry;
 use wf_llm::{LlmProvider, ToolEvent};
-use wf_models::models::{LocalFileSource, ModelRegistry, ProviderSource};
+use wf_models::models::ModelRegistry;
 use wf_persistence;
 use wf_reflection::{build_self_check_prompt, check_rules};
 use wf_runtime::runtime::AgentRuntime;
@@ -80,6 +80,8 @@ pub enum Effect {
 pub enum AppEvent {
     ModelRegistryFetched {
         count: usize,
+        /// Whether this is a background refresh after serving cached data.
+        refreshed: bool,
     },
     ModelRegistryFailed {
         error: String,
@@ -191,36 +193,45 @@ pub enum AppEvent {
 pub async fn execute_effect(effect: Effect, tx: &mpsc::UnboundedSender<AppEvent>) {
     match effect {
         Effect::FetchModelRegistry => {
-            // Background refresh — cache already loaded by handler
-            let mut registry = ModelRegistry::new();
+            // 1. Serve cached data instantly so the UI never waits.
+            let mut registry =
+                wf_persistence::load_provider_cache().unwrap_or_else(ModelRegistry::new);
+            registry.ensure_builtin_defaults();
+            let cached_count = registry.providers().len();
+            if cached_count > 0 {
+                let _ = wf_persistence::save_provider_cache(&registry);
+                let _ = tx.send(AppEvent::ModelRegistryFetched {
+                    count: cached_count,
+                    refreshed: false,
+                });
+            }
+
+            // 2. Background-refresh from remote.
             match registry.fetch().await {
                 Ok(()) => {
                     let count = registry.providers().len();
                     let _ = wf_persistence::save_provider_cache(&registry);
-                    let _ = tx.send(AppEvent::ModelRegistryFetched { count });
+                    if count != cached_count || cached_count == 0 {
+                        let _ = tx.send(AppEvent::ModelRegistryFetched {
+                            count,
+                            refreshed: true,
+                        });
+                    }
+                }
+                Err(_) if cached_count == 0 => {
+                    // Remote failed and no cache — use builtin defaults.
+                    registry.ensure_builtin_defaults();
+                    let count = registry.providers().len();
+                    if count > 0 {
+                        let _ = wf_persistence::save_provider_cache(&registry);
+                    }
+                    let _ = tx.send(AppEvent::ModelRegistryFetched {
+                        count,
+                        refreshed: false,
+                    });
                 }
                 Err(_) => {
-                    // Remote failed — try local api.json
-                    let local_source = LocalFileSource::new(std::path::PathBuf::from("api.json"));
-                    match local_source.fetch().await {
-                        Ok(providers) if !providers.is_empty() => {
-                            registry = ModelRegistry::with_providers(providers);
-                            let count = registry.providers().len();
-                            let _ = wf_persistence::save_provider_cache(&registry);
-                            let _ = tx.send(AppEvent::ModelRegistryFetched { count });
-                        }
-                        _ => {
-                            // Both remote and local failed.
-                            // If no cache exists at all, fall back to built-in defaults.
-                            if wf_persistence::load_provider_cache().is_none() {
-                                registry.ensure_builtin_defaults();
-                                let count = registry.providers().len();
-                                let _ = wf_persistence::save_provider_cache(&registry);
-                                let _ = tx.send(AppEvent::ModelRegistryFetched { count });
-                            }
-                            // Otherwise keep existing cache silently.
-                        }
-                    }
+                    // Remote failed but cache already served — nothing to do.
                 }
             }
         }
@@ -694,7 +705,7 @@ fn format_tool_args(args: &serde_json::Value) -> String {
                     other => {
                         let s = serde_json::to_string(other).unwrap_or_default();
                         if s.len() > 60 {
-                            format!("{}…", &s[..57])
+                            format!("{}…", s.chars().take(57).collect::<String>())
                         } else {
                             s
                         }

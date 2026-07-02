@@ -273,7 +273,7 @@ pub fn agent_inspect_provider(ctx: &CommandContext) -> Vec<Node> {
         .iter()
         .map(|a| {
             let id_str = wf_agent::AgentPool::agent_id_str(&a.id);
-            let short = id_str[..12.min(id_str.len())].to_string();
+            let short = id_str.chars().take(12).collect::<String>();
             Node {
                 id: Cow::Owned(short.clone()),
                 display: Cow::Owned(format!("{} - {}", short, a.name)),

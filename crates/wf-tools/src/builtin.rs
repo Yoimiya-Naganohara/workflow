@@ -314,7 +314,7 @@ impl Tool for Shell {
                     .nth(102_400)
                     .map(|(i, _)| i)
                     .unwrap_or(s.len());
-                result.push_str(&s[..end]);
+                result.push_str(s.split_at(end).0);
                 result.push_str("\n... [stdout truncated at 100KB]");
             } else {
                 result.push_str(&s);
@@ -332,7 +332,7 @@ impl Tool for Shell {
                     .nth(51_200)
                     .map(|(i, _)| i)
                     .unwrap_or(s.len());
-                result.push_str(&s[..end]);
+                result.push_str(s.split_at(end).0);
                 result.push_str("\n... [stderr truncated at 50KB]");
             } else {
                 result.push_str(&s);

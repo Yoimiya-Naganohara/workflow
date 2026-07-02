@@ -431,6 +431,13 @@ pub struct AgentEntry {
 //  ReasoningOption — model reasoning configuration
 // ============================================================================
 
+/// Deserialize Vec<String>, silently skipping null entries.
+fn deserialize_string_vec<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<String>, D::Error> {
+    Vec::<Option<String>>::deserialize(d).map(|v| v.into_iter().flatten().collect())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ReasoningOption {
@@ -438,12 +445,12 @@ pub enum ReasoningOption {
     Toggle,
     #[serde(rename = "effort")]
     Effort {
-        #[serde(default)]
+        #[serde(default, deserialize_with = "deserialize_string_vec")]
         values: Vec<String>,
     },
     #[serde(rename = "budget_tokens")]
     BudgetTokens {
-        #[serde(default)]
+        #[serde(default, deserialize_with = "deserialize_string_vec")]
         values: Vec<String>,
     },
     #[serde(other)]

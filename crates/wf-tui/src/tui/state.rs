@@ -5,6 +5,7 @@ use futures::future::AbortHandle;
 use wf_models::models::ModelCapabilities;
 use wf_runtime::runtime::AgentRuntime;
 
+use crate::tui::controller;
 use crate::tui::effect::AppEvent;
 
 // ── Shared types ──
@@ -190,13 +191,20 @@ impl AppState {
     pub fn handle_event(&mut self, event: AppEvent) {
         use crate::tui::state::{ChatMessage, MessageRole, MessageStatus};
         match event {
-            AppEvent::ModelRegistryFetched { count } => {
-                if let Some(cached) = wf_persistence::load_provider_cache() {
-                    self.core.models = cached;
+            AppEvent::ModelRegistryFetched { count, refreshed } => {
+                if refreshed {
+                    // Background refresh — reload from updated cache.
+                    if let Some(cached) = wf_persistence::load_provider_cache() {
+                        self.core.models = cached;
+                    }
+                    self.core.models.ensure_builtin_defaults();
+                    controller::merge_custom_providers(self);
+                } else {
+                    // Initial cache serve — state already populated by caller.
+                    self.core
+                        .messages
+                        .push(ChatMessage::system(format!("Loaded {} providers", count)));
                 }
-                self.core
-                    .messages
-                    .push(ChatMessage::system(format!("Loaded {} providers", count)));
             }
             AppEvent::ModelRegistryFailed { error, is_empty } => {
                 let status = if is_empty {
@@ -467,7 +475,7 @@ impl AppState {
                             .nth(197)
                             .map(|(i, _)| i)
                             .unwrap_or(args.len());
-                        format!("{}…", &args[..end])
+                        format!("{}…", args.split_at(end).0)
                     } else {
                         args.clone()
                     };

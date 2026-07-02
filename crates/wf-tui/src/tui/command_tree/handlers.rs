@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use crate::tui::command_tree::{AppState, CommandInvocation, CommandResult, UiEffect};
+use crate::tui::controller;
 use crate::tui::effect::Effect;
 use crate::tui::state::{ChatMessage, MessageRole, PopupMode};
 
@@ -120,6 +121,9 @@ pub fn connect(_: &CommandInvocation, state: &mut AppState) -> CommandResult {
     if let Some(cached) = wf_persistence::load_provider_cache() {
         state.core.models = cached;
     }
+    state.core.models.ensure_builtin_defaults();
+    // Re-merge custom providers that may have been overwritten by the cache
+    controller::merge_custom_providers(state);
     // Background-refresh remote (will update cache + models when done)
     state.effects.push(Effect::FetchModelRegistry);
     CommandResult::handled()

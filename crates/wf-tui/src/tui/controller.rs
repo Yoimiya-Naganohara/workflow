@@ -254,12 +254,11 @@ pub async fn load_initial_state(state: &mut AppState) {
     state.core.api_keys.extend(persisted.api_keys);
     state.core.provider_clients.clear();
 
-    merge_custom_providers(state);
-
     if let Some(cached) = wf_persistence::load_provider_cache() {
         state.core.models = cached;
     }
     state.core.models.ensure_builtin_defaults();
+    merge_custom_providers(state);
     if !state.core.selected_models.is_empty() {
         if let Some(first) = state.core.selected_models.first() {
             state.ui.context_limit = state
