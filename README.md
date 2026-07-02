@@ -1,334 +1,497 @@
-<div align="center">
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/workflow-runtime-8B5CF6?style=for-the-badge&logo=rust&logoColor=white">
+    <img alt="workflow" src="https://img.shields.io/badge/workflow-runtime-8B5CF6?style=for-the-badge&logo=rust&logoColor=white">
+  </picture>
+</p>
 
-# ⚡ Workflow
+<p align="center">
+  <b>Multi-agent orchestration runtime with hierarchical delegation,<br>experience-driven learning, and sandboxed tool execution.</b>
+</p>
 
-**Gate-first multi-agent orchestration — agents are *presumed guilty* until cleared.**
-
-[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust&style=flat-square)](#)
-[![MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/Yoimiya-Naganohara/workflow/ci.yml?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/Yoimiya-Naganohara/workflow/actions/workflows/ci.yml)
-[![Tokio](https://img.shields.io/badge/async-tokio-ff69b4?style=flat-square)](#)
-[![SIMD](https://img.shields.io/badge/SIMD-AVX2%2BFMA-9cf?style=flat-square)](#)
-
-</div>
-
----
-
-## 🧠 The Idea
-
-Every agent framework works the same way: **trust the LLM, then verify**. Let the agent run, potentially waste tokens, and clean up afterward.
-
-**Workflow inverts that.** Before a single token is spent or an agent spawned, every request must pass **four independent gates** — admission control, budget/depth check, experience-based confidence assessment, and a rule/LLM audit. One rejection means the agent **never exists**. No wasted inference. No runaway costs.
-
-> **"Presumed guilty"** — agents don't *earn* the right to run. They *request permission*. The pipeline decides. The default is **no**.
-
-```rust
-// An agent must clear all four gates before it exists.
-match runtime.spawn_agent(request).await {
-    Ok(agent_id) => /* cleared all gates — agent is running */,
-    Err(SpawnRejection::L1Rejected { reason, confidence }) =>
-        log::warn!("L1 confidence {confidence:.2} below threshold: {reason}"),
-    Err(SpawnRejection::BudgetExhausted { requested, remaining }) =>
-        log::error!("budget: need {requested}, have {remaining}"),
-    Err(SpawnRejection::DepthExceeded { current, max }) =>
-        log::error!("depth {current} exceeds limit {max}"),
-    Err(SpawnRejection::L2Collapsed) =>
-        log::error!("audit engine collapsed — system needs stabilization"),
-    Err(e) => log::error!("spawn failed: {e}"),
-}
-```
+<p align="center">
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange?style=flat&logo=rust" alt="Rust"></a>
+  <a href="https://github.com/WorkflowTeam/workflow/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat" alt="License"></a>
+  <img src="https://img.shields.io/badge/edition-2024-important?style=flat" alt="Edition 2024">
+  <img src="https://img.shields.io/badge/status-alpha-yellow?style=flat" alt="Alpha">
+</p>
 
 ---
 
-## 🏛️ Architecture — The Four Gates
+## Overview
 
+**Workflow** is a Rust-native agentic runtime that orchestrates swarms of LLM-powered agents to decompose, delegate, and execute complex missions. It combines a multi-layer decision pipeline, a DAG-based task graph, experience-driven learning via semantic embeddings, and a sandboxed tool system — all surfaced through a rich terminal UI.
+
+```mermaid
+flowchart TB
+    Mission -->|decompose| TaskGraph[Task Graph DAG]
+    TaskGraph -->|spawn| DecisionPipeline
+    TaskGraph -->|schedule| DecisionPipeline
+
+    subgraph DecisionPipeline[Decision Pipeline]
+        L1[L-1 Admission<br/>Tokio Semaphore]
+        L0[L0 Circuit Breaker<br/>CAS Budget & Depth]
+        L1e[L1 Experience Retrieval<br/>Semantic Similarity]
+        L2[L2 Audit Engine<br/>Conflict Resolution]
+        L1 --> L0 --> L1e --> L2
+    end
+
+    DecisionPipeline -->|approved| AgentPool
+    DecisionPipeline -->|experience| ExperiencePool
+
+    subgraph AgentPool[Agent Pool]
+        Root[Root Agent]
+        Child1[Child Agent 1]
+        Child2[Child Agent 2]
+        Root --> Child1
+        Root --> Child2
+    end
+
+    subgraph ExperiencePool[Experience Pool]
+        Fast[Fast Track<br/>In-Memory Ring]
+        Fluid[Fluid Track<br/>MMap Persistent]
+    end
+
+    AgentPool --> Sandbox[Sandbox<br/>Filesystem]
+    AgentPool --> MCPServer[MCP Tools]
+    AgentPool --> TUI[TUI<br/>ratatui]
 ```
-                    ┌──────────────────────────────────────────┐
-                    │            SPAWN REQUEST                  │
-                    │  (task_emb, role_emb, budget, depth, …)  │
-                    └────────────────┬─────────────────────────┘
-                                     │
-                            ┌────────▼────────┐
-                   ┌────────┤   L-1 ADMISSION ├────── Tokio semaphore
-                   │        └────────┬────────┘      max concurrent agents
-                   │                 │ pass           timeout: 100ms
-                   │        ┌────────▼────────┐
-                   │        │  L0 BUDGET/DEPTH │────── CAS atomics (lock-free)
-                   │        │  Circuit Breaker │       budget, depth, tool bitmap
-                   │        └────────┬────────┘
-                   │                 │ pass
-                   │        ┌────────▼────────┐
-                   │        │  L1 EXPERIENCE  │────── 384-d cosine similarity
-                   │        │  Confidence     │       vs dual-track memory pool
-                   │        └────────┬────────┘
-                   │                 │ pass
-                   │        ┌────────▼────────┐
-                   │        │  L2 AUDIT       │────── Rule engine or LLM judge
-                   │        │  (screen + arb) │       collapse protection
-                   │        └────────┬────────┘
-                   │                 │ pass
-                   │        ┌────────▼────────┐
-                   │        │  ✅ AGENT SPAWN │
-                   │        │  (RAII guards)  │
-                   │        └─────────────────┘
-                   │
-                   ▼
-           ❌ REJECTED
-           (SystemOverloaded | BudgetExhausted | DepthExceeded |
-            ResourceConflict | L1Rejected | L2Rejected | L2Collapsed)
+
+## Architecture
+
+### Decision Pipeline
+
+Every agent spawn request passes through a four-layer decision gate:
+
+```mermaid
+flowchart LR
+    S[Spawn Request] --> L_1[L-1 Admission]
+    L_1 -->|semaphore acquired| L0[L0 Circuit Breaker]
+    L_1 -->|semaphore timeout| X1[❌ Rejected<br/>System Overloaded]
+    L0 -->|budget & depth OK| L1[L1 Experience]
+    L0 -->|budget exhausted| X2[❌ Rejected<br/>Budget Exhausted]
+    L0 -->|depth exceeded| X3[❌ Rejected<br/>Depth Exceeded]
+    L1 -->|confidence ≥ threshold| L2[L2 Audit]
+    L1 -->|confidence < threshold| X4[❌ Rejected<br/>Low Confidence]
+    L2 -->|arbitration passes| OK[✅ Approved<br/>ChildAgentConfig]
+    L2 -->|rules violated| X5[❌ Rejected<br/>Prune / Collapse]
 ```
 
-| Layer | Gate | What It Stops | Mechanism |
-|-------|------|--------------|-----------|
-| **L-1** 🚦 | Admission | Concurrency overload | Tokio semaphore with timeout |
-| **L0** 💰 | Budget & Depth | Token drain, infinite recursion | CAS atomic counters (lock-free) |
-| **L1** 🧪 | Experience | Repeating past failures | 384-d cosine similarity vs. dual-track memory |
-| **L2** ⚖️ | Audit | Resource conflicts, value violations | Rule engine (or optional LLM judge), collapse recovery |
+| Layer | Gate | Mechanism | Rejection |
+|-------|------|-----------|-----------|
+| **L-1** | Admission Control | Tokio `Semaphore` — caps concurrent agents | `SystemOverloaded` |
+| **L0** | Circuit Breaker | CAS atomics on budget, depth, tool bitmap | `BudgetExhausted`, `DepthExceeded`, `ResourceConflict` |
+| **L1** | Experience Retrieval | Cosine similarity (AVX2+FMA) against 384-d embeddings | `L1Rejected` with confidence score |
+| **L2** | Audit Engine | Rules + priority scoring with automatic collapse | `Prune`, `Override`, `L2Collapsed` |
 
-Every gate is a **Rust trait** — swap any layer independently without touching the runtime.
+### Task Graph (DAG)
 
----
+Missions are decomposed into a directed acyclic graph with a formal state machine:
 
-## ✨ Key Features
+```mermaid
+stateDiagram-v2
+    [*] --> Created
+    Created --> Ready: dependencies satisfied
+    Created --> Decomposed: sub-tasks spawned
+    Created --> Dispatching: scheduler acquires lock
+    Created --> Rejected: pipeline declined
 
-### 🔀 Gate-First Pipeline
-Agents don't run and get fixed later. They request permission. The pipeline decides. Four independent checks, one rejection = spawn denied.
+    Ready --> Running: agent assigned
+    Ready --> Dispatching: scheduler acquires lock
+    Ready --> Decomposed: sub-tasks spawned
+    Ready --> Completed: no agent needed
+    Ready --> Failed: scheduling error
+    Ready --> Rejected: pipeline rejected
 
-### 🧠 Dual-Track Memory (Experience Pool)
-- **Bedrock track** — mmap-backed, survives restarts (`~/.workflow/experience_a.bin`)
-- **Fluid track** — in-memory, bounded (configurable, default 512), fast writes
-- **Clustering** — representative fluid entries auto-consolidate into bedrock using cosine-similarity clustering
-- **Role-scoped search** — experiences filtered by `role_template_id` for per-role learning
-- **Time decay** — older entries naturally lose influence (7-day half-life)
+    Dispatching --> Running: pipeline approved
+    Dispatching --> Rejected: pipeline rejected
+    Dispatching --> Created: pipeline error → retry
 
-### 📊 Task Graph DAG
-Full `Created → Ready → Running → Decomposed → Completed | Failed | Rejected` lifecycle. Tracks spawn hierarchy, execution ordering, and failure propagation with `FailFast` policy.
+    Running --> Completed: success
+    Running --> Failed: error
 
-### 🔬 Reflection Engine
-After an agent responds, **8 heuristic + semantic rules** verify output quality before accepting it:
-- `code_complete` — balanced braces in code blocks
-- `error_awareness` — tool errors must be acknowledged
-- `multi_question_coverage` — proportional response length
-- `empty_promise` — "I will…" backed by tool calls
-- `file_ref_used` — `@file` references addressed
-- `min_output` — meaningful length
-- `relevance` — semantic cosine similarity (embedding-based)
-- `semantic_promise` — promises match execution (embedding-based)
+    Decomposed --> Completed: all children done
+    Decomposed --> Failed: FailFast propagation
 
-### 🛡️ Collapse Protection
-L2 audit engine has a **circuit breaker**: after `N` consecutive high-risk failures, the engine "collapses" and prunes all contending agents. A **time-based decay** mechanism (5 min half-life) allows eventual recovery from transient failures.
-
-### 🔒 Filesystem Sandbox
-Each agent gets fully isolated filesystem access:
+    Completed --> [*]
+    Failed --> [*]
+    Rejected --> [*]
+    Blocked --> [*]
+    Skipped --> [*]
 ```
-~/.workflow/sandbox/{agent_id}/
-  ├── work/     ← writable (all writes, compilation, shell cwd)
-  └── src → /project  ← read-only symlink to project root
+
+Key properties:
+
+- **Parent/children** = decomposition hierarchy (who spawned whom)
+- **Dependencies** = execution ordering (what must finish first)
+- **FailurePolicy::FailFast** — a child failure immediately marks the parent `Failed` and propagates upward
+- **Dispatching** — anti-double-dispatch lock preventing duplicate scheduling
+
+### Agent Lifecycle
+
+```mermaid
+flowchart TB
+    subgraph Pipeline[Decision Gate]
+        L1[L-1 Admission] --> L0[L0 Budget] --> L1e[L1 Experience] --> L2[L2 Audit]
+    end
+
+    subgraph Execution[Agent Execution]
+        Create[Create Agent<br/>sandbox + config] --> Plan[Planning Phase]
+        Plan --> Loop{Tool Call Loop}
+        Loop -->|tool result| Loop
+        Loop -->|needs delegation| Spawn[Spawn Children]
+        Loop -->|Final Response| Complete[Complete]
+        Spawn --> Aggregate[Aggregate Results]
+        Aggregate --> Complete
+    end
+
+    subgraph Reflection[Reflection Pipeline]
+        Rules[Rule Engine<br/>heuristic checks] --> SelfCheck[LLM Self-Check<br/>1-token yes/no]
+        SelfCheck -->|both flag issue| Continue[🔄 Continuation Round]
+        SelfCheck -->|pass| Done[✅ Done]
+    end
+
+    Pipeline -->|approved| Create
+    Complete --> Reflection
 ```
-`../` escapes, absolute paths outside the boundary, and symlink traversal that leaves the project root are **all rejected**.
 
-### 🔌 9 LLM Backends
-OpenAI, Anthropic, Gemini, Ollama, Cohere, Mistral, Azure, LlamaFile, Copilot — swap at runtime, no API rewrites via the [`rig`](https://github.com/0xPlaygrounds/rig) provider abstraction.
+### Experience Pool (Dual-Track Memory)
 
-### 🖥️ Terminal UI
-Built-in TUI powered by `ratatui` + `crossterm` with:
-- Agent tree visualization
-- Chat message streaming (thinking → streaming → completed)
-- Command palette
-- Session checkpoint/restore
-- Crash recovery (auto-restart with state preservation)
+Two parallel memory tracks work in concert — one ephemeral and fast, one durable and clustered:
 
-### 🧰 MCP Tool System
-Full tool ecosystem with `read_file`, `write_file`, `sh`, `diff_edit`, `search_asset`, inter-agent messaging, and memo (key-value scratchpad) tools — all behind MCP's `ToolServer` interface.
+```mermaid
+flowchart LR
+    subgraph Ingest[Experience Ingestion]
+        Outcome[Agent Outcome] --> Embedder[384-d Embedding]
+        Embedder --> Fast[Fast Track]
+        Embedder --> Fluid[Fluid Track]
+    end
 
-### 🧩 Pluggable Architecture
-Every major component is a trait:
-- `AdmissionControl` (L-1)
-- `CircuitBreaker` (L0)
-- `ExperienceRetrieval` (L1)
-- `AuditEngine` (L2)
-- `EmbeddingService`
+    subgraph Fast[Fast Track - Ring Buffer]
+        E1[(Recent Exps)]
+        E2[(High Decay)]
+        E3[(Low Persistence)]
+    end
 
-Swap implementations at build time with zero runtime cost.
+    subgraph Fluid[Fluid Track - MMap File]
+        C1[(Clustered<br/>Durable Store)]
+        C2[(L2 Overridable<br/>Weights)]
+        C3[(Domain<br/>Versioned)]
+    end
 
----
+    subgraph Retrieval[L1 Retrieval]
+        Query[Spawn Request<br/>embeddings] --> Scorer
+        Fast --> Scorer[Cosine Similarity<br/>AVX2+FMA]
+        Fluid --> Scorer
+        Scorer --> Weighted[Weighted Score<br/>task + role + value + recency]
+        Weighted --> Decision{confidence<br/>≥ threshold?}
+        Decision -->|yes| Approve[✅ Approve]
+        Decision -->|no| Reject[❌ L1Rejected]
+    end
+```
 
-## 🚀 Quickstart
+| Track | Backing | Decay | Persistence | L2 Override |
+|-------|---------|-------|-------------|-------------|
+| **Fast** | In-memory `Vec` ring buffer | High | None | No |
+| **Fluid** | `mmap` + binary file | Low | Durable | Yes — boosts weight ×1.5 |
 
-### Prerequisites
-- **Rust 1.85+**
-- An LLM provider (set via environment variable)
+The L1 retriever scores incoming spawn requests using SIMD-accelerated cosine similarity (AVX2+FMA) against 384-d embeddings, combining four weighted factors: task similarity, role similarity, value alignment, and temporal recency.
 
-| Provider | Env Variable | Example |
-|----------|-------------|---------|
-| OpenAI | `OPENAI_API_KEY` | `sk-...` |
-| Anthropic | `ANTHROPIC_API_KEY` | `sk-ant-...` |
-| Ollama | `OLLAMA_BASE_URL` | `http://localhost:11434` |
-| Gemini | `GEMINI_API_KEY` | `AIza...` |
+### Sandboxed Tool System
 
-### Run
+Every agent gets an isolated filesystem sandbox with copy-on-write semantics:
+
+```mermaid
+flowchart TB
+    subgraph Host[Host Filesystem]
+        Project[/project]
+        SandboxDir[~/.workflow/sandbox/]
+    end
+
+    subgraph AgentSandbox[Agent Sandbox<br/>agent_id:8]
+        Work[work/<br/>writable]
+        Src[src → /project<br/>read-only symlink]
+    end
+
+    SandboxDir --- AgentSandbox
+    Src -.->|symlink| Project
+
+    subgraph Tools[Tool Resolution]
+        Write[write /work/...] --> Allow[✅ Allowed]
+        Read[read /src/...] --> Allow
+        Escape[.../../escape] --> Block[❌ Blocked]
+        Outside[write /project/...] --> Block
+    end
+```
+
+Path traversal, symlink escapes leaving the project root, and writes to the source tree are all blocked. Tool catalog:
+
+| Category | Tools |
+|----------|-------|
+| **Built-in** | `read`, `write`, `search`, `grep`, `glob`, `shell`, `diff_edit` |
+| **Agent** | `spawn_child`, `send_message`, `read_messages`, `list_agents`, `search_asset` |
+| **Memo** | `memo_write`, `memo_read`, `memo_list` — per-role scratchpad |
+| **MCP** | Full `ToolServer` with streaming, tool chaining, and `ToolDyn` dynamic dispatch |
+
+### Structured Reflection
+
+A two-stage quality gate fires after every agent completion. Lightweight rules run first; only if they flag a problem does the LLM spend a token on self-verification:
+
+```mermaid
+flowchart TB
+    AgentDone[Agent Responds] --> Rules{Rule Engine}
+
+    subgraph Rules[Stage 1: Rule Engine]
+        Len[📏 Length Check<br/>too short?] --> Pass1
+        Rel[🎯 Relevance Check<br/>semantic similarity] --> Pass1
+        Sem[📐 Semantic Promise<br/>embedding distance] --> Pass1
+        Pass1{all rules pass?}
+    end
+
+    Pass1 -->|yes| SelfCheck{Stage 2:<br/>LLM Self-Check}
+    Pass1 -->|no| SelfCheck
+
+    SelfCheck -->|"yes (1 token)"| Done[✅ Accept]
+    SelfCheck -->|"no (1 token)"| Continue[🔄 Continuation Round<br/>re-prompt agent]
+    Continue --> AgentDone
+```
+
+### Persistence & Checkpointing
+
+```mermaid
+flowchart LR
+    subgraph Runtime[Runtime State]
+        Pool[Agent Pool]
+        Graph[Task Graph]
+    end
+
+    subgraph Disk[~/.workflow/]
+        direction TB
+        AP[agent_pool.bin<br/>bincode]
+        TG[task_graph.bin<br/>bincode]
+        EP[experience_a.bin<br/>mmap + binary]
+        RT[role_templates.json]
+        ST[state.json<br/>obfuscated keys]
+        SL[sessions/*.json]
+    end
+
+    Pool -->|on agent complete| AP
+    Graph -->|on mutation| TG
+    ExperiencePool -->|continuous| EP
+    Config -->|on change| ST
+    TUI -->|periodic| SL
+    TemplateStore -->|on startup| RT
+```
+
+| Component | Format | Trigger | Recovery |
+|-----------|--------|---------|----------|
+| Agent Pool | `bincode` | Each agent completion | Full restore on restart |
+| Task Graph | `bincode` | After each mutation | Rebuilt from checkpoint |
+| Experience Pool | `mmap` + binary | Continuous (dual-track) | Instant — mmap persists in kernel |
+| Role Templates | JSON | Read at startup | Missing file → seed defaults |
+| State | JSON (XOR-obfuscated keys) | Config change | Graceful fallback |
+| Session Logs | JSON | Periodic autosave | Chat history on TUI restart |
+
+### Terminal UI
+
+Built with [ratatui](https://github.com/ratatui/ratatui), the TUI provides a split-panel real-time cockpit:
+
+```mermaid
+flowchart TB
+    subgraph Screen[TUI Layout - ratatui]
+        Status[Status Bar<br/>runtime health · token usage · agent count]
+
+        subgraph Main[Main Split]
+            Sidebar[Left Sidebar<br/>Agent Tree<br/>hierarchy · status · tool trace]
+            Content[Right Content<br/>Chat Panel / Command Palette / Diagnostics]
+        end
+
+        Command[Command Bar<br/>fuzzy-searchable commands]
+    end
+
+    subgraph State[Shared State - AppState]
+        Core[Core Runtime<br/>agent pool · events · config]
+        UI[UI State<br/>focus · scroll · selected agent]
+    end
+
+    RuntimeEvents[Runtime Event Stream] -->|broker| Core
+    Core --> Sidebar
+    Core --> Content
+    KeyEvents[Keyboard/Mouse Events] --> Controller[Controller]
+    Controller --> Core
+    Controller --> UI
+```
+
+## Crate Map
+
+```mermaid
+flowchart TB
+    subgraph Binary[Binary]
+        WF[wf-workflow]
+    end
+
+    subgraph Core[Foundation]
+        CORE[wf-core<br/>types · SIMD · guard · task graph]
+        LLM[wf-llm<br/>providers · embedding · chat]
+    end
+
+    subgraph Agent[Agent Layer]
+        AGENT[wf-agent<br/>pool · lifecycle · sandbox]
+        TOOLS[wf-tools<br/>MCP server · built-in tools]
+        REFLECT[wf-reflection<br/>rules engine · self-check]
+    end
+
+    subgraph Runtime[Runtime Layer]
+        RUNTIME[wf-runtime<br/>pipeline · scheduler · checkpoint]
+        L1[wf-l1<br/>experience retrieval]
+        L2[wf-l2<br/>audit engine · arbitration]
+    end
+
+    subgraph Memory[Memory & Config]
+        EXP[wf-experience<br/>dual-track · clustering]
+        MODELS[wf-models<br/>registry · provider config]
+        PERSIST[wf-persistence<br/>atomic I/O]
+    end
+
+    subgraph UI[UI]
+        TUI[wf-tui<br/>ratatui terminal]
+    end
+
+    AGENT --> CORE
+    AGENT --> LLM
+    TOOLS --> AGENT
+    TOOLS --> CORE
+    REFLECT --> CORE
+    REFLECT --> LLM
+
+    RUNTIME --> CORE
+    RUNTIME --> AGENT
+    RUNTIME --> L1
+    RUNTIME --> L2
+    RUNTIME --> EXP
+    RUNTIME --> PERSIST
+
+    L1 --> CORE
+    L2 --> CORE
+    EXP --> CORE
+    EXP --> LLM
+    MODELS --> CORE
+
+    TUI --> RUNTIME
+    TUI --> CORE
+
+    WF --> RUNTIME
+    WF --> TUI
+    WF --> MODELS
+    WF --> PERSIST
+
+    style WF fill:#8B5CF6,color:#fff
+    style CORE fill:#3B82F6,color:#fff
+    style RUNTIME fill:#10B981,color:#fff
+```
+
+## Getting Started
+
+```mermaid
+flowchart LR
+    Clone[git clone] --> Prereqs{Rust 1.85+<br/>API key / local LLM}
+    Prereqs --> Build[cargo build --release]
+    Build --> Run[cargo run --release]
+    Run --> TUI[🎛️ TUI launches]
+    TUI --> Config[Configure providers<br/>in TUI command palette]
+    Config --> Mission[🎯 Enter your mission]
+    Mission --> Agents[🤖 Agents spawn & execute]
+```
 
 ```bash
+# Build
 cargo build --release
 
-# Terminal UI (interactive)
+# Run
 cargo run --release
 
-# Headless CLI mode
-cargo run --release -- --cli
+# CI gates
+./ci.sh
 ```
 
-### Local Development
+### Prerequisites
+
+- Rust 1.85+ (edition 2024)
+- An LLM provider API key (OpenAI, Anthropic, etc.) or a local Ollama/Llamafile instance
+
+### Configuration
+
+Provider keys and model selection are configured through the TUI or persisted in `~/.workflow/state.json`. Keys can be stored in obfuscated form (XOR with machine ID) for casual security.
 
 ```bash
-./ci.sh        # check, fmt, clippy, test, docs (all gates)
-./ci.sh --fix  # auto-fix formatting
+# Set environment variables for API keys
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
----
+## CI Gates
 
-## 📦 Crates
-
-```
-workflow/
-├── wf-core           # Foundation: types, SIMD cosine sim, constants,
-│                     #   guard layer, task graph DAG, conflict domain,
-│                     #   metrics, event system
-├── wf-llm            # LLM provider abstraction — 9 backends via rig,
-│                     #   embedding service (fastembed/ONNX)
-├── wf-l1             # L1 experience-based confidence assessment,
-│                     #   arbitration, value classification
-├── wf-l2             # L2 rule audit engine, LLM-powered judge,
-│                     #   collapse recovery, override patch generation
-├── wf-experience     # Dual-track memory (bedrock + fluid),
-│                     #   clustering, role template store
-├── wf-models         # Model registry, provider config, cost tracking
-├── wf-agent          # Agent pool, plan registry, sandbox, memos,
-│                     #   inter-agent messaging, suspend queue
-├── wf-tools          # MCP tools — ReadFile, WriteFile, Shell,
-│                     #   DiffEdit, search, agent messaging, memos
-├── wf-reflection     # 8-rule reflection engine (heuristic + semantic),
-│                     #   self-check prompt, continuation feedback
-├── wf-persistence    # State serialization, key-value store
-├── wf-runtime        # Pipeline wiring, scheduler, lifecycle,
-│                     #   checkpoint/restore, strategy graph
-├── wf-tui            # Terminal UI (ratatui + crossterm)
-└── wf-workflow       # Binary entrypoint (TUI or --cli)
+```mermaid
+flowchart TB
+    PR[PR / Push] --> Check[1. cargo check]
+    Check --> Fmt{2. cargo fmt --check}
+    Fmt -->|pass| Clippy[3. cargo clippy -D warnings]
+    Fmt -->|fail + --fix| FmtFix[cargo fmt]
+    Fmt -->|fail| Fail1[❌]
+    Clippy -->|pass| Test[4. cargo test]
+    Clippy -->|fail| Fail2[❌]
+    Test -->|pass| Pass[✅ All Gates Pass]
+    Test -->|fail| Fail3[❌]
 ```
 
----
+| Gate | Command | Fail exit |
+|------|---------|-----------|
+| `cargo check` | `cargo check` | 1 |
+| `cargo fmt` | `cargo fmt --check` (auto-fix via `--fix`) | 1 |
+| `cargo clippy` | `cargo clippy -- -D warnings` | 1 |
+| `cargo test` | `cargo test` | 1 |
 
-## ⚙️ Configuration
+## Design Principles
 
-```rust
-AgentRuntimeConfig {
-    max_concurrent_agents: 10,     // L-1 semaphore cap
-    admission_timeout_ms: 100,     // L-1 wait timeout
-    max_depth: 5,                  // L0 spawn depth limit
-    initial_budget: 10_000,        // L0 token budget
-    l1_confidence_threshold: 0.5,  // L1 confidence floor
-    semantic_conflict_threshold: -0.6, // L2 conflict boundary
-    suspend_timeout_ms: 50,        // suspend queue timeout
-    bedrock_path: None,            // ~/.workflow/experience_a.bin
-    role_template_path: None,      // ~/.workflow/role_templates.json
-}
+```mermaid
+mindmap
+  root((Workflow<br/>Principles))
+    Lock-Free by Default
+      CAS atomics for budget & depth
+      Mutex only for short non-await ops
+      Bounded contention ~10 agents
+    RAII Lifecycle
+      BudgetGuard releases on drop
+      AdmissionPermit returns to semaphore
+      SandboxHandle cleaned on eviction
+    Dependency Injection
+      Every pipeline layer swappable
+      DecisionPipelineBuilder
+      Mock-friendly for testing
+    Fail-Closed
+      L0 rejects on allocation failure
+      L2 collapses on consecutive failures
+      Sandbox blocks path escapes
+      Checkpoint recovery on restart
+    Observability
+      Per-agent tool traces & metrics
+      Token usage tracking
+      Reasoning chain capture
+      Real-time TUI diagnostics
 ```
 
-### Key Constants (tunable in `wf-core/src/constants.rs`)
+1. **Lock-free by default** — shared state uses CAS atomics; `Mutex` only for short, non-`.await`-held operations
+2. **RAII resource lifecycle** — budget permits, admission slots, and sandbox handles all release on drop
+3. **Dependency injection** — every pipeline layer can be swapped (mocks, custom audit engines, etc.)
+4. **Fail-closed** — L0 rejects on allocation failure, L2 collapses on consecutive audit failures, sandbox rejects on path escape
+5. **Observability** — every agent records tool traces, token usage, metrics, and reasoning for TUI diagnostics
 
-| Constant | Default | Description |
-|----------|---------|-------------|
-| `EMBEDDING_DIM` | 384 | Embedding vector dimension (all-MiniLM-L6-v2) |
-| `DEFAULT_MAX_DEPTH` | 5 | Maximum agent spawn depth |
-| `DEFAULT_RUNTIME_BUDGET` | 10,000 | Initial token budget |
-| `DEFAULT_L1_CONFIDENCE` | 0.5 | L1 confidence threshold |
-| `MAX_CONSECUTIVE_FAILURES` | 5 | L2 collapse threshold |
-| `L2_OVERRIDE_BOOST` | 1.5 | L2 override weight multiplier |
-| `BUDGET_ANOMALY_RATIO` | 0.8 | Budget anomaly detection |
-| `COLLAPSE_RECOVERY_SECS` | 300 | L2 time-based decay period |
-
----
-
-## 🧪 Extending
-
-### Swap an Audit Engine
-
-```rust
-use wf_runtime::pipeline::DecisionPipelineBuilder;
-
-let pipeline = DecisionPipelineBuilder::new()
-    .embedding(my_embedding_service)
-    .audit_engine(Box::new(MyCustomAuditEngine::new()))
-    .build();
-
-let runtime = AgentRuntime::from_pipeline(pipeline);
-```
-
-### Use the LLM Judge for L2
-
-```rust
-use wf_l2::{L2LlmAuditEngine, L2LlmConfig};
-
-let pipeline = DecisionPipelineBuilder::new()
-    .embedding(my_embedding_service)
-    .llm_audit_engine(
-        Arc::new(provider),
-        L2LlmConfig {
-            model_id: "gpt-4".into(),
-            temperature: 0.3,
-            max_tokens: 500,
-            ..Default::default()
-        },
-    )
-    .build();
-```
-
-### Add a Custom Reflection Rule
-
-```rust
-use wf_reflection::{ReflectionRule, RuleContext, RuleVerdict, RuleRegistry};
-
-struct MyRule;
-#[async_trait]
-impl ReflectionRule for MyRule {
-    fn id(&self) -> &'static str { "my_custom_rule" }
-    fn description(&self) -> &'static str { "Checks something important" }
-    async fn check(&self, ctx: &RuleContext<'_>) -> RuleVerdict {
-        // Your logic here
-        RuleVerdict::Pass
-    }
-}
-
-let mut registry = wf_reflection::default_registry();
-registry.register(Box::new(MyRule));
-```
-
----
-
-## 🗺️ Roadmap
-
-| Phase | Focus | Status |
-|-------|-------|--------|
-| 1 | Task graph DAG delegation | ✅ Complete |
-| 2 | Runtime analytics & optimization | 🔄 In progress |
-| 3 | Inter-agent messaging & tool tracing | 🔄 In progress |
-| 4 | Security audit & production hardening | 📋 Planned |
-
----
-
-## 🤝 Contributing
-
-PRs welcome — and they go through the **same four gates** as agents 😄
-
-1. **`cargo check`** — must compile cleanly
-2. **`cargo fmt --check`** — must be formatted (`./ci.sh --fix` to auto-fix)
-3. **`cargo clippy -- -D warnings`** — no new warnings
-4. **`cargo test`** — all tests pass
-
-Run `./ci.sh` locally before pushing.
-
----
-
-## 📄 License
+## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+<p align="center">
+  <sub>Built with Rust, tokio, ratatui, rig, and fastembed.</sub>
+</p>
