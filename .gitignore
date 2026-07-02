@@ -4,7 +4,6 @@
 *.swp
 *.swo
 .DS_Store
-.fastembed_cache/
 .vscode/
 .idea/
 *.tmp-*

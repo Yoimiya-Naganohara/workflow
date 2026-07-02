@@ -5,6 +5,7 @@
 //! - [`EmbeddingRouter`]: strategy-based router that can fall back to a remote
 //!   LLM provider embedding API when available.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -53,9 +54,20 @@ impl EmbeddingService {
     ///
     /// Uses all-MiniLM-L6-v2 (384-dim, ~23 MB) with GPU acceleration.
     /// Falls back to CPU if CUDA is unavailable.
+    /// Models cached under `~/.workflow/.fastembed_cache/`.
     pub fn new() -> Self {
+        // Resolve cache dir: ~/.workflow/.fastembed_cache
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".to_string());
+        let cache_dir = PathBuf::from(home)
+            .join(".workflow")
+            .join(".fastembed_cache");
+
         let model = TextEmbedding::try_new(
-            InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_execution_providers(vec![
+            InitOptions::new(EmbeddingModel::AllMiniLML6V2)
+                .with_cache_dir(cache_dir)
+                .with_execution_providers(vec![
                 // GPU providers (tried in order; ONNX Runtime skips unavailable ones):
                 CUDAExecutionProvider::default().into(),
                 CoreMLExecutionProvider::default().into(),
