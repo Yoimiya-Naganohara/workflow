@@ -103,24 +103,54 @@ impl Tui {
         let state_clone = self.state.clone();
         let pool = state_clone.read().await.core.agent_pool.clone();
         let runtime = state_clone.read().await.core.runtime.clone();
-        let tool_server = state_clone.read().await.core.tool_server.clone();
-        let runtime_tx = state_clone.read().await.core.runtime_event_tx.clone();
         if let Some(rt) = runtime {
             tokio::spawn(async move {
-                use wf_runtime::runtime::runtime_loop::RuntimeEventLoop;
-                let loop_ = RuntimeEventLoop::new(
-                    rt,
-                    pool,
-                    event_loop_rx,
-                    broker_tx,
-                    tool_server,
-                    runtime_tx,
-                )
-                .await;
-                loop_.run().await;
+                use wf_runtime::runtime::agent_lifecycle::SpawnParent;
+                use wf_runtime::runtime::event::RuntimeEvent;
+                let mut rx = event_loop_rx;
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        RuntimeEvent::DecomposeTask {
+                            parent_agent,
+                            subtasks,
+                        } => {
+                            let parent_depth = pool
+                                .read()
+                                .await
+                                .get_agent(&parent_agent)
+                                .map(|a| a.depth)
+                                .unwrap_or(0);
+                            for sub in &subtasks {
+                                let mut guard = pool.write().await;
+                                if let Ok(agent_id) = rt
+                                    .read()
+                                    .await
+                                    .spawn_agent(
+                                        &sub.goal,
+                                        &sub.role,
+                                        Some("default"),
+                                        Some(SpawnParent {
+                                            id: parent_agent,
+                                            depth: parent_depth,
+                                        }),
+                                        &mut *guard,
+                                    )
+                                    .await
+                                {
+                                    let rt_guard = rt.read().await;
+                                    rt_guard.start_agent_loop(agent_id, &pool, &rt);
+                                    drop(rt_guard);
+                                }
+                            }
+                        }
+                        other => {
+                            let _ = broker_tx.send(other).await;
+                        }
+                    }
+                }
             });
         } else {
-            tracing::error!("Runtime not initialized — event loop not started");
+            tracing::error!("Runtime not initialized — event handler not started");
         }
 
         let app_tx = self.app_event_tx.clone();

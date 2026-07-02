@@ -9,10 +9,9 @@ pub mod optimizer;
 pub mod orchestration;
 pub mod pipeline;
 pub mod runtime;
-pub mod runtime_loop;
-pub mod scheduler;
-pub mod strategy_graph;
 pub mod validation;
+
+pub mod strategy_graph;
 
 pub use config::{AgentRuntimeConfig, RoleTemplate};
 pub use event::RuntimeEvent;

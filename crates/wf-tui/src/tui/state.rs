@@ -668,11 +668,7 @@ impl AppState {
 
         // Get provider and model_id from the current selection
         let (provider, model_id, system_prompt) = self.get_chat_context(runtime, input);
-        let system_prompt = format!(
-            "{}\n\n{}",
-            system_prompt,
-            wf_core::MEMO_INSTRUCTIONS,
-        );
+        let system_prompt = format!("{}\n\n{}", system_prompt, wf_core::MEMO_INSTRUCTIONS,);
 
         let provider = match provider {
             Some(p) => p,

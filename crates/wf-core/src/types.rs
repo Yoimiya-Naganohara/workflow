@@ -432,9 +432,7 @@ pub struct AgentEntry {
 // ============================================================================
 
 /// Deserialize Vec<String>, silently skipping null entries.
-fn deserialize_string_vec<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> Result<Vec<String>, D::Error> {
+fn deserialize_string_vec<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
     Vec::<Option<String>>::deserialize(d).map(|v| v.into_iter().flatten().collect())
 }
 

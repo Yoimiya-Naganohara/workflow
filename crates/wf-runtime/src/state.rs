@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::runtime::AgentRuntime;
-use crate::runtime::event::RuntimeEvent;
+use crate::runtime::RuntimeEvent;
 use wf_agent::AgentPool;
 use wf_core::{AgentId, ChatMessage, SelectedModel};
 use wf_models::models::ModelRegistry;

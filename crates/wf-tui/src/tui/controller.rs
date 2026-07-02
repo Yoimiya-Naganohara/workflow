@@ -63,7 +63,17 @@ pub fn ensure_initial_agent_sync(core: &mut CoreState, goal_hint: &str) -> Optio
                     pool.mark_active(&existing_id);
                     Some(existing_id)
                 } else {
-                    Some(rt.bootstrap_root_agent(goal, &core.default_role, &mut pool))
+                    // Bootstrap: quick path without pipeline approval.
+                    // We're already on a tokio runtime, so block_on is safe.
+                    #[allow(clippy::await_holding_lock)]
+                    let result = tokio::runtime::Handle::current().block_on(rt.spawn_agent(
+                        goal,
+                        &core.default_role,
+                        None,
+                        None,
+                        &mut pool,
+                    ));
+                    result.ok()
                 }
             }
             Err(_) => return None,

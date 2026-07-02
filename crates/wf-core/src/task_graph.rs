@@ -985,7 +985,6 @@ impl TaskGraph {
     /// Currently unused — `is_descendant` (downward traversal through
     /// children) handles the cycle check.  Kept for Phase 2 when parent
     /// lineage verification is needed from the runtime layer.
-    #[allow(dead_code)]
     fn can_reach_via_parent(&self, from: TaskId, target: TaskId) -> bool {
         let mut visited = HashSet::new();
         let mut stack = vec![from];
