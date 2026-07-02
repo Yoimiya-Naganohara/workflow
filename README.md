@@ -86,46 +86,7 @@ flowchart LR
 
 ### Task Graph (DAG)
 
-Missions are decomposed into a directed acyclic graph with a formal state machine:
-
-```mermaid
-stateDiagram-v2
-    [*] --> Created
-    Created --> Ready: dependencies satisfied
-    Created --> Decomposed: sub-tasks spawned
-    Created --> Dispatching: scheduler acquires lock
-    Created --> Rejected: pipeline declined
-
-    Ready --> Running: agent assigned
-    Ready --> Dispatching: scheduler acquires lock
-    Ready --> Decomposed: sub-tasks spawned
-    Ready --> Completed: no agent needed
-    Ready --> Failed: scheduling error
-    Ready --> Rejected: pipeline rejected
-
-    Dispatching --> Running: pipeline approved
-    Dispatching --> Rejected: pipeline rejected
-    Dispatching --> Created: pipeline error → retry
-
-    Running --> Completed: success
-    Running --> Failed: error
-
-    Decomposed --> Completed: all children done
-    Decomposed --> Failed: FailFast propagation
-
-    Completed --> [*]
-    Failed --> [*]
-    Rejected --> [*]
-    Blocked --> [*]
-    Skipped --> [*]
-```
-
-Key properties:
-
-- **Parent/children** = decomposition hierarchy (who spawned whom)
-- **Dependencies** = execution ordering (what must finish first)
-- **FailurePolicy::FailFast** — a child failure immediately marks the parent `Failed` and propagates upward
-- **Dispatching** — anti-double-dispatch lock preventing duplicate scheduling
+Missions are decomposed into a directed acyclic graph. Nodes track status through `Created → Ready → Running → Decomposed → Completed`, with `Failed`, `Rejected`, `Blocked`, and `Skipped` as terminal states. An anti-double-dispatch `Dispatching` lock prevents duplicate scheduling. Failure propagates via `FailurePolicy::FailFast` — a child failure immediately marks the parent `Failed` and cascades upward.
 
 ### Agent Lifecycle
 
@@ -157,74 +118,16 @@ flowchart TB
 
 ### Experience Pool (Dual-Track Memory)
 
-Two parallel memory tracks work in concert — one ephemeral and fast, one durable and clustered:
-
-```mermaid
-flowchart LR
-    subgraph Ingest[Experience Ingestion]
-        Outcome[Agent Outcome] --> Embedder[384-d Embedding]
-        Embedder --> Fast[Fast Track]
-        Embedder --> Fluid[Fluid Track]
-    end
-
-    subgraph Fast[Fast Track - Ring Buffer]
-        E1[(Recent Exps)]
-        E2[(High Decay)]
-        E3[(Low Persistence)]
-    end
-
-    subgraph Fluid[Fluid Track - MMap File]
-        C1[(Clustered<br/>Durable Store)]
-        C2[(L2 Overridable<br/>Weights)]
-        C3[(Domain<br/>Versioned)]
-    end
-
-    subgraph Retrieval[L1 Retrieval]
-        Query[Spawn Request<br/>embeddings] --> Scorer
-        Fast --> Scorer[Cosine Similarity<br/>AVX2+FMA]
-        Fluid --> Scorer
-        Scorer --> Weighted[Weighted Score<br/>task + role + value + recency]
-        Weighted --> Decision{confidence<br/>≥ threshold?}
-        Decision -->|yes| Approve[✅ Approve]
-        Decision -->|no| Reject[❌ L1Rejected]
-    end
-```
+Two parallel memory tracks — an ephemeral in-memory ring buffer (fast) and an `mmap`-backed persistent store (fluid). The L1 retriever scores spawn requests via SIMD cosine similarity (AVX2+FMA, 384-d embeddings), combining task similarity, role alignment, value alignment, and recency.
 
 | Track | Backing | Decay | Persistence | L2 Override |
 |-------|---------|-------|-------------|-------------|
-| **Fast** | In-memory `Vec` ring buffer | High | None | No |
-| **Fluid** | `mmap` + binary file | Low | Durable | Yes — boosts weight ×1.5 |
-
-The L1 retriever scores incoming spawn requests using SIMD-accelerated cosine similarity (AVX2+FMA) against 384-d embeddings, combining four weighted factors: task similarity, role similarity, value alignment, and temporal recency.
+| **Fast** | In-memory ring buffer | High | None | No |
+| **Fluid** | `mmap` + binary file | Low | Durable | Yes (×1.5 boost) |
 
 ### Sandboxed Tool System
 
-Every agent gets an isolated filesystem sandbox with copy-on-write semantics:
-
-```mermaid
-flowchart TB
-    subgraph Host[Host Filesystem]
-        Project[/project]
-        SandboxDir[~/.workflow/sandbox/]
-    end
-
-    subgraph AgentSandbox[Agent Sandbox<br/>agent_id:8]
-        Work[work/<br/>writable]
-        Src[src → /project<br/>read-only symlink]
-    end
-
-    SandboxDir --- AgentSandbox
-    Src -.->|symlink| Project
-
-    subgraph Tools[Tool Resolution]
-        Write[write /work/...] --> Allow[✅ Allowed]
-        Read[read /src/...] --> Allow
-        Escape[.../../escape] --> Block[❌ Blocked]
-        Outside[write /project/...] --> Block
-    end
-```
-
-Path traversal, symlink escapes leaving the project root, and writes to the source tree are all blocked. Tool catalog:
+Every agent gets an isolated sandbox (`~/.workflow/sandbox/{id}/`): a writable `work/` dir and a read-only `src` symlink to the project root. Path traversal, symlink escapes, and writes to the source tree are all blocked. Tool catalog:
 
 | Category | Tools |
 |----------|-------|
@@ -235,53 +138,9 @@ Path traversal, symlink escapes leaving the project root, and writes to the sour
 
 ### Structured Reflection
 
-A two-stage quality gate fires after every agent completion. Lightweight rules run first; only if they flag a problem does the LLM spend a token on self-verification:
-
-```mermaid
-flowchart TB
-    AgentDone[Agent Responds] --> Rules{Rule Engine}
-
-    subgraph Rules[Stage 1: Rule Engine]
-        Len[📏 Length Check<br/>too short?] --> Pass1
-        Rel[🎯 Relevance Check<br/>semantic similarity] --> Pass1
-        Sem[📐 Semantic Promise<br/>embedding distance] --> Pass1
-        Pass1{all rules pass?}
-    end
-
-    Pass1 -->|yes| SelfCheck{Stage 2:<br/>LLM Self-Check}
-    Pass1 -->|no| SelfCheck
-
-    SelfCheck -->|"yes (1 token)"| Done[✅ Accept]
-    SelfCheck -->|"no (1 token)"| Continue[🔄 Continuation Round<br/>re-prompt agent]
-    Continue --> AgentDone
-```
+A two-stage quality gate after each agent completion: (1) lightweight heuristic rules (length, relevance, semantic promise), then (2) a 1-token LLM self-check. Only if both flag a problem does the runtime trigger a continuation round.
 
 ### Persistence & Checkpointing
-
-```mermaid
-flowchart LR
-    subgraph Runtime[Runtime State]
-        Pool[Agent Pool]
-        Graph[Task Graph]
-    end
-
-    subgraph Disk[~/.workflow/]
-        direction TB
-        AP[agent_pool.bin<br/>bincode]
-        TG[task_graph.bin<br/>bincode]
-        EP[experience_a.bin<br/>mmap + binary]
-        RT[role_templates.json]
-        ST[state.json<br/>obfuscated keys]
-        SL[sessions/*.json]
-    end
-
-    Pool -->|on agent complete| AP
-    Graph -->|on mutation| TG
-    ExperiencePool -->|continuous| EP
-    Config -->|on change| ST
-    TUI -->|periodic| SL
-    TemplateStore -->|on startup| RT
-```
 
 | Component | Format | Trigger | Recovery |
 |-----------|--------|---------|----------|
@@ -294,33 +153,7 @@ flowchart LR
 
 ### Terminal UI
 
-Built with [ratatui](https://github.com/ratatui/ratatui), the TUI provides a split-panel real-time cockpit:
-
-```mermaid
-flowchart TB
-    subgraph Screen[TUI Layout - ratatui]
-        Status[Status Bar<br/>runtime health · token usage · agent count]
-
-        subgraph Main[Main Split]
-            Sidebar[Left Sidebar<br/>Agent Tree<br/>hierarchy · status · tool trace]
-            Content[Right Content<br/>Chat Panel / Command Palette / Diagnostics]
-        end
-
-        Command[Command Bar<br/>fuzzy-searchable commands]
-    end
-
-    subgraph State[Shared State - AppState]
-        Core[Core Runtime<br/>agent pool · events · config]
-        UI[UI State<br/>focus · scroll · selected agent]
-    end
-
-    RuntimeEvents[Runtime Event Stream] -->|broker| Core
-    Core --> Sidebar
-    Core --> Content
-    KeyEvents[Keyboard/Mouse Events] --> Controller[Controller]
-    Controller --> Core
-    Controller --> UI
-```
+Built with [ratatui](https://github.com/ratatui/ratatui): status bar, agent tree sidebar, chat panel / command palette / diagnostics content area, and a fuzzy-searchable command bar.
 
 ## Crate Map
 
@@ -392,17 +225,6 @@ flowchart TB
 
 ## Getting Started
 
-```mermaid
-flowchart LR
-    Clone[git clone] --> Prereqs{Rust 1.85+<br/>API key / local LLM}
-    Prereqs --> Build[cargo build --release]
-    Build --> Run[cargo run --release]
-    Run --> TUI[🎛️ TUI launches]
-    TUI --> Config[Configure providers<br/>in TUI command palette]
-    Config --> Mission[🎯 Enter your mission]
-    Mission --> Agents[🤖 Agents spawn & execute]
-```
-
 ```bash
 # Build
 cargo build --release
@@ -431,17 +253,9 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 ## CI Gates
 
-```mermaid
-flowchart TB
-    PR[PR / Push] --> Check[1. cargo check]
-    Check --> Fmt{2. cargo fmt --check}
-    Fmt -->|pass| Clippy[3. cargo clippy -D warnings]
-    Fmt -->|fail + --fix| FmtFix[cargo fmt]
-    Fmt -->|fail| Fail1[❌]
-    Clippy -->|pass| Test[4. cargo test]
-    Clippy -->|fail| Fail2[❌]
-    Test -->|pass| Pass[✅ All Gates Pass]
-    Test -->|fail| Fail3[❌]
+```bash
+./ci.sh           # Run all gates (check, format, clippy, test)
+./ci.sh --fix     # Auto-fix formatting issues
 ```
 
 | Gate | Command | Fail exit |
@@ -452,33 +266,6 @@ flowchart TB
 | `cargo test` | `cargo test` | 1 |
 
 ## Design Principles
-
-```mermaid
-mindmap
-  root((Workflow<br/>Principles))
-    Lock-Free by Default
-      CAS atomics for budget & depth
-      Mutex only for short non-await ops
-      Bounded contention ~10 agents
-    RAII Lifecycle
-      BudgetGuard releases on drop
-      AdmissionPermit returns to semaphore
-      SandboxHandle cleaned on eviction
-    Dependency Injection
-      Every pipeline layer swappable
-      DecisionPipelineBuilder
-      Mock-friendly for testing
-    Fail-Closed
-      L0 rejects on allocation failure
-      L2 collapses on consecutive failures
-      Sandbox blocks path escapes
-      Checkpoint recovery on restart
-    Observability
-      Per-agent tool traces & metrics
-      Token usage tracking
-      Reasoning chain capture
-      Real-time TUI diagnostics
-```
 
 1. **Lock-free by default** — shared state uses CAS atomics; `Mutex` only for short, non-`.await`-held operations
 2. **RAII resource lifecycle** — budget permits, admission slots, and sandbox handles all release on drop
