@@ -1,19 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/wf-core",
-    "crates/wf-llm",
-    "crates/wf-l1",
-    "crates/wf-l2",
-    "crates/wf-experience",
-    "crates/wf-models",
-    "crates/wf-agent",
-    "crates/wf-tools",
-    "crates/wf-persistence",
-    "crates/wf-reflection",
-    "crates/wf-runtime",
-    "crates/wf-tui",
-    "crates/wf-workflow",
+    "crates/*",
 ]
 
 [workspace.package]

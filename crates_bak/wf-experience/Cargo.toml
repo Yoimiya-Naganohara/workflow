@@ -1,0 +1,19 @@
+[package]
+name = "wf-experience"
+description = "Experience pool, dual-track memory, clustering"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+wf-core = { path = "../wf-core" }
+wf-l1 = { path = "../wf-l1" }
+serde.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+memmap2.workspace = true
+bincode.workspace = true
+rayon.workspace = true
+rand.workspace = true
+tempfile.workspace = true

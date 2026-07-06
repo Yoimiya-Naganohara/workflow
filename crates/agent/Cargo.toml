@@ -1,0 +1,11 @@
+[package]
+name = "agent"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+[dependencies]
+rig.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tool = {path="../tool"}
+futures.workspace = true

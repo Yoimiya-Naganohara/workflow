@@ -1,0 +1,141 @@
+{
+  "id": "claudius",
+  "name": "Claudius",
+  "description": "Multimodal reasoning model for visual analysis, planning, and tool use",
+  "family": "mimo",
+  "attachment": true,
+  "reasoning": true,
+  "reasoning_options": [
+    {
+      "type": "toggle",
+      "values": [
+        "low",
+        "default",
+        "none",
+        "medium",
+        "max",
+        "high",
+        null,
+        "xhigh",
+        "minimal"
+      ],
+      "min": 1024,
+      "max": 32000
+    },
+    {
+      "type": "budget_tokens",
+      "values": [
+        "low",
+        "none",
+        "medium",
+        "max",
+        "high",
+        "xhigh",
+        "minimal"
+      ],
+      "max": 32000,
+      "min": 256
+    },
+    {
+      "type": "budget_tokens",
+      "min": 1024,
+      "max": 24576
+    }
+  ],
+  "tool_call": true,
+  "temperature": true,
+  "knowledge": "2026-05",
+  "release_date": "2026-05-12",
+  "last_updated": "2026-05-12",
+  "modalities": {
+    "input": [
+      "audio",
+      "image",
+      "text",
+      "pdf",
+      "video"
+    ],
+    "output": [
+      "audio",
+      "image",
+      "text",
+      "pdf",
+      "video"
+    ]
+  },
+  "open_weights": false,
+  "limit": {
+    "context": 256000,
+    "output": 64000,
+    "input": 272000
+  },
+  "cost": {
+    "input": 3,
+    "output": 8,
+    "cache_read": 0.9,
+    "cache_write": 6.25,
+    "tiers": [
+      {
+        "input": 10,
+        "output": 45,
+        "cache_read": 1,
+        "tier": {
+          "type": "context",
+          "size": 272000
+        },
+        "cache_write": 7.5,
+        "input_audio": 1.902
+      },
+      {
+        "input": 0.25,
+        "output": 1.52,
+        "cache_read": 0.05072,
+        "tier": {
+          "type": "context",
+          "size": 128000
+        },
+        "input_audio": 3.804
+      }
+    ],
+    "context_over_200k": {
+      "input": 10,
+      "output": 45,
+      "cache_read": 1,
+      "cache_write": 7.5
+    },
+    "input_audio": 1,
+    "output_audio": 38,
+    "reasoning": 6
+  },
+  "structured_output": true,
+  "interleaved": {
+    "field": "reasoning_content"
+  },
+  "status": "deprecated",
+  "experimental": {
+    "modes": {
+      "fast": {
+        "cost": {
+          "input": 30,
+          "output": 150,
+          "cache_read": 3,
+          "cache_write": 37.5
+        },
+        "provider": {
+          "body": {
+            "speed": "fast",
+            "service_tier": "priority"
+          },
+          "headers": {
+            "anthropic-beta": "fast-mode-2026-02-01"
+          }
+        }
+      }
+    }
+  },
+  "provider": {
+    "npm": "@ai-sdk/openai-compatible",
+    "api": "https://${GOOGLE_VERTEX_ENDPOINT}/v1/projects/${GOOGLE_VERTEX_PROJECT}/locations/${GOOGLE_VERTEX_LOCATION}/endpoints/openapi",
+    "shape": "completions"
+  }
+}

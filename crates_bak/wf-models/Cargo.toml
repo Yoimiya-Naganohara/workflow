@@ -1,0 +1,18 @@
+[package]
+name = "wf-models"
+description = "Model registry, provider config, provider client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio.workspace = true
+async-trait.workspace = true
+wf-core = { path = "../wf-core" }
+wf-llm = { path = "../wf-llm" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
