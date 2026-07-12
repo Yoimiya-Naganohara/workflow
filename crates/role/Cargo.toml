@@ -1,14 +1,12 @@
 [package]
-name = "workflow-agent"
+name = "workflow-role"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 
 [dependencies]
-rig.workspace = true
+workflow-tool = { path = "../tool" }
+workflow-agent = { path = "../agent" }
 tokio.workspace = true
-futures.workspace = true
+rig.workspace = true
 async-stream.workspace = true
-dashmap.workspace = true
-anyhow.workspace = true
-lru.workspace = true

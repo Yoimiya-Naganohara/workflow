@@ -1,5 +1,5 @@
 [package]
-name="providers"
+name="workflow-providers"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -11,4 +11,4 @@ anyhow.workspace=true
 serde.workspace=true
 serde_json.workspace=true
 tokio.workspace=true
-tool = {path="../tool"}
+workflow-tool = {path="../tool"}

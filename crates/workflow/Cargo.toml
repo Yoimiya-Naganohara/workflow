@@ -1,0 +1,8 @@
+[package]
+name = "workflow"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+workflow-core = { path = "../core" }
+tokio.workspace = true

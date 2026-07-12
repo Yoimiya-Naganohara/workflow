@@ -1,0 +1,13 @@
+[package]
+name = "workflow-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+rig.workspace=true
+tokio.workspace=true
+
+workflow-agent = {path="../agent"}
+workflow-tool = {path="../tool"}
+workflow-role = {path="../role"}

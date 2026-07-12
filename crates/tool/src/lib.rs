@@ -1,148 +1,111 @@
-use rig::completion::ToolDefinition;
-use rig::tool::Tool;
-use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+//! Agent workflow tools — LLM-callable tools for inter-agent communication.
+//!
+//! Agent workflow tools — LLM-callable tools for inter-agent communication.
+//!
+//! Each tool implements [`rig::tool::Tool`] and can be registered on a
+//! [`rig::tool::server::ToolServer`].
 
-// ── SendMessage tool ─────────────────────────────────────────
+use std::sync::Arc;
 
-/// Arguments expected by the `send_message` tool.
+use rig::{completion::ToolDefinition, tool::Tool};
+use serde::Deserialize;
+use workflow_agent::{AgentId, Message, MessageType, agent_pool::AgentPool};
+pub type ToolId = u32;
+// ── Errors ──────────────────────────────────────────────────
+
+/// Errors that can occur during tool execution.
+#[derive(Debug, thiserror::Error)]
+pub enum ToolError {
+    /// The target agent was not found in the pool.
+    #[error("agent with id {0} not found in pool")]
+    AgentNotFound(AgentId),
+    /// The message could not be sent through the agent's channel.
+    #[error("failed to send message to agent {receiver}: {source}")]
+    SendFailed {
+        receiver: AgentId,
+        #[source]
+        source: tokio::sync::mpsc::error::SendError<Message>,
+    },
+}
+
+// ── SendMessage ──────────────────────────────────────────────
+
+/// Arguments for the `send_message` tool.
 #[derive(Deserialize)]
 pub struct SendMessageArgs {
-    /// Target recipient identifier (e.g. agent name, user ID, channel).
-    pub recipient: String,
-    /// Message body to deliver.
-    pub message: String,
+    /// The numeric ID of the sending agent.
+    from_id: AgentId,
+    /// The numeric ID of the target agent.
+    target_id: AgentId,
+    /// The message content to send.
+    message: String,
 }
 
-/// Structured output returned to the model after a send attempt.
-#[derive(Serialize)]
-pub struct SendMessageOutput {
-    pub success: bool,
-    pub detail: String,
-}
-
-/// Errors produced by [`SendMessageTool`].
-#[derive(Debug, thiserror::Error)]
-pub enum SendMessageError {
-    #[error("send_message channel closed")]
-    ChannelClosed,
-    #[error("serialization error: {0}")]
-    Serde(#[from] serde_json::Error),
-}
-
-/// A tool that sends a message through an unbounded channel.
+/// Tool that sends a message from one agent to another via the [`AgentPool`].
 ///
-/// The consumer polls the receiver end to forward messages to their
-/// final destination (another agent, external API, etc.).
-///
-/// # Example registration on a ToolServer
-/// ```ignore
-/// let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-/// let tool_server = ToolServer::new()
-///     .tool(SendMessageTool::new(tx))
-///     .run();
-/// // poll rx in the agent loop to forward messages...
-/// ```
-pub struct SendMessageTool {
-    tx: mpsc::UnboundedSender<(String, String)>,
+/// The calling LLM is expected to include its own `from_id` in the arguments
+/// (the prompt should instruct it to do so).
+pub struct SendMessage {
+    pool: Arc<AgentPool>,
 }
 
-impl SendMessageTool {
-    pub fn new(tx: mpsc::UnboundedSender<(String, String)>) -> Self {
-        Self { tx }
+impl SendMessage {
+    pub fn new(pool: Arc<AgentPool>) -> Self {
+        Self { pool }
     }
 }
 
-impl Tool for SendMessageTool {
+impl Tool for SendMessage {
     const NAME: &'static str = "send_message";
 
-    type Error = SendMessageError;
+    type Error = ToolError;
     type Args = SendMessageArgs;
-    type Output = SendMessageOutput;
+    type Output = String;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
-            name: Self::NAME.to_string(),
-            description:
-                "Send a text message to a named recipient (another agent, user, or system). \
-                 Returns whether the message was dispatched successfully."
-                    .to_string(),
+            name: "send_message".to_string(),
+            description: "Send a message to another agent in the pool by its numeric agent ID"
+                .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "recipient": {
-                        "type": "string",
-                        "description": "Identifier of the target recipient"
+                    "from_id": {
+                        "type": "integer",
+                        "description": "Your own numeric agent ID (the sender)"
+                    },
+                    "target_id": {
+                        "type": "integer",
+                        "description": "The numeric agent ID of the recipient"
                     },
                     "message": {
                         "type": "string",
-                        "description": "Message content to send"
+                        "description": "The message content to send"
                     }
                 },
-                "required": ["recipient", "message"]
+                "required": ["from_id", "target_id", "message"]
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        self.tx
-            .send((args.recipient, args.message))
-            .map_err(|_| SendMessageError::ChannelClosed)?;
-        Ok(SendMessageOutput {
-            success: true,
-            detail: "Message dispatched".into(),
-        })
-    }
-}
-
-// ── Tests ────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_send_message_tool_definition() {
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let tool = SendMessageTool::new(tx);
-        let def = tool.definition("".into()).await;
-        assert_eq!(def.name, "send_message");
-        assert!(def.description.contains("recipient"));
-    }
-
-    #[tokio::test]
-    async fn test_send_message_tool_call() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let tool = SendMessageTool::new(tx);
-
-        let output = tool
-            .call(SendMessageArgs {
-                recipient: "agent-42".into(),
-                message: "hello from test".into(),
-            })
+        let agent = self
+            .pool
+            .get_agent(&args.target_id)
             .await
-            .unwrap();
+            .ok_or(ToolError::AgentNotFound(args.target_id))?;
 
-        assert!(output.success);
+        let sender = agent.sender().clone();
+        let msg = Message::Data(MessageType::AgentMessage(args.from_id, args.message));
 
-        let (recipient, message) = rx.recv().await.unwrap();
-        assert_eq!(recipient, "agent-42");
-        assert_eq!(message, "hello from test");
-    }
+        sender
+            .send(msg)
+            .await
+            .map_err(|source| ToolError::SendFailed {
+                receiver: args.target_id,
+                source,
+            })?;
 
-    #[tokio::test]
-    async fn test_send_message_tool_channel_closed() {
-        let (tx, rx) = mpsc::unbounded_channel();
-        drop(rx); // close the receiver end
-
-        let tool = SendMessageTool::new(tx);
-        let result = tool
-            .call(SendMessageArgs {
-                recipient: "anyone".into(),
-                message: "will fail".into(),
-            })
-            .await;
-
-        assert!(result.is_err());
+        Ok(format!("Message sent to agent {}", args.target_id))
     }
 }

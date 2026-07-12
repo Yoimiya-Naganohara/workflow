@@ -9,17 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "agent"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "rig",
- "tokio",
- "tool",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3005,6 +2994,11 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "heck"
@@ -4464,6 +4458,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b6180140927ee907000b0aa540091f6ea512ead4447c92b8fc35bc72788a5a6"
+dependencies = [
+ "hashbrown 0.17.1",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5296,19 +5299,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
 dependencies = [
  "prost",
-]
-
-[[package]]
-name = "providers"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "reqwest 0.13.4",
- "rig",
- "serde",
- "serde_json",
- "tokio",
- "tool",
 ]
 
 [[package]]
@@ -7062,19 +7052,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tool"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "reqwest 0.13.4",
- "rig",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
 name = "tower"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7856,6 +7833,76 @@ name = "wit-bindgen"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+
+[[package]]
+name = "workflow"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "workflow-core",
+]
+
+[[package]]
+name = "workflow-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "dashmap",
+ "futures",
+ "lru",
+ "rig",
+ "tokio",
+]
+
+[[package]]
+name = "workflow-core"
+version = "0.1.0"
+dependencies = [
+ "rig",
+ "tokio",
+ "workflow-agent",
+ "workflow-role",
+ "workflow-tool",
+]
+
+[[package]]
+name = "workflow-providers"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest 0.13.4",
+ "rig",
+ "serde",
+ "serde_json",
+ "tokio",
+ "workflow-tool",
+]
+
+[[package]]
+name = "workflow-role"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "rig",
+ "tokio",
+ "workflow-agent",
+ "workflow-tool",
+]
+
+[[package]]
+name = "workflow-tool"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest 0.13.4",
+ "rig",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "workflow-agent",
+]
 
 [[package]]
 name = "writeable"
