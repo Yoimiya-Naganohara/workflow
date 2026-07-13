@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::RwLock;
 use workflow_agent::{
     Agent, AgentEvent, AgentId, Message, MessageType,
@@ -110,7 +110,7 @@ async fn snapshot(app: AppHandle) -> Result<Snapshot, String> {
 }
 
 #[tauri::command]
-async fn send(app: AppHandle, target: AgentId, text: String) -> Result<(), String> {
+async fn send(app: AppHandle, target: AgentId, text: String) -> Result<Snapshot, String> {
     let agent = {
         let state = app.state::<RwLock<AppState>>();
         let s = state.read().await;
@@ -127,13 +127,11 @@ async fn send(app: AppHandle, target: AgentId, text: String) -> Result<(), Strin
             .or_default()
             .push(UiMessage::User { text: text.clone() });
     }
-    app.emit("tick", ()).map_err(|e| e.to_string())?;
-    agent
+    let _ = agent
         .sender()
         .send(Message::Data(MessageType::User(text)))
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .await;
+    snapshot(app).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

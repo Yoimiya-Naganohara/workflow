@@ -7,10 +7,12 @@
     let selected = $state<number | null>(null);
     let messages = $state<any[]>([]);
     let input = $state("");
+    let lastUpdated = $state("");
 
     async function pull() {
         try {
             const s = await invoke("snapshot");
+            lastUpdated = new Date().toLocaleTimeString();
             agents = s.agents;
             selected = s.selected;
             messages = s.messages;
@@ -21,12 +23,8 @@
 
     onMount(() => {
         pull();
-        const unlisten = listen("tick", () => pull());
-        const interval = setInterval(pull, 2000);
-        return () => {
-            unlisten.then((f) => f());
-            clearInterval(interval);
-        };
+        listen("tick", () => pull());
+        setInterval(pull, 2000);
     });
 
     async function submit(e: Event) {
@@ -35,7 +33,10 @@
         const text = input.trim();
         input = "";
         try {
-            await invoke("send", { target: selected, text });
+            const s = await invoke("send", { target: selected, text });
+            agents = s.agents;
+            selected = s.selected;
+            messages = s.messages;
         } catch (e) {
             console.error("send failed", e);
         }
@@ -56,6 +57,7 @@
             {#each messages as m}
                 <div class={m.role}>{m.text}</div>
             {/each}
+            <div class="stamp">{lastUpdated}</div>
         </div>
         <form onsubmit={submit}>
             <input bind:value={input} />
@@ -80,6 +82,7 @@
     .thinking { opacity: 0.5; font-style: italic; }
     .tool { color: #6a6; font-size: 12px; }
     .error { color: #a66; }
+    .stamp { font-size: 10px; color: #555; margin-top: 8px; }
     form { display: flex; padding: 12px; gap: 8px; border-top: 1px solid #0f3460; background: #16213e; }
     input { flex: 1; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; padding: 8px; color: #e0e0e0; }
     button[type="submit"] { background: #533483; border: none; border-radius: 6px; padding: 8px 16px; color: #fff; cursor: pointer; }
