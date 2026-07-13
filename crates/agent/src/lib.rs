@@ -293,7 +293,15 @@ impl Agent {
                 let state = Arc::clone(&self.state);
                 let shutdown = self.shutdown.clone();
                 let outbox = self.outbox.clone();
-                tokio::spawn(Self::run_agent_loop(rx, run_fn, state, shutdown, outbox))
+                let current_task = Arc::clone(&self.current_task);
+                tokio::spawn(Self::run_agent_loop(
+                    rx,
+                    run_fn,
+                    state,
+                    current_task,
+                    shutdown,
+                    outbox,
+                ))
             }
             _ => return,
         };

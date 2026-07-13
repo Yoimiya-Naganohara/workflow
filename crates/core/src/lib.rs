@@ -42,6 +42,7 @@ impl Runtime {
         let role_pool = RolePool::default();
         let role = role_pool.get(&RoleId::default());
         let preamble = role.unwrap().definition();
+        let role = role.unwrap().name();
         let id = "";
 
         let agent = client
@@ -51,7 +52,7 @@ impl Runtime {
             .conversation(id)
             .preamble(&preamble)
             .build();
-        let agent = Arc::new(Agent::new(AgentId::default(), agent));
+        let agent = Arc::new(Agent::new(AgentId::default(), role.to_owned(), agent));
         self.agent_pool.add_agent(agent).await.unwrap();
         loop {
             let mut buf = String::new();
