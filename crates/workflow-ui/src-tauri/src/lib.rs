@@ -95,7 +95,7 @@ async fn forward(pool: Arc<AgentPool>, app: AppHandle, chat: Arc<RwLock<ChatLog>
 }
 
 #[tauri::command]
-async fn snapshot(state: State<'_, RwLock<AppState>>) -> Snapshot {
+async fn snapshot(state: State<'_, RwLock<AppState>>) -> Result<Snapshot, String> {
     let s = state.read().await;
     let agents = s.runtime.pool().list_agents().await;
     let cs = s.chat.read().await;
@@ -103,7 +103,7 @@ async fn snapshot(state: State<'_, RwLock<AppState>>) -> Snapshot {
     let messages = selected
         .and_then(|id| cs.messages.get(&id).cloned())
         .unwrap_or_default();
-    Snapshot { agents, selected, messages }
+    Ok(Snapshot { agents, selected, messages })
 }
 
 #[tauri::command]
