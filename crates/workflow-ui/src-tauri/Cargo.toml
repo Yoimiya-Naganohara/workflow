@@ -1,0 +1,25 @@
+[package]
+name = "workflow-ui"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "workflow_ui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+rig = { git = "https://github.com/Yoimiya-Naganohara/rig.git", version = "0.39", features = ["rmcp"] }
+workflow-agent = { path = "../../agent" }
+workflow-core = { path = "../../core" }
+workflow-tool = { path = "../../tool" }
+workflow-role = { path = "../../role" }

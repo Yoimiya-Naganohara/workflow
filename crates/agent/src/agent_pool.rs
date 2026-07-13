@@ -11,6 +11,13 @@ use tokio::{
 
 use crate::{Agent, AgentId, AgentState, ControlMessage, Message};
 
+#[derive(serde::Serialize)]
+pub struct AgentInfo {
+    pub id: AgentId,
+    pub role: String,
+    pub current_task: Option<String>,
+}
+
 /// Registry of live agents. Non-generic so it can hold agents backed by
 /// different completion models/providers simultaneously.
 struct AgentEntity {
@@ -75,5 +82,31 @@ impl AgentPool {
         if let Some((agent)) = self.lru.lock().await.pop(id) {
             Self::shutdown(&agent).await;
         };
+    }
+
+    /// Snapshot every live agent's id, role, and current task.
+    ///
+    /// Borrows the LRU cache once and reads each agent's `current_task`
+    /// under its async RwLock — no Arc clones, no allocations beyond
+    /// the returned `Vec` and the `Option<String>` for the task.
+    pub async fn list_agents(&self) -> Vec<AgentInfo> {
+        let lru = self.lru.lock().await;
+        let mut out = Vec::with_capacity(lru.len());
+        for (_, entity) in lru.iter() {
+            let id = entity.agent.id();
+            let role = entity.agent.role().to_owned();
+            let task = entity
+                .agent
+                .current_task()
+                .read()
+                .await
+                .clone();
+            out.push(AgentInfo {
+                id,
+                role,
+                current_task: task,
+            });
+        }
+        out
     }
 }

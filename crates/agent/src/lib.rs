@@ -100,6 +100,14 @@ impl Shutdown {
 
 pub type AgentId = u32;
 
+tokio::task_local! {
+    static CURRENT_AGENT_ID: AgentId;
+}
+
+pub fn current_agent_id() -> AgentId {
+    CURRENT_AGENT_ID.try_with(|id| *id).unwrap_or(0)
+}
+
 /// Type-erased "run one turn" function: given a prompt, produce a stream of
 /// [`AgentEvent`]s. The concrete `rig::agent::Agent<M>` and its associated
 /// `StreamingResponse` type are captured *inside* the closure built by
@@ -235,6 +243,7 @@ impl Agent {
     /// and processes each message sequentially. Non-generic: the model is
     /// already erased behind [`RunFn`].
     async fn run_agent_loop(
+        id: AgentId,
         mut internal_rx: Receiver<MessageType>,
         run_fn: RunFn,
         state: Arc<RwLock<AgentState>>,
@@ -242,6 +251,7 @@ impl Agent {
         shutdown: Shutdown,
         outbox: tokio::sync::broadcast::Sender<AgentEvent>,
     ) {
+        CURRENT_AGENT_ID.scope(id, async {
         while let Some(message) = internal_rx.recv().await {
             if shutdown.is_requested() {
                 break;
@@ -265,6 +275,7 @@ impl Agent {
             *current_task.write().await = None;
             *state.write().await = AgentState::Idle;
         }
+        }).await;
     }
 
     /// Take `internal_rx` and `run_fn` from self (called once at the start
@@ -294,7 +305,9 @@ impl Agent {
                 let shutdown = self.shutdown.clone();
                 let outbox = self.outbox.clone();
                 let current_task = Arc::clone(&self.current_task);
+                let id = self.id;
                 tokio::spawn(Self::run_agent_loop(
+                    id,
                     rx,
                     run_fn,
                     state,

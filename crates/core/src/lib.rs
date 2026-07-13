@@ -12,18 +12,21 @@ use rig::{
 use tokio::spawn;
 use workflow_agent::{Agent, AgentId, Message, MessageType, agent_pool::AgentPool};
 use workflow_role::{RoleId, RolePool};
-use workflow_tool::SendMessage;
+use workflow_tool::{send_message::SendMessage, list_agents::ListAgents};
 
 pub struct Runtime {
     agent_pool: Arc<AgentPool>,
 }
 impl Runtime {
     pub fn new() -> Self {
-        // Create the shared agent pool first so the tool can reference it.
         let agent_pool = Arc::new(AgentPool::new(NonZeroUsize::new(100).unwrap()));
-
         Self { agent_pool }
     }
+
+    pub fn pool(&self) -> &Arc<AgentPool> {
+        &self.agent_pool
+    }
+
     pub async fn run(&self) {
         // todo: use configuration or persistence
         let base_url = "https://opencode.ai/zen/v1";
@@ -38,6 +41,7 @@ impl Runtime {
         // Any tool that needs the pool gets a clone of the Arc.
         let handle = ToolServer::new()
             .tool(SendMessage::new(Arc::clone(&self.agent_pool)))
+            .tool(ListAgents::new(Arc::clone(&self.agent_pool)))
             .run();
         let role_pool = RolePool::default();
         let role = role_pool.get(&RoleId::default());

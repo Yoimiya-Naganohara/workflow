@@ -4,12 +4,11 @@
 //!
 //! Each tool implements [`rig::tool::Tool`] and can be registered on a
 //! [`rig::tool::server::ToolServer`].
+pub mod list_agents;
 pub mod send_message;
-use std::sync::Arc;
 
-use rig::{completion::ToolDefinition, tool::Tool};
-use serde::Deserialize;
-use workflow_agent::{AgentId, Message, MessageType, agent_pool::AgentPool};
+use workflow_agent::{AgentId, Message};
+
 pub type ToolId = u32;
 // ── Errors ──────────────────────────────────────────────────
 
