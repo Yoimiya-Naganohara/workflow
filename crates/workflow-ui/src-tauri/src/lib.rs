@@ -42,60 +42,63 @@ struct ChatLog {
 struct AppState {
     runtime: Runtime,
     chat: Arc<RwLock<ChatLog>>,
-    app: AppHandle,
 }
 
-async fn forward(pool: Arc<AgentPool>, app: AppHandle, chat: Arc<RwLock<ChatLog>>) {
+async fn subscribe_agent(
+    agent: Arc<workflow_agent::Agent>,
+    id: AgentId,
+    app: AppHandle,
+    chat: Arc<RwLock<ChatLog>>,
+) {
+    let mut rx = agent.receiver();
+    while let Ok(ev) = rx.recv().await {
+        match ev {
+            AgentEvent::Text(t) => {
+                chat.write().await.buffer.entry(id).or_default().push_str(&t);
+            }
+            AgentEvent::Reasoning(t) => {
+                chat.write().await.messages.entry(id).or_default()
+                    .push(UiMessage::Thinking { text: t });
+            }
+            AgentEvent::ToolCall { name } => {
+                chat.write().await.messages.entry(id).or_default()
+                    .push(UiMessage::Tool { text: name });
+            }
+            AgentEvent::TurnComplete => {
+                let mut cs = chat.write().await;
+                if let Some(text) = cs.buffer.remove(&id) {
+                    cs.messages.entry(id).or_default()
+                        .push(UiMessage::Assistant { text });
+                }
+            }
+            AgentEvent::Error(e) => {
+                chat.write().await.messages.entry(id).or_default()
+                    .push(UiMessage::Error { text: e });
+            }
+            _ => {}
+        }
+        let _ = app.emit("tick", ());
+    }
+}
+
+async fn watch_agents(pool: Arc<AgentPool>, app: AppHandle, chat: Arc<RwLock<ChatLog>>) {
     let mut seen = 0u32;
     loop {
         for info in pool.list_agents().await {
-            if info.id <= seen {
-                continue;
-            }
-            seen = info.id;
-            if let Some(agent) = pool.get_agent(&info.id).await {
-                let app = app.clone();
-                let chat = chat.clone();
-                let id = info.id;
-                tokio::spawn(async move {
-                    let mut rx = agent.receiver();
-                    while let Ok(ev) = rx.recv().await {
-                        match ev {
-                            AgentEvent::Text(t) => {
-                                chat.write().await.buffer.entry(id).or_default().push_str(&t);
-                            }
-                            AgentEvent::Reasoning(t) => {
-                                chat.write().await.messages.entry(id).or_default()
-                                    .push(UiMessage::Thinking { text: t });
-                            }
-                            AgentEvent::ToolCall { name } => {
-                                chat.write().await.messages.entry(id).or_default()
-                                    .push(UiMessage::Tool { text: name });
-                            }
-                            AgentEvent::TurnComplete => {
-                                let mut cs = chat.write().await;
-                                if let Some(text) = cs.buffer.remove(&id) {
-                                    cs.messages.entry(id).or_default()
-                                        .push(UiMessage::Assistant { text });
-                                }
-                            }
-                            AgentEvent::Error(e) => {
-                                chat.write().await.messages.entry(id).or_default()
-                                    .push(UiMessage::Error { text: e });
-                            }
-                            _ => {}
-                        }
-                        let _ = app.emit("tick", ());
-                    }
-                });
+            if info.id > seen {
+                seen = info.id;
+                if let Some(agent) = pool.get_agent(&info.id).await {
+                    tokio::spawn(subscribe_agent(agent, info.id, app.clone(), chat.clone()));
+                }
             }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
 }
 
 #[tauri::command]
-async fn snapshot(state: State<'_, RwLock<AppState>>) -> Result<Snapshot, String> {
+async fn snapshot(app: AppHandle) -> Result<Snapshot, String> {
+    let state = app.state::<RwLock<AppState>>();
     let s = state.read().await;
     let agents = s.runtime.pool().list_agents().await;
     let cs = s.chat.read().await;
@@ -107,14 +110,30 @@ async fn snapshot(state: State<'_, RwLock<AppState>>) -> Result<Snapshot, String
 }
 
 #[tauri::command]
-async fn send(state: State<'_, RwLock<AppState>>, target: AgentId, text: String) -> Result<(), String> {
-    let s = state.read().await;
-    let agent = s.runtime.pool().get_agent(&target).await
-        .ok_or("agent not found")?;
-    s.chat.write().await.messages.entry(target).or_default()
-        .push(UiMessage::User { text: text.clone() });
-    agent.sender().send(Message::Data(MessageType::User(text)))
-        .await.map_err(|e| e.to_string())
+async fn send(app: AppHandle, target: AgentId, text: String) -> Result<(), String> {
+    let agent = {
+        let state = app.state::<RwLock<AppState>>();
+        let s = state.read().await;
+        s.runtime.pool().get_agent(&target).await.ok_or("agent not found".to_string())?
+    };
+    {
+        let state = app.state::<RwLock<AppState>>();
+        let s = state.read().await;
+        s.chat
+            .write()
+            .await
+            .messages
+            .entry(target)
+            .or_default()
+            .push(UiMessage::User { text: text.clone() });
+    }
+    app.emit("tick", ()).map_err(|e| e.to_string())?;
+    agent
+        .sender()
+        .send(Message::Data(MessageType::User(text)))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -138,38 +157,48 @@ pub fn run() {
                     .unwrap_or_default();
                 let api_key = std::env::var("OPENCODE_API_KEY").unwrap_or_default();
 
-                use rig::{client::CompletionClient, memory::InMemoryConversationMemory,
-                    providers::openai::CompletionsClient, tool::server::ToolServer};
+                use rig::{
+                    client::CompletionClient, memory::InMemoryConversationMemory,
+                    providers::openai::CompletionsClient, tool::server::ToolServer,
+                };
 
                 let client = CompletionsClient::builder()
-                    .base_url(&base_url).api_key(&api_key).build().unwrap();
+                    .base_url(&base_url)
+                    .api_key(&api_key)
+                    .build()
+                    .unwrap();
 
                 let handle = ToolServer::new()
                     .tool(SendMessage::new(Arc::clone(&p)))
                     .tool(ListAgents::new(Arc::clone(&p)))
                     .run();
 
-                let agent = client.agent("big-pickle")
+                let agent = client
+                    .agent("big-pickle")
                     .tool_server_handle(handle)
                     .memory(InMemoryConversationMemory::new())
-                    .conversation("").preamble(&preamble).build();
+                    .conversation("")
+                    .preamble(&preamble)
+                    .build();
 
                 p.add_agent(Arc::new(Agent::new(AgentId::default(), role_name, agent)))
-                    .await.unwrap();
+                    .await
+                    .unwrap();
             });
 
-            let handle = app.handle().clone();
             let chat = Arc::new(RwLock::new(ChatLog {
                 messages: HashMap::new(),
                 buffer: HashMap::new(),
             }));
             app.manage(RwLock::new(AppState {
-                runtime, chat: chat.clone(), app: handle.clone(),
+                runtime,
+                chat: chat.clone(),
             }));
 
+            let handle = app.handle().clone();
             rt.spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                forward(pool, handle, chat).await;
+                watch_agents(pool, handle, chat).await;
             });
             Ok(())
         })
