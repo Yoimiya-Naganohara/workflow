@@ -2,7 +2,7 @@ use std::{
     env::var,
     io::{Write, stdin, stdout},
     num::NonZeroUsize,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use rig::{
@@ -12,7 +12,11 @@ use rig::{
 use tokio::spawn;
 use workflow_agent::{Agent, AgentId, Message, MessageType, agent_pool::AgentPool};
 use workflow_role::{RoleId, RolePool};
-use workflow_tool::{send_message::SendMessage, list_agents::ListAgents};
+use workflow_tool::{
+    list_agents::ListAgents,
+    orchestrate::{AgentFactory, Orchestrate},
+    send_message::SendMessage,
+};
 
 pub struct Runtime {
     agent_pool: Arc<AgentPool>,
@@ -38,12 +42,19 @@ impl Runtime {
             .build()
             .unwrap();
         // Register tools on the ToolServer before running it.
-        // Any tool that needs the pool gets a clone of the Arc.
-        let handle = ToolServer::new()
-            .tool(SendMessage::new(Arc::clone(&self.agent_pool)))
-            .tool(ListAgents::new(Arc::clone(&self.agent_pool)))
-            .run();
         let role_pool = RolePool::default();
+        let handle_cell: Arc<Mutex<Option<rig::tool::server::ToolServerHandle>>> =
+            Arc::new(Mutex::new(None));
+        let handle = {
+            let factory = make_agent_factory(&client, model, &role_pool, Arc::clone(&handle_cell));
+            ToolServer::new()
+                .tool(SendMessage::new(Arc::clone(&self.agent_pool)))
+                .tool(ListAgents::new(Arc::clone(&self.agent_pool)))
+                .tool(Orchestrate::new(Arc::clone(&self.agent_pool), factory))
+                .run()
+        };
+        *handle_cell.lock().unwrap() = Some(handle.clone());
+
         let role = role_pool.get(&RoleId::default());
         let preamble = role.unwrap().definition();
         let role = role.unwrap().name();
@@ -87,4 +98,35 @@ impl Runtime {
             });
         }
     }
+}
+
+fn make_agent_factory(
+    client: &CompletionsClient,
+    model: &str,
+    role_pool: &RolePool,
+    handle_cell: Arc<Mutex<Option<rig::tool::server::ToolServerHandle>>>,
+) -> AgentFactory {
+    let client = client.clone();
+    let model = model.to_owned();
+    let role_pool = role_pool.clone();
+    Arc::new(move |id, role| {
+        let handle = handle_cell
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("ToolServerHandle not set — run() must complete first");
+        let role_def = role_pool
+            .get(&RoleId::from(role.clone()))
+            .unwrap_or_else(|| role_pool.get(&RoleId::default()).unwrap());
+        let preamble = role_def.definition();
+        let role_name = role_def.name();
+        let rig_agent = client
+            .agent(&model)
+            .tool_server_handle(handle)
+            .memory(InMemoryConversationMemory::new())
+            .conversation("")
+            .preamble(preamble)
+            .build();
+        Arc::new(Agent::new(id, role_name.to_owned(), rig_agent))
+    })
 }

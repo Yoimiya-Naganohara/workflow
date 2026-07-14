@@ -71,6 +71,8 @@ pub enum AgentEvent {
     Reasoning(String),
     /// A tool call started — the function name is now known.
     ToolCall { name: String },
+    /// A tool call completed with a result.
+    ToolResult { name: String, result: String },
     /// One completion turn finished successfully.
     TurnComplete,
     /// A stream-level error occurred.
@@ -222,7 +224,33 @@ impl Agent {
         }
     }
 
-    /// This agent's numeric id.
+    pub fn new_no_model(id: AgentId, role: String) -> Self {
+        let (internal_tx, internal_rx) = channel::<MessageType>(10);
+        let (sender, inbox) = channel::<Message>(10);
+        let (outbox, receiver) = tokio::sync::broadcast::channel(10);
+        let run_fn: RunFn = Box::new(move |prompt: String| {
+            Box::pin(stream! {
+                yield AgentEvent::Text(prompt);
+                yield AgentEvent::TurnComplete;
+            })
+        });
+
+        Self {
+            id,
+            role,
+            current_task: Arc::new(RwLock::new(None)),
+            run_fn: StdMutex::new(Some(run_fn)),
+            internal_rx: StdMutex::new(Some(internal_rx)),
+            internal_tx,
+            state: Arc::new(RwLock::new(AgentState::Idle)),
+            sender,
+            inbox: TokioMutex::new(inbox),
+            shutdown: Shutdown::new(),
+            receiver,
+            outbox,
+        }
+    }
+
     pub fn id(&self) -> AgentId {
         self.id
     }
@@ -251,31 +279,33 @@ impl Agent {
         shutdown: Shutdown,
         outbox: tokio::sync::broadcast::Sender<AgentEvent>,
     ) {
-        CURRENT_AGENT_ID.scope(id, async {
-        while let Some(message) = internal_rx.recv().await {
-            if shutdown.is_requested() {
-                break;
-            }
+        CURRENT_AGENT_ID
+            .scope(id, async {
+                while let Some(message) = internal_rx.recv().await {
+                    if shutdown.is_requested() {
+                        break;
+                    }
 
-            let prompt = match message {
-                MessageType::User(p) => p,
-                MessageType::AgentMessage(from, content) => {
-                    format!("[message from agent {from}]: {content}")
+                    let prompt = match message {
+                        MessageType::User(p) => p,
+                        MessageType::AgentMessage(from, content) => {
+                            format!("[message from agent {from}]: {content}")
+                        }
+                    };
+
+                    *current_task.write().await = Some(prompt.clone());
+                    *state.write().await = AgentState::Running;
+
+                    let mut stream = run_fn(prompt);
+                    while let Some(event) = stream.next().await {
+                        let _ = outbox.send(event);
+                    }
+
+                    *current_task.write().await = None;
+                    *state.write().await = AgentState::Idle;
                 }
-            };
-
-            *current_task.write().await = Some(prompt.clone());
-            *state.write().await = AgentState::Running;
-
-            let mut stream = run_fn(prompt);
-            while let Some(event) = stream.next().await {
-                let _ = outbox.send(event);
-            }
-
-            *current_task.write().await = None;
-            *state.write().await = AgentState::Idle;
-        }
-        }).await;
+            })
+            .await;
     }
 
     /// Take `internal_rx` and `run_fn` from self (called once at the start

@@ -5,6 +5,7 @@
 //! Each tool implements [`rig::tool::Tool`] and can be registered on a
 //! [`rig::tool::server::ToolServer`].
 pub mod list_agents;
+pub mod orchestrate;
 pub mod send_message;
 
 use workflow_agent::{AgentId, Message};
@@ -25,4 +26,7 @@ pub enum ToolError {
         #[source]
         source: tokio::sync::mpsc::error::SendError<Message>,
     },
+    /// Orchestration planning error (invalid DAG, cycles, etc.).
+    #[error("orchestrate: {0}")]
+    Orchestrate(String),
 }

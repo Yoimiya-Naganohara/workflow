@@ -38,6 +38,7 @@ impl Role {
         &self.tools
     }
 }
+#[derive(Clone)]
 pub struct RolePool {
     roles: HashMap<RoleId, Role>,
 }
@@ -71,8 +72,17 @@ impl RolePool {
     pub fn new(roles: HashMap<RoleId, Role>) -> Self {
         Self { roles }
     }
+
     pub fn get(&self, role_id: &RoleId) -> Option<&Role> {
         self.roles.get(role_id)
+    }
+
+    pub fn add(&mut self, id: RoleId, role: Role) {
+        self.roles.insert(id, role);
+    }
+
+    pub fn list(&self) -> Vec<&Role> {
+        self.roles.values().collect()
     }
 }
 
