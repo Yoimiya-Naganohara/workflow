@@ -24,7 +24,7 @@
 	}
 
 	interface UiMessage {
-		role: "user" | "assistant" | "thinking" | "tool" | "error";
+		type: "user" | "text" | "thinking" | "tool" | "error";
 		text: string;
 		result?: string | null;
 	}
@@ -180,24 +180,24 @@
 
 	let renderedItems = $derived.by(() => {
 		const items: RenderedItem[] = messages.map(m => {
-			if (m.role === "assistant") {
+			if (m.type === "text") {
 				let html = "";
 				try { html = String(marked.parse(m.text, { async: false })); } catch {}
-				return { role: "assistant", text: m.text, html };
+				return { role: "text", text: m.text, html };
 			}
-			if (m.role === "tool") {
+			if (m.type === "tool") {
 				return { role: "tool", text: m.text, html: "", result: m.result, status: m.result ? "done" : "running" };
 			}
-			return { role: m.role, text: m.text, html: "" };
+			return { role: m.type, text: m.text, html: "" };
 		});
 		if (selected != null && streamText[selected]) {
 			const t = streamText[selected];
 			if (t) {
 				const last = items[items.length - 1];
-				if (last?.role !== "assistant" || last.text !== t) {
-					let html = "";
-					try { html = String(marked.parse(t, { async: false })); } catch {}
-					items.push({ role: "assistant", text: t, html, streaming: true });
+			if (last?.role !== "text" || last.text !== t) {
+				let html = "";
+				try { html = String(marked.parse(t, { async: false })); } catch {}
+				items.push({ role: "text", text: t, html, streaming: true });
 				}
 			}
 		}
@@ -458,8 +458,8 @@
 					<div class="mx-auto max-w-3xl py-6 px-6">
 						{#each renderedItems as item}
 							<div class="mb-3 last:mb-0">
-								{#if item.role === "assistant"}
-									<TextBlock text={item.text} html={item.html} role="assistant" streaming={item.streaming ?? false} />
+							{#if item.role === "text"}
+								<TextBlock text={item.text} html={item.html} role="text" streaming={item.streaming ?? false} />
 								{:else if item.role === "user"}
 									<TextBlock text={item.text} html={item.html} role="user" />
 								{:else if item.role === "thinking"}

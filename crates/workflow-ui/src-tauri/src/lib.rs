@@ -21,11 +21,11 @@ struct RoleInfo {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "role")]
+#[serde(tag = "type")]
 enum UiMessage {
     #[serde(rename = "user")]
     User { text: String },
-    #[serde(rename = "assistant")]
+    #[serde(rename = "text")]
     Assistant { text: String },
     #[serde(rename = "thinking")]
     Thinking { text: String },
