@@ -347,7 +347,7 @@
 								"flex items-center gap-2 flex-1 w-0 rounded-md px-2 py-1.5 text-left transition-colors",
 								"hover:bg-accent hover:text-accent-foreground",
 								"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-								selected === a.id && "bg-accent text-accent-foreground border-l-2 border-primary rounded-l-none",
+								selected === a.id && "bg-accent text-accent-foreground border-l-2 border-primary rounded-s-none",
 							)}
 							onclick={() => selectAgent(a.id)}
 						>

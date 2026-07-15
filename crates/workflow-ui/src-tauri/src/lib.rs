@@ -140,7 +140,7 @@ async fn subscribe_agent(
             }
             AgentEvent::TurnComplete => {
                 let mut cs = chat.write().await;
-                cs.streaming.remove(&id);
+                // cs.streaming.remove(&id);
                 // if let Some(text) = cs.buffer.remove(&id) {
                 //     cs.messages
                 //         .entry(id)
@@ -220,7 +220,7 @@ async fn send(app: AppHandle, target: AgentId, text: String) -> Result<Snapshot,
 
     let _ = agent
         .sender()
-        .send(Message::Data(MessageType::User(text)))
+        .send(MessageType::Data(Message::User(text)))
         .await;
 
     let agents = s.runtime.pool().list_agents().await;

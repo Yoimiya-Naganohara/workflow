@@ -278,7 +278,7 @@ impl Agent {
                     let prompt = match message {
                         Message::User(p) => p,
                         Message::AgentMessage(from, content) => {
-                            format!("[message from agent {from}]: {content} \r\nif you want to reply you should send back")
+                            format!("[message from agent {from}]: {content} \r\ndecide whether you want to reply")
                         }
                     };
 
