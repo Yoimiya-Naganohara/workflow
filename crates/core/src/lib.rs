@@ -79,7 +79,7 @@ impl Runtime {
                 .unwrap();
             agent
                 .sender()
-                .send(Message::Data(MessageType::User(buf)))
+                .send(MessageType::Data(Message::User(buf)))
                 .await;
             let mut receiver = agent.receiver();
             spawn(async move {

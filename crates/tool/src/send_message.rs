@@ -63,7 +63,7 @@ impl Tool for SendMessage {
             .ok_or(ToolError::AgentNotFound(args.target_id))?;
 
         let sender = agent.sender().clone();
-        let msg = Message::Data(MessageType::AgentMessage(from_id, args.message));
+        let msg = MessageType::Data(Message::AgentMessage(from_id, args.message));
 
         sender
             .send(msg)

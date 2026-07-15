@@ -8,7 +8,7 @@ pub mod list_agents;
 pub mod orchestrate;
 pub mod send_message;
 
-use workflow_agent::{AgentId, Message};
+use workflow_agent::{AgentId, MessageType};
 
 pub type ToolId = u32;
 // ── Errors ──────────────────────────────────────────────────
@@ -24,7 +24,7 @@ pub enum ToolError {
     SendFailed {
         receiver: AgentId,
         #[source]
-        source: tokio::sync::mpsc::error::SendError<Message>,
+        source: tokio::sync::mpsc::error::SendError<MessageType>,
     },
     /// Orchestration planning error (invalid DAG, cycles, etc.).
     #[error("orchestrate: {0}")]

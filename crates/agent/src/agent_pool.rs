@@ -4,7 +4,7 @@ use anyhow::Result;
 use lru::LruCache;
 use tokio::{spawn, sync::Mutex, task::JoinHandle};
 
-use crate::{Agent, AgentId, ControlMessage, Message};
+use crate::{Agent, AgentId, ControlMessage, MessageType};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AgentInfo {
@@ -50,7 +50,7 @@ impl AgentPool {
         let _ = entity
             .agent
             .sender()
-            .send(Message::Control(ControlMessage::Abort))
+            .send(MessageType::Control(ControlMessage::Abort))
             .await;
         entity.handler.abort();
     }

@@ -250,7 +250,7 @@ impl Tool for Orchestrate {
 
                 agent
                     .sender()
-                    .send(Message::Data(MessageType::User(task.task.clone())))
+                    .send(MessageType::Data(Message::User(task.task.clone())))
                     .await
                     .map_err(|e| {
                         ToolError::Orchestrate(format!(

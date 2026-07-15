@@ -41,7 +41,7 @@ impl std::fmt::Display for AgentState {
 }
 
 /// Data payload (LLM prompts, inter-agent content).
-pub enum MessageType {
+pub enum Message {
     User(String),
     AgentMessage(AgentId, String),
 }
@@ -53,9 +53,9 @@ pub enum ControlMessage {
 }
 
 /// Inbound message discriminated by kind.
-pub enum Message {
+pub enum MessageType {
     Control(ControlMessage),
-    Data(MessageType),
+    Data(Message),
 }
 
 /// Streamed output emitted by an [`Agent`] for an external consumer to handle.
@@ -135,12 +135,12 @@ pub struct Agent {
     role: String,
     current_task: Arc<RwLock<Option<String>>>,
     run_fn: StdMutex<Option<RunFn>>,
-    internal_rx: StdMutex<Option<Receiver<MessageType>>>,
-    internal_tx: Sender<MessageType>,
+    internal_rx: StdMutex<Option<Receiver<Message>>>,
+    internal_tx: Sender<Message>,
     state: Arc<RwLock<AgentState>>,
     shutdown: Shutdown,
-    sender: Sender<Message>,
-    inbox: TokioMutex<Receiver<Message>>,
+    sender: Sender<MessageType>,
+    inbox: TokioMutex<Receiver<MessageType>>,
     receiver: tokio::sync::broadcast::Receiver<AgentEvent>,
     outbox: tokio::sync::broadcast::Sender<AgentEvent>,
 }
@@ -160,8 +160,8 @@ impl Agent {
         role: String,
         rig_agent: rig::agent::Agent<M>,
     ) -> Self {
-        let (internal_tx, internal_rx) = channel::<MessageType>(10);
-        let (sender, inbox) = channel::<Message>(10);
+        let (internal_tx, internal_rx) = channel::<Message>(10);
+        let (sender, inbox) = channel::<MessageType>(10);
         let (outbox, receiver) = tokio::sync::broadcast::channel(10);
         let rig = Arc::new(rig_agent);
         let run_fn: RunFn = Box::new(move |prompt: String| {
@@ -214,8 +214,8 @@ impl Agent {
     }
 
     pub fn new_no_model(id: AgentId, role: String) -> Self {
-        let (internal_tx, internal_rx) = channel::<MessageType>(10);
-        let (sender, inbox) = channel::<Message>(10);
+        let (internal_tx, internal_rx) = channel::<Message>(10);
+        let (sender, inbox) = channel::<MessageType>(10);
         let (outbox, receiver) = tokio::sync::broadcast::channel(10);
         let run_fn: RunFn = Box::new(move |prompt: String| {
             Box::pin(stream! {
@@ -261,7 +261,7 @@ impl Agent {
     /// already erased behind [`RunFn`].
     async fn run_agent_loop(
         id: AgentId,
-        mut internal_rx: Receiver<MessageType>,
+        mut internal_rx: Receiver<Message>,
         run_fn: RunFn,
         state: Arc<RwLock<AgentState>>,
         current_task: Arc<RwLock<Option<String>>>,
@@ -276,8 +276,8 @@ impl Agent {
                     }
 
                     let prompt = match message {
-                        MessageType::User(p) => p,
-                        MessageType::AgentMessage(from, content) => {
+                        Message::User(p) => p,
+                        Message::AgentMessage(from, content) => {
                             format!("[message from agent {from}]: {content} \r\nif you want to reply you should send back")
                         }
                     };
@@ -299,7 +299,7 @@ impl Agent {
 
     /// Take `internal_rx` and `run_fn` from self (called once at the start
     /// of [`run`]).
-    fn take_plumbing(&self) -> Option<(Receiver<MessageType>, RunFn)> {
+    fn take_plumbing(&self) -> Option<(Receiver<Message>, RunFn)> {
         let rx = self.internal_rx.lock().unwrap().take()?;
         let run_fn = self.run_fn.lock().unwrap().take()?;
         Some((rx, run_fn))
@@ -308,7 +308,7 @@ impl Agent {
     /// Async helper that locks the inbox, awaits a message, and returns it.
     /// This is needed so [`tokio::select!`] can poll a future that holds a
     /// [`TokioMutex`] guard across the `recv()` await.
-    async fn recv_from_inbox(&self) -> Option<Message> {
+    async fn recv_from_inbox(&self) -> Option<MessageType> {
         self.inbox.lock().await.recv().await
     }
 
@@ -342,7 +342,7 @@ impl Agent {
             select! {
                 Some(msg) = self.recv_from_inbox() => {
                     match msg {
-                        Message::Control(cmd) => match cmd {
+                        MessageType::Control(cmd) => match cmd {
                             ControlMessage::Abort => {
                                 eprintln!("[agent {}] abort requested", self.id);
                                 self.shutdown.signal();
@@ -352,7 +352,7 @@ impl Agent {
                                 eprintln!("[agent {}] hibernate (not yet implemented)", self.id);
                             }
                         },
-                        Message::Data(data) => {
+                        MessageType::Data(data) => {
                             if self.shutdown.is_requested() {
                                 break;
                             }
@@ -376,7 +376,7 @@ impl Agent {
         eprintln!("[agent {}] shut down", self.id);
     }
 
-    pub fn sender(&self) -> &Sender<Message> {
+    pub fn sender(&self) -> &Sender<MessageType> {
         &self.sender
     }
 
