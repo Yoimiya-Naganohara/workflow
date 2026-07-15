@@ -10,6 +10,7 @@
 	import { Separator } from "$lib/components/ui/separator";
 	import { marked } from "marked";
 	import * as Dialog from "$lib/components/ui/dialog";
+	import * as Select from "$lib/components/ui/select";
 	import TextBlock from "$lib/components/chat/text-block.svelte";
 	import ToolCard from "$lib/components/chat/tool-card.svelte";
 	import ErrorBlock from "$lib/components/chat/error-block.svelte";
@@ -235,15 +236,16 @@
 	<div class="space-y-3">
 		<div class="flex flex-col gap-1.5">
 			<label class="text-xs font-medium text-muted-foreground" for="new-role">Role</label>
-			<select
-				id="new-role"
-				bind:value={newAgentRole}
-				class="flex h-8 w-full rounded-lg border border-input bg-background px-2.5 py-1 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-			>
-				{#each roles as r}
-					<option value={r.name}>{r.name}</option>
-				{/each}
-			</select>
+			<Select.Root bind:value={newAgentRole} type="single">
+				<Select.Trigger class="w-full text-xs h-8" id="new-role">
+					{newAgentRole}
+				</Select.Trigger>
+				<Select.Content>
+					{#each roles as r}
+						<Select.Item value={r.name}>{r.name}</Select.Item>
+					{/each}
+				</Select.Content>
+			</Select.Root>
 		</div>
 		<Card class="p-3 bg-muted/50">
 			<p class="text-xs text-muted-foreground leading-relaxed">
