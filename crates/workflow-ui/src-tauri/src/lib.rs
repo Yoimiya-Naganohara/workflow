@@ -45,12 +45,6 @@ struct Snapshot {
     messages: Vec<UiMessage>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct StreamDelta {
-    id: AgentId,
-    text: String,
-}
-
 struct ChatLog {
     messages: HashMap<AgentId, Vec<UiMessage>>,
     buffer: HashMap<AgentId, String>,
@@ -86,7 +80,7 @@ async fn subscribe_agent(
                 buf.push_str(&t);
                 let text = buf.clone();
                 drop(cs);
-                let _ = app.emit("stream", StreamDelta { id, text });
+                let _ = app.emit("text", (id, text));
             }
             AgentEvent::Reasoning(t) => {
                 let mut cs = chat.write().await;

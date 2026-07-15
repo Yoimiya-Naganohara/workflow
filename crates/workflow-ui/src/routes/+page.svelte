@@ -79,11 +79,6 @@
 		}
 	}
 
-	interface StreamDelta {
-		id: number;
-		text: string;
-	}
-
 	let streamText = $state<{ [key: number]: string }>({});
 
 	async function pull(sel?: number | null) {
@@ -100,8 +95,8 @@
 	onMount(() => {
 		loadRoles();
 		pull(null);
-		const unlistenStream = listen<StreamDelta>("stream", (e) => {
-			streamText[e.payload.id] = e.payload.text;
+	const unlistenStream = listen<[number, string]>("text", (e) => {
+		streamText[e.payload[0]] = e.payload[1];
 		});
 		const unlistenTick = listen("tick", () => {
 			pull();
