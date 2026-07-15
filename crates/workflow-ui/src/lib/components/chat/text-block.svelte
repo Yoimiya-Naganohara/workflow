@@ -1,27 +1,42 @@
 <script lang="ts">
-	import { Bot, User } from "@lucide/svelte";
+    import { Bot, User } from "@lucide/svelte";
 
-	let { text, html, role, streaming }: { text: string; html: string; role: "user" | "assistant"; streaming?: boolean } = $props();
+    let {
+        text,
+        html,
+        role,
+        streaming,
+    }: {
+        text: string;
+        html: string;
+        role: "user" | "assistant";
+        streaming?: boolean;
+    } = $props();
 </script>
 
 <div class="flex items-start gap-3">
-	<div class="size-7 rounded-full {role === 'user' ? 'bg-primary/10' : 'bg-muted-foreground/10'} flex items-center justify-center shrink-0 mt-0.5">
-		{#if role === "user"}
-			<User class="size-3.5 text-primary/70" />
-		{:else}
-			<Bot class="size-3.5 text-muted-foreground/70" />
-		{/if}
-	</div>
-	<div class="min-w-0 flex-1">
-		<div class="text-xs font-medium text-muted-foreground/60 mb-0.5">
-			{role === "user" ? "You" : "Agent"}
-		</div>
-		{#if role === "user"}
-			<div class="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap break-words">
-				{text}
-			</div>
-		{:else}
-			<div class="text-sm leading-relaxed prose-sm dark:prose-invert max-w-none
+    {#if role === "user"}
+        <div
+            class="size-7 rounded-full {role === 'user'
+                ? 'bg-primary/10'
+                : 'bg-muted-foreground/10'} flex items-center justify-center shrink-0 mt-0.5"
+        >
+            <User class="size-3.5 text-primary/70" />
+        </div>
+    {/if}
+    <div class="min-w-0 flex-1">
+        <div class="text-xs font-medium text-muted-foreground/60 mb-0.5">
+            {role === "user" ? "You" : ""}
+        </div>
+        {#if role === "user"}
+            <div
+                class="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap break-words"
+            >
+                {text}
+            </div>
+        {:else}
+            <div
+                class="text-sm leading-relaxed prose-sm dark:prose-invert max-w-none
 				[&_code]:rounded [&_code]:bg-muted-foreground/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_code]:font-mono
 				[&_pre]:rounded-lg [&_pre]:bg-neutral-950 [&_pre]:p-3 [&_pre]:text-xs [&_pre]:leading-relaxed [&_pre]:overflow-x-auto
 				[&_pre_code]:bg-transparent [&_pre_code]:p-0
@@ -33,9 +48,12 @@
 				[&_:not(pre)_>_code]:before:content-['`'] [&_:not(pre)_>_code]:after:content-['`']
 				[&_hr]:border-border/50
 				[&_table]:w-full [&_table]:text-xs [&_th]:text-left [&_th]:font-medium [&_th]:text-muted-foreground [&_th]:pb-1 [&_td]:py-0.5 [&_td]:border-t [&_td]:border-border/30
-			">
-				{@html html}{#if streaming}<span class="inline-block w-[2px] h-[1.1em] bg-foreground animate-pulse ml-0.5 align-text-bottom"></span>{/if}
-			</div>
-		{/if}
-	</div>
+			"
+            >
+                {@html html}{#if streaming}<span
+                        class="inline-block w-[2px] h-[1.1em] bg-foreground animate-pulse ml-0.5 align-text-bottom"
+                    ></span>{/if}
+            </div>
+        {/if}
+    </div>
 </div>

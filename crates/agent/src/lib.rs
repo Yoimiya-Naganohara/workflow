@@ -185,17 +185,6 @@ impl Agent {
                                     yield AgentEvent::ToolCall { name };
                                 }
                             }
-                            StreamedAssistantContent::Reasoning(reasoning) => {
-                                let mut buf = String::new();
-                                for block in reasoning.content {
-                                    if let rig::message::ReasoningContent::Text { text, .. } = block {
-                                        buf.push_str(&text);
-                                    }
-                                }
-                                if !buf.is_empty() {
-                                    yield AgentEvent::Reasoning(buf);
-                                }
-                            }
                             _ => {}
                         },
                         Ok(MultiTurnStreamItem::FinalResponse(_)) => {
@@ -289,7 +278,7 @@ impl Agent {
                     let prompt = match message {
                         MessageType::User(p) => p,
                         MessageType::AgentMessage(from, content) => {
-                            format!("[message from agent {from}]: {content}")
+                            format!("[message from agent {from}]: {content} \r\nif you want to reply you should send back")
                         }
                     };
 

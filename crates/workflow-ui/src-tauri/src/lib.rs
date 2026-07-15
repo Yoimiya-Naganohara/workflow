@@ -30,7 +30,10 @@ enum UiMessage {
     #[serde(rename = "thinking")]
     Thinking { text: String },
     #[serde(rename = "tool")]
-    Tool { text: String, result: Option<String> },
+    Tool {
+        text: String,
+        result: Option<String>,
+    },
     #[serde(rename = "error")]
     Error { text: String },
 }
@@ -80,16 +83,25 @@ async fn subscribe_agent(
         match ev {
             AgentEvent::Text(t) => {
                 let mut cs = chat.write().await;
-                cs.buffer.entry(id).or_default().push_str(&t);
-                let text = cs.buffer.get(&id).cloned().unwrap_or_default();
-                cs.streaming.insert(id, text.clone());
-                drop(cs);
-                let _ = app.emit("stream", StreamDelta { id, text });
+                let msgs = cs.messages.entry(id).or_default();
+                if msgs
+                    .last()
+                    .map_or(false, |m| matches!(m, UiMessage::Assistant { .. }))
+                {
+                    if let Some(UiMessage::Assistant { text: ref mut last }) = msgs.last_mut() {
+                        last.push_str(&t);
+                    }
+                } else {
+                    msgs.push(UiMessage::Assistant { text: t });
+                }
             }
             AgentEvent::Reasoning(t) => {
                 let mut cs = chat.write().await;
                 let msgs = cs.messages.entry(id).or_default();
-                if msgs.last().map_or(false, |m| matches!(m, UiMessage::Thinking { .. })) {
+                if msgs
+                    .last()
+                    .map_or(false, |m| matches!(m, UiMessage::Thinking { .. }))
+                {
                     if let Some(UiMessage::Thinking { text: ref mut last }) = msgs.last_mut() {
                         last.push_str(&t);
                     }
@@ -98,29 +110,50 @@ async fn subscribe_agent(
                 }
             }
             AgentEvent::ToolCall { name } => {
-                chat.write().await.messages.entry(id).or_default()
-                    .push(UiMessage::Tool { text: name, result: None });
+                chat.write()
+                    .await
+                    .messages
+                    .entry(id)
+                    .or_default()
+                    .push(UiMessage::Tool {
+                        text: name,
+                        result: None,
+                    });
             }
             AgentEvent::ToolResult { name, result } => {
                 let mut cs = chat.write().await;
                 let msgs = cs.messages.entry(id).or_default();
-                let idx = msgs.iter().rposition(|m| matches!(m, UiMessage::Tool { text, result: None } if *text == name));
+                let idx = msgs.iter().rposition(
+                    |m| matches!(m, UiMessage::Tool { text, result: None } if *text == name),
+                );
                 if let Some(i) = idx {
-                    msgs[i] = UiMessage::Tool { text: name, result: Some(result) };
+                    msgs[i] = UiMessage::Tool {
+                        text: name,
+                        result: Some(result),
+                    };
                 } else {
-                    msgs.push(UiMessage::Tool { text: name, result: Some(result) });
+                    msgs.push(UiMessage::Tool {
+                        text: name,
+                        result: Some(result),
+                    });
                 }
             }
             AgentEvent::TurnComplete => {
                 let mut cs = chat.write().await;
                 cs.streaming.remove(&id);
-                if let Some(text) = cs.buffer.remove(&id) {
-                    cs.messages.entry(id).or_default()
-                        .push(UiMessage::Assistant { text });
-                }
+                // if let Some(text) = cs.buffer.remove(&id) {
+                //     cs.messages
+                //         .entry(id)
+                //         .or_default()
+                //         .push(UiMessage::Assistant { text });
+                // }
             }
             AgentEvent::Error(e) => {
-                chat.write().await.messages.entry(id).or_default()
+                chat.write()
+                    .await
+                    .messages
+                    .entry(id)
+                    .or_default()
                     .push(UiMessage::Error { text: e });
             }
         }
@@ -158,7 +191,11 @@ async fn snapshot(app: AppHandle, selected: Option<AgentId>) -> Result<Snapshot,
     let messages = sel
         .and_then(|id| cs.messages.get(&id).cloned())
         .unwrap_or_default();
-    Ok(Snapshot { agents, selected: sel, messages })
+    Ok(Snapshot {
+        agents,
+        selected: sel,
+        messages,
+    })
 }
 
 #[tauri::command]
@@ -192,7 +229,11 @@ async fn send(app: AppHandle, target: AgentId, text: String) -> Result<Snapshot,
     let messages = sel
         .and_then(|id| cs.messages.get(&id).cloned())
         .unwrap_or_default();
-    Ok(Snapshot { agents, selected: sel, messages })
+    Ok(Snapshot {
+        agents,
+        selected: sel,
+        messages,
+    })
 }
 
 #[tauri::command]
@@ -203,20 +244,21 @@ async fn create_agent(app: AppHandle, role_name: String) -> Result<Vec<AgentInfo
     let id = s.next_id.fetch_add(1, Ordering::SeqCst);
     let pool = s.runtime.pool();
 
-    let role = s.role_pool.get(&RoleId::from(role_name.clone()))
+    let role = s
+        .role_pool
+        .get(&RoleId::from(role_name.clone()))
         .cloned()
         .unwrap_or_else(|| s.role_pool.get(&RoleId::default()).cloned().unwrap());
 
     let cfg = &s.agent_config;
 
     if cfg.api_key.is_empty() {
-        pool.add_agent(Arc::new(
-            Agent::new_no_model(id, role.name().to_owned()),
-        )).await.map_err(|e| e.to_string())?;
+        pool.add_agent(Arc::new(Agent::new_no_model(id, role.name().to_owned())))
+            .await
+            .map_err(|e| e.to_string())?;
     } else {
         use rig::{
-            client::CompletionClient,
-            memory::InMemoryConversationMemory,
+            client::CompletionClient, memory::InMemoryConversationMemory,
             providers::openai::CompletionsClient,
         };
 
@@ -226,7 +268,9 @@ async fn create_agent(app: AppHandle, role_name: String) -> Result<Vec<AgentInfo
             .build()
             .map_err(|e| e.to_string())?;
 
-        let handle = cfg.tool_handle.clone()
+        let handle = cfg
+            .tool_handle
+            .clone()
             .ok_or_else(|| "ToolServer not initialized".to_string())?;
 
         let rig_agent = client
@@ -260,24 +304,37 @@ async fn get_roles(app: AppHandle) -> Result<Vec<RoleInfo>, String> {
     let state = app.state::<RwLock<AppState>>();
     let s = state.read().await;
     let roles = s.role_pool.list();
-    Ok(roles.into_iter().map(|r| RoleInfo {
-        id: r.name().to_owned(),
-        name: r.name().to_owned(),
-        definition: r.definition().to_owned(),
-    }).collect())
+    Ok(roles
+        .into_iter()
+        .map(|r| RoleInfo {
+            id: r.name().to_owned(),
+            name: r.name().to_owned(),
+            definition: r.definition().to_owned(),
+        })
+        .collect())
 }
 
 #[tauri::command]
-async fn add_role(app: AppHandle, name: String, definition: String) -> Result<Vec<RoleInfo>, String> {
+async fn add_role(
+    app: AppHandle,
+    name: String,
+    definition: String,
+) -> Result<Vec<RoleInfo>, String> {
     let state = app.state::<RwLock<AppState>>();
     let mut s = state.write().await;
-    s.role_pool.add(RoleId::from(name.clone()), Role::new(name, definition, vec![]));
+    s.role_pool.add(
+        RoleId::from(name.clone()),
+        Role::new(name, definition, vec![]),
+    );
     let roles = s.role_pool.list();
-    Ok(roles.into_iter().map(|r| RoleInfo {
-        id: r.name().to_owned(),
-        name: r.name().to_owned(),
-        definition: r.definition().to_owned(),
-    }).collect())
+    Ok(roles
+        .into_iter()
+        .map(|r| RoleInfo {
+            id: r.name().to_owned(),
+            name: r.name().to_owned(),
+            definition: r.definition().to_owned(),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -313,7 +370,7 @@ pub fn run() {
                         ToolServer::new()
                             .tool(SendMessage::new(Arc::clone(&pool)))
                             .tool(ListAgents::new(Arc::clone(&pool)))
-                            .run()
+                            .run(),
                     )
                 } else {
                     None
@@ -322,10 +379,12 @@ pub fn run() {
                 (handle, api_key, base_url, model_name)
             };
 
-            let role_name = role_pool.get(&RoleId::default())
+            let role_name = role_pool
+                .get(&RoleId::default())
                 .map(|r| r.name().to_owned())
                 .unwrap_or_else(|| "planner".to_string());
-            let role_def = role_pool.get(&RoleId::default())
+            let role_def = role_pool
+                .get(&RoleId::default())
                 .map(|r| r.definition().to_owned())
                 .unwrap_or_default();
 
@@ -342,8 +401,7 @@ pub fn run() {
                         .unwrap();
                 } else {
                     use rig::{
-                        client::CompletionClient,
-                        memory::InMemoryConversationMemory,
+                        client::CompletionClient, memory::InMemoryConversationMemory,
                         providers::openai::CompletionsClient,
                     };
 
@@ -394,7 +452,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            ping, snapshot, send, create_agent, remove_agent, get_roles, add_role, get_agent_messages
+            ping,
+            snapshot,
+            send,
+            create_agent,
+            remove_agent,
+            get_roles,
+            add_role,
+            get_agent_messages
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

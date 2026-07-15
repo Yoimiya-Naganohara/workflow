@@ -253,7 +253,10 @@ impl Tool for Orchestrate {
                     .send(Message::Data(MessageType::User(task.task.clone())))
                     .await
                     .map_err(|e| {
-                        ToolError::Orchestrate(format!("failed to dispatch task '{}': {e}", task.id))
+                        ToolError::Orchestrate(format!(
+                            "failed to dispatch task '{}': {e}",
+                            task.id
+                        ))
                     })?;
 
                 assigned.push(TaskAssignment {

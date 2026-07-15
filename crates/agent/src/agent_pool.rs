@@ -2,11 +2,7 @@ use std::{num::NonZeroUsize, sync::Arc};
 
 use anyhow::Result;
 use lru::LruCache;
-use tokio::{
-    spawn,
-    sync::Mutex,
-    task::JoinHandle,
-};
+use tokio::{spawn, sync::Mutex, task::JoinHandle};
 
 use crate::{Agent, AgentId, ControlMessage, Message};
 
