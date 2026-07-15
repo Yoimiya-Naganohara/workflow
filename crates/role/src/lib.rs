@@ -127,6 +127,18 @@ impl Experience {
         }
         .into()
     }
+
+    pub fn role_id(&self) -> &RoleId {
+        &self.role_id
+    }
+
+    pub fn comment(&self) -> &str {
+        &self.comment
+    }
+
+    pub fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
 }
 // ── ExperiencePool (per-role ring buffer) ───────────────────
 
@@ -137,6 +149,12 @@ impl Experience {
 /// appending the new one.
 pub struct ExperiencePool {
     experiences: HashMap<RoleId, VecDeque<Experience>>,
+}
+
+impl Default for ExperiencePool {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ExperiencePool {
@@ -199,7 +217,7 @@ impl ExperiencePool {
 }
 
 // ── Optimizer ───────────────────────────────────────────────
-trait Embed {
+pub trait Embed {
     fn embed(&self, str: &str) -> Vec<f32>;
 }
 pub struct Optimizer {
@@ -264,7 +282,7 @@ impl Optimizer {
                 }
             }
             for tool in &experience.tool_calls {
-                let tool_vec = self.embedder.embed(&tool);
+                let tool_vec = self.embedder.embed(tool);
                 let similarity = self.cosine(&peak_summary_vec, &tool_vec);
                 peak_t = peak_t.max(similarity);
                 bottom_t = bottom_t.min(similarity);

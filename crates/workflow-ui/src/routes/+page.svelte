@@ -95,17 +95,15 @@
 	onMount(() => {
 		loadRoles();
 		pull(null);
-	const unlistenStream = listen<[number, string]>("text", (e) => {
-		streamText[e.payload[0]] = e.payload[1];
-		});
-		const unlistenTick = listen("tick", () => {
+		const unlistenWorkflow = listen<{ type: string; message?: string }>("workflow:event", (event) => {
+			if (event.payload.type === "error") {
+				error = event.payload.message ?? "runtime error";
+				return;
+			}
 			pull();
 		});
-		const interval = setInterval(pull, 2000);
 		return () => {
-			unlistenStream.then((fn) => fn());
-			unlistenTick.then((fn) => fn());
-			clearInterval(interval);
+			unlistenWorkflow.then((unlisten) => unlisten());
 		};
 	});
 
@@ -454,7 +452,7 @@
 						{#each renderedItems as item}
 							<div class="mb-3 last:mb-0">
 							{#if item.role === "text"}
-								<TextBlock text={item.text} html={item.html} role="text" streaming={item.streaming ?? false} />
+								<TextBlock text={item.text} html={item.html} role="assistant" streaming={item.streaming ?? false} />
 								{:else if item.role === "user"}
 									<TextBlock text={item.text} html={item.html} role="user" />
 								{:else if item.role === "thinking"}

@@ -18,8 +18,4 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-rig = { git = "https://github.com/Yoimiya-Naganohara/rig.git", version = "0.39", features = ["rmcp"] }
-workflow-agent = { path = "../../agent" }
 workflow-core = { path = "../../core" }
-workflow-tool = { path = "../../tool" }
-workflow-role = { path = "../../role" }

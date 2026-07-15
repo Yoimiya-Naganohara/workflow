@@ -5,9 +5,11 @@ authors.workspace = true
 edition.workspace = true
 
 [dependencies]
-rig.workspace=true
-tokio.workspace=true
+rig.workspace = true
+tokio.workspace = true
+serde.workspace = true
+thiserror.workspace = true
 
-workflow-agent = {path="../agent"}
-workflow-tool = {path="../tool"}
-workflow-role = {path="../role"}
+workflow-agent = { path = "../agent" }
+workflow-tool = { path = "../tool" }
+workflow-role = { path = "../role" }

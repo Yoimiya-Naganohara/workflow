@@ -2,15 +2,25 @@ use std::{num::NonZeroUsize, sync::Arc};
 
 use anyhow::Result;
 use lru::LruCache;
-use tokio::{spawn, sync::Mutex, task::JoinHandle};
+use tokio::{
+    spawn,
+    sync::{Mutex, broadcast},
+    task::JoinHandle,
+};
 
-use crate::{Agent, AgentId, ControlMessage, MessageType};
+use crate::{Agent, AgentId};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AgentInfo {
     pub id: AgentId,
     pub role: String,
     pub current_task: Option<String>,
+}
+
+#[derive(Clone)]
+pub enum AgentPoolEvent {
+    Added(Arc<Agent>),
+    Removed(AgentId),
 }
 
 struct AgentEntity {
@@ -20,13 +30,20 @@ struct AgentEntity {
 
 pub struct AgentPool {
     lru: Arc<Mutex<LruCache<AgentId, Arc<AgentEntity>>>>,
+    events: broadcast::Sender<AgentPoolEvent>,
 }
 
 impl AgentPool {
     pub fn new(capacity: NonZeroUsize) -> Self {
+        let (events, _) = broadcast::channel(capacity.get().max(32));
         Self {
             lru: Arc::new(Mutex::new(LruCache::new(capacity))),
+            events,
         }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<AgentPoolEvent> {
+        self.events.subscribe()
     }
 
     pub async fn add_agent(&self, agent: Arc<Agent>) -> Result<()> {
@@ -35,10 +52,16 @@ impl AgentPool {
             let agent = agent.clone();
             spawn(async move { agent.run().await })
         };
-        let entity = Arc::new(AgentEntity { agent, handler });
-        if let Some((_, old)) = self.lru.lock().await.push(id, entity) {
-            old.handler.abort();
+        let entity = Arc::new(AgentEntity {
+            agent: Arc::clone(&agent),
+            handler,
+        });
+        let evicted = self.lru.lock().await.push(id, entity);
+        if let Some((old_id, old)) = evicted {
+            Self::shutdown(&old);
+            let _ = self.events.send(AgentPoolEvent::Removed(old_id));
         }
+        let _ = self.events.send(AgentPoolEvent::Added(agent));
         Ok(())
     }
 
@@ -46,32 +69,32 @@ impl AgentPool {
         self.lru.lock().await.get(id).map(|r| r.agent.clone())
     }
 
-    async fn shutdown(entity: &Arc<AgentEntity>) {
-        let _ = entity
-            .agent
-            .sender()
-            .send(MessageType::Control(ControlMessage::Abort))
-            .await;
+    fn shutdown(entity: &AgentEntity) {
         entity.handler.abort();
     }
 
     pub async fn remove_agent(&self, id: &AgentId) {
-        if let Some(entity) = self.lru.lock().await.pop(id) {
-            Self::shutdown(&entity).await;
+        let entity = self.lru.lock().await.pop(id);
+        if let Some(entity) = entity {
+            Self::shutdown(&entity);
+            let _ = self.events.send(AgentPoolEvent::Removed(*id));
         }
     }
 
     pub async fn list_agents(&self) -> Vec<AgentInfo> {
-        let lru = self.lru.lock().await;
-        let mut out = Vec::with_capacity(lru.len());
-        for (_, entity) in lru.iter() {
-            let id = entity.agent.id();
-            let role = entity.agent.role().to_owned();
-            let task = entity.agent.current_task().read().await.clone();
+        let agents: Vec<Arc<Agent>> = {
+            let lru = self.lru.lock().await;
+            lru.iter()
+                .map(|(_, entity)| Arc::clone(&entity.agent))
+                .collect()
+        };
+
+        let mut out = Vec::with_capacity(agents.len());
+        for agent in agents {
             out.push(AgentInfo {
-                id,
-                role,
-                current_task: task,
+                id: agent.id(),
+                role: agent.role().to_owned(),
+                current_task: agent.current_task().read().await.clone(),
             });
         }
         out

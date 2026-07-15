@@ -10301,6 +10301,8 @@ name = "workflow-core"
 version = "0.1.0"
 dependencies = [
  "rig",
+ "serde",
+ "thiserror 2.0.18",
  "tokio",
  "workflow-agent",
  "workflow-role",
@@ -10336,17 +10338,13 @@ dependencies = [
 name = "workflow-ui"
 version = "0.1.0"
 dependencies = [
- "rig",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
  "tokio",
- "workflow-agent",
  "workflow-core",
- "workflow-role",
- "workflow-tool",
 ]
 
 [[package]]

@@ -3,24 +3,17 @@ pub mod agent_pool;
 use async_stream::stream;
 use futures::{Stream, StreamExt};
 use rig::{
-    agent::{AgentHook, MultiTurnStreamItem},
-    completion::CompletionModel,
-    message::Text,
+    agent::MultiTurnStreamItem, completion::CompletionModel, message::Text,
     streaming::StreamedAssistantContent,
 };
 use std::{
+    collections::VecDeque,
     pin::Pin,
-    sync::{
-        Arc, Mutex as StdMutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex as StdMutex},
 };
-use tokio::{
-    select,
-    sync::{
-        Mutex as TokioMutex, RwLock,
-        mpsc::{Receiver, Sender, channel, unbounded_channel},
-    },
+use tokio::sync::{
+    RwLock,
+    mpsc::{Receiver, Sender, channel},
 };
 
 // ── Types ────────────────────────────────────────────────────
@@ -70,34 +63,13 @@ pub enum AgentEvent {
     /// Reasoning text delta (chain-of-thought).
     Reasoning(String),
     /// A tool call started — the function name is now known.
-    ToolCall { name: String },
+    ToolCall { name: String, params: String },
     /// A tool call completed with a result.
     ToolResult { name: String, result: String },
     /// One completion turn finished successfully.
     TurnComplete,
     /// A stream-level error occurred.
     Error(String),
-}
-
-/// Shared runtime flag for graceful shutdown.
-struct Shutdown(Arc<AtomicBool>);
-
-impl Shutdown {
-    fn new() -> Self {
-        Self(Arc::new(AtomicBool::new(false)))
-    }
-
-    fn signal(&self) {
-        self.0.store(true, Ordering::Relaxed);
-    }
-
-    fn is_requested(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
-
-    fn clone(&self) -> Self {
-        Self(Arc::clone(&self.0))
-    }
 }
 
 pub type AgentId = u32;
@@ -110,11 +82,7 @@ pub fn current_agent_id() -> AgentId {
     CURRENT_AGENT_ID.try_with(|id| *id).unwrap_or(0)
 }
 
-/// Type-erased "run one turn" function: given a prompt, produce a stream of
-/// [`AgentEvent`]s. The concrete `rig::agent::Agent<M>` and its associated
-/// `StreamingResponse` type are captured *inside* the closure built by
-/// [`Agent::new`], so neither `M` nor its response type leaks into the
-/// [`Agent`] struct. This is what lets `Agent` be non-generic.
+/// Type-erased function that runs one model turn and yields agent events.
 pub type RunFn =
     Box<dyn Fn(String) -> Pin<Box<dyn Stream<Item = AgentEvent> + Send>> + Send + Sync>;
 
@@ -133,18 +101,17 @@ pub type RunFn =
 pub struct Agent {
     id: AgentId,
     role: String,
+
     current_task: Arc<RwLock<Option<String>>>,
-    run_fn: StdMutex<Option<RunFn>>,
-    internal_rx: StdMutex<Option<Receiver<Message>>>,
-    internal_tx: Sender<Message>,
     state: Arc<RwLock<AgentState>>,
-    shutdown: Shutdown,
+
+    run_fn: StdMutex<Option<RunFn>>,
+    inbox: StdMutex<Option<Receiver<MessageType>>>,
     sender: Sender<MessageType>,
-    inbox: TokioMutex<Receiver<MessageType>>,
+
     receiver: tokio::sync::broadcast::Receiver<AgentEvent>,
     outbox: tokio::sync::broadcast::Sender<AgentEvent>,
 }
-
 impl Agent {
     /// Create a new Agent, type-erasing the model.
     ///
@@ -155,43 +122,53 @@ impl Agent {
     ///   orchestrator (user prompts, peer messages, control signals).
     /// * `outbox` – sender for streamed [`AgentEvent`]s; the caller owns the
     ///   receiver and handles all output rendering/forwarding.
-    pub fn new<M: CompletionModel + 'static>(
-        id: AgentId,
-        role: String,
-        rig_agent: rig::agent::Agent<M>,
-    ) -> Self {
-        let (internal_tx, internal_rx) = channel::<Message>(10);
-        let (sender, inbox) = channel::<MessageType>(10);
-        let (outbox, receiver) = tokio::sync::broadcast::channel(10);
-        let rig = Arc::new(rig_agent);
-        let run_fn: RunFn = Box::new(move |prompt: String| {
-            let rig = Arc::clone(&rig);
+    pub fn new<M>(id: AgentId, role: String, rig_agent: rig::agent::Agent<M>) -> Self
+    where
+        M: CompletionModel + 'static,
+    {
+        const MAX_TURNS: usize = 100;
+        const CHANNEL_CAPACITY: usize = 32;
+
+        let (sender, inbox) = channel::<MessageType>(CHANNEL_CAPACITY);
+        let (outbox, receiver) = tokio::sync::broadcast::channel(CHANNEL_CAPACITY);
+        let rig_agent = Arc::new(rig_agent);
+        let run_fn: RunFn = Box::new(move |prompt| {
+            let rig_agent = Arc::clone(&rig_agent);
             Box::pin(stream! {
-                let mut stream = rig.runner(prompt).max_turns(100).stream().await;
+                let mut stream = rig_agent
+                    .runner(prompt)
+                    .max_turns(MAX_TURNS)
+                    .stream()
+                    .await;
+
                 while let Some(item) = stream.next().await {
-                    match item {
+                    let event = match item {
                         Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
                             StreamedAssistantContent::Text(Text { text, .. }) => {
-                                yield AgentEvent::Text(text);
+                                Some(AgentEvent::Text(text))
                             }
                             StreamedAssistantContent::ReasoningDelta { reasoning, .. }
                                 if !reasoning.is_empty() =>
                             {
-                                yield AgentEvent::Reasoning(reasoning);
+                                Some(AgentEvent::Reasoning(reasoning))
                             }
-                            StreamedAssistantContent::ToolCallDelta { content, .. } => {
-                                use rig::streaming::ToolCallDeltaContent;
-                                if let ToolCallDeltaContent::Name(name) = content {
-                                    yield AgentEvent::ToolCall { name };
-                                }
+                            StreamedAssistantContent::ToolCall { tool_call, .. } => {
+                                Some(AgentEvent::ToolCall {
+                                    name: tool_call.function.name,
+                                    params: tool_call.function.arguments.to_string(),
+                                })
                             }
-                            _ => {}
+                            _ => None,
                         },
                         Ok(MultiTurnStreamItem::FinalResponse(_)) => {
-                            yield AgentEvent::TurnComplete;
+                            Some(AgentEvent::TurnComplete)
                         }
-                        Ok(_) => {}
-                        Err(e) => yield AgentEvent::Error(e.to_string()),
+                        Ok(_) => None,
+                        Err(error) => Some(AgentEvent::Error(error.to_string())),
+                    };
+
+                    if let Some(event) = event {
+                        yield event;
                     }
                 }
             })
@@ -201,40 +178,10 @@ impl Agent {
             id,
             role,
             current_task: Arc::new(RwLock::new(None)),
-            run_fn: StdMutex::new(Some(run_fn)),
-            internal_rx: StdMutex::new(Some(internal_rx)),
-            internal_tx,
             state: Arc::new(RwLock::new(AgentState::Idle)),
-            sender,
-            inbox: TokioMutex::new(inbox),
-            shutdown: Shutdown::new(),
-            receiver,
-            outbox,
-        }
-    }
-
-    pub fn new_no_model(id: AgentId, role: String) -> Self {
-        let (internal_tx, internal_rx) = channel::<Message>(10);
-        let (sender, inbox) = channel::<MessageType>(10);
-        let (outbox, receiver) = tokio::sync::broadcast::channel(10);
-        let run_fn: RunFn = Box::new(move |prompt: String| {
-            Box::pin(stream! {
-                yield AgentEvent::Text(prompt);
-                yield AgentEvent::TurnComplete;
-            })
-        });
-
-        Self {
-            id,
-            role,
-            current_task: Arc::new(RwLock::new(None)),
             run_fn: StdMutex::new(Some(run_fn)),
-            internal_rx: StdMutex::new(Some(internal_rx)),
-            internal_tx,
-            state: Arc::new(RwLock::new(AgentState::Idle)),
+            inbox: StdMutex::new(Some(inbox)),
             sender,
-            inbox: TokioMutex::new(inbox),
-            shutdown: Shutdown::new(),
             receiver,
             outbox,
         }
@@ -256,124 +203,81 @@ impl Agent {
         &self.current_task
     }
 
-    /// Background event-loop that reads from the internal channel
-    /// and processes each message sequentially. Non-generic: the model is
-    /// already erased behind [`RunFn`].
-    async fn run_agent_loop(
-        id: AgentId,
-        mut internal_rx: Receiver<Message>,
-        run_fn: RunFn,
-        state: Arc<RwLock<AgentState>>,
-        current_task: Arc<RwLock<Option<String>>>,
-        shutdown: Shutdown,
-        outbox: tokio::sync::broadcast::Sender<AgentEvent>,
-    ) {
-        CURRENT_AGENT_ID
-            .scope(id, async {
-                while let Some(message) = internal_rx.recv().await {
-                    if shutdown.is_requested() {
-                        break;
-                    }
-
-                    let prompt = match message {
-                        Message::User(p) => p,
-                        Message::AgentMessage(from, content) => {
-                            format!("[message from agent {from}]: {content} \r\ndecide whether you want to reply")
-                        }
-                    };
-
-                    *current_task.write().await = Some(prompt.clone());
-                    *state.write().await = AgentState::Running;
-
-                    let mut stream = run_fn(prompt);
-                    while let Some(event) = stream.next().await {
-                        let _ = outbox.send(event);
-                    }
-
-                    *current_task.write().await = None;
-                    *state.write().await = AgentState::Idle;
-                }
-            })
-            .await;
-    }
-
-    /// Take `internal_rx` and `run_fn` from self (called once at the start
-    /// of [`run`]).
-    fn take_plumbing(&self) -> Option<(Receiver<Message>, RunFn)> {
-        let rx = self.internal_rx.lock().unwrap().take()?;
-        let run_fn = self.run_fn.lock().unwrap().take()?;
-        Some((rx, run_fn))
-    }
-
-    /// Async helper that locks the inbox, awaits a message, and returns it.
-    /// This is needed so [`tokio::select!`] can poll a future that holds a
-    /// [`TokioMutex`] guard across the `recv()` await.
-    async fn recv_from_inbox(&self) -> Option<MessageType> {
-        self.inbox.lock().await.recv().await
-    }
-
-    /// Run the main event loop.
+    /// Run the main event loop. This method may only be called once.
     ///
-    /// Spawns a background task for LLM processing so that the inbox stays
-    /// responsive during streaming.
+    /// Incoming data is queued while a turn is active. Control messages remain
+    /// responsive and `Abort` immediately drops the active model stream.
     pub async fn run(&self) {
-        // Move internal_rx and the erased runner into a background task.
-        let agent_handle = match self.take_plumbing() {
-            Some((rx, run_fn)) => {
-                let state = Arc::clone(&self.state);
-                let shutdown = self.shutdown.clone();
-                let outbox = self.outbox.clone();
-                let current_task = Arc::clone(&self.current_task);
-                let id = self.id;
-                tokio::spawn(Self::run_agent_loop(
-                    id,
-                    rx,
-                    run_fn,
-                    state,
-                    current_task,
-                    shutdown,
-                    outbox,
-                ))
-            }
-            _ => return,
+        let Some(mut inbox) = self.inbox.lock().unwrap().take() else {
+            return;
+        };
+        let Some(run_fn) = self.run_fn.lock().unwrap().take() else {
+            return;
         };
 
-        loop {
-            select! {
-                Some(msg) = self.recv_from_inbox() => {
-                    match msg {
-                        MessageType::Control(cmd) => match cmd {
-                            ControlMessage::Abort => {
-                                eprintln!("[agent {}] abort requested", self.id);
-                                self.shutdown.signal();
-                                break;
+        let mut pending = VecDeque::new();
+
+        'lifecycle: loop {
+            let message = match pending.pop_front() {
+                Some(message) => Some(MessageType::Data(message)),
+                None => inbox.recv().await,
+            };
+
+            let Some(message) = message else {
+                break;
+            };
+
+            match message {
+                MessageType::Control(ControlMessage::Abort) => break,
+                MessageType::Control(ControlMessage::Hibernate) => continue,
+                MessageType::Data(message) => {
+                    let prompt = match message {
+                        Message::User(prompt) => prompt,
+                        Message::AgentMessage(from, content) => format!(
+                            "[message from agent {from}]: {content}\n\
+                             Decide whether a reply is needed. If so, use send_message."
+                        ),
+                    };
+
+                    *self.current_task.write().await = Some(prompt.clone());
+                    *self.state.write().await = AgentState::Running;
+
+                    let mut events = run_fn(prompt);
+                    let mut completed = false;
+                    let mut abort = false;
+
+                    loop {
+                        tokio::select! {
+                            event = events.next() => match event {
+                                Some(AgentEvent::TurnComplete) => completed = true,
+                                Some(event) => {
+                                    let _ = self.outbox.send(event);
+                                }
+                                None => break,
+                            },
+                            incoming = inbox.recv() => match incoming {
+                                Some(MessageType::Data(message)) => pending.push_back(message),
+                                Some(MessageType::Control(ControlMessage::Hibernate)) => {}
+                                Some(MessageType::Control(ControlMessage::Abort)) | None => {
+                                    abort = true;
+                                    break;
+                                }
                             }
-                            ControlMessage::Hibernate => {
-                                eprintln!("[agent {}] hibernate (not yet implemented)", self.id);
-                            }
-                        },
-                        MessageType::Data(data) => {
-                            if self.shutdown.is_requested() {
-                                break;
-                            }
-                            if self.internal_tx.send(data).await.is_err() {
-                                eprintln!("[agent {}] internal channel closed", self.id);
-                                break;
-                            }
-                        },
+                        }
                     }
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    eprintln!("[agent {}] ctrl+c received", self.id);
-                    self.shutdown.signal();
-                    break;
+
+                    *self.current_task.write().await = None;
+                    *self.state.write().await = AgentState::Idle;
+
+                    if completed && !abort {
+                        let _ = self.outbox.send(AgentEvent::TurnComplete);
+                    }
+                    if abort {
+                        break 'lifecycle;
+                    }
                 }
             }
         }
-
-        // Wait for the agent loop to finish
-        let _ = agent_handle.await;
-        eprintln!("[agent {}] shut down", self.id);
     }
 
     pub fn sender(&self) -> &Sender<MessageType> {
@@ -386,10 +290,13 @@ impl Agent {
 }
 
 // ── Tests ────────────────────────────────────────────────────
-use rig::agent::{Flow, StepEvent};
+#[cfg(test)]
+use rig::agent::{AgentHook, Flow, StepEvent};
 
+#[cfg(test)]
 struct ToolAudit;
 
+#[cfg(test)]
 impl<M: CompletionModel> AgentHook<M> for ToolAudit {
     async fn on_event(&self, event: StepEvent<'_, M>) -> Flow {
         match event {

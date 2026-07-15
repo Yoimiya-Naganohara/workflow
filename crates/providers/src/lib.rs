@@ -101,6 +101,12 @@ pub struct Providers {
     providers: Vec<ProviderInfo>,
 }
 
+impl Default for Providers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Providers {
     pub fn new() -> Self {
         Self {
@@ -110,10 +116,10 @@ impl Providers {
 
     pub async fn fetch_provider_informations(&mut self, url: Option<&str>) {
         let url = url.unwrap_or("https://models.dev/api.json");
-        if let Ok(response) = reqwest::get(url).await {
-            if let Ok(map) = response.json::<HashMap<String, ProviderInfo>>().await {
-                self.providers = map.into_values().collect();
-            }
+        if let Ok(response) = reqwest::get(url).await
+            && let Ok(map) = response.json::<HashMap<String, ProviderInfo>>().await
+        {
+            self.providers = map.into_values().collect();
         }
     }
 
@@ -143,10 +149,10 @@ impl Providers {
 
     pub async fn save_to_file(&self, path: Option<&Path>) {
         let path = path.unwrap_or_else(|| Path::new("api.json"));
-        if let Ok(contents) = serde_json::to_string(&self.providers) {
-            if std::fs::write(path, contents).is_err() {
-                eprintln!("providers: write file error: {path:?}");
-            }
+        if let Ok(contents) = serde_json::to_string(&self.providers)
+            && std::fs::write(path, contents).is_err()
+        {
+            eprintln!("providers: write file error: {path:?}");
         }
     }
 }
