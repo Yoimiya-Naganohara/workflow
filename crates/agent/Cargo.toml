@@ -13,4 +13,5 @@ dashmap.workspace = true
 anyhow.workspace = true
 lru.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true

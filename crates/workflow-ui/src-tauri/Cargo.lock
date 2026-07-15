@@ -10293,6 +10293,7 @@ dependencies = [
  "lru",
  "rig",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -10303,6 +10304,7 @@ version = "0.1.0"
 dependencies = [
  "rig",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "workflow-agent",

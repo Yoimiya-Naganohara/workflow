@@ -1,9 +1,12 @@
 pub mod agent_pool;
+pub mod protocol;
 
 use async_stream::stream;
 use futures::{Stream, StreamExt};
 use rig::{
-    agent::MultiTurnStreamItem, completion::CompletionModel, message::Text,
+    agent::MultiTurnStreamItem,
+    completion::CompletionModel,
+    message::{Reasoning, Text},
     streaming::StreamedAssistantContent,
 };
 use std::{
@@ -40,7 +43,7 @@ impl std::fmt::Display for AgentState {
 #[derive(Debug, Clone)]
 pub enum Message {
     User(String),
-    AgentMessage(AgentId, String),
+    AgentMessage(protocol::PeerMessage),
 }
 
 /// Out-of-band lifecycle controls. These use a separate unbounded channel so
@@ -164,10 +167,22 @@ impl Agent {
                                 Some(AgentEvent::Text(text))
                             }
                             StreamedAssistantContent::ReasoningDelta { reasoning, .. }
-                                if !reasoning.is_empty() =>
+                                 =>
                             {
                                 Some(AgentEvent::Reasoning(reasoning))
                             }
+                            // StreamedAssistantContent::Reasoning(Reasoning{content,..})=>{
+                            //     dbg!(&content);
+                            //     content.iter().for_each(|v|{
+                            //         match v {
+                            //             rig::message::ReasoningContent::Text{text,..}=>{
+                            //                 dbg!(text);
+                            //             }
+                            //             _ => {},
+                            //         }
+                            //     });
+                            //     Some(AgentEvent::Reasoning(String::new()))
+                            // }
                             StreamedAssistantContent::ToolCall { tool_call, .. } => {
                                 Some(AgentEvent::ToolCall {
                                     name: tool_call.function.name,
@@ -271,9 +286,7 @@ impl Agent {
 
             let prompt = match message {
                 Message::User(prompt) => prompt,
-                Message::AgentMessage(from, content) => {
-                    format!("Message from agent {from}:\n{content}")
-                }
+                Message::AgentMessage(msg) => msg.render_for_model(),
             };
 
             *self.current_task.write().await = Some(prompt.clone());

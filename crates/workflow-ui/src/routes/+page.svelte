@@ -6,11 +6,14 @@
 	import { Button } from "$lib/components/ui/button";
 	import { Textarea } from "$lib/components/ui/textarea";
 	import { Input } from "$lib/components/ui/input";
+	import { Card } from "$lib/components/ui/card";
+	import { Separator } from "$lib/components/ui/separator";
 	import { marked } from "marked";
 	import * as Dialog from "$lib/components/ui/dialog";
 	import TextBlock from "$lib/components/chat/text-block.svelte";
 	import ToolCard from "$lib/components/chat/tool-card.svelte";
 	import ErrorBlock from "$lib/components/chat/error-block.svelte";
+	import ThinkingBlock from "$lib/components/chat/thinking-block.svelte";
 	import Badge from "$lib/components/ui/badge/badge.svelte";
 	import {
 		Send, Plus, Trash2, Settings, Brain, Blocks, Bot,
@@ -242,11 +245,11 @@
 				{/each}
 			</select>
 		</div>
-		<div class="rounded-lg bg-muted/50 border border-border/50 p-3">
+		<Card class="p-3 bg-muted/50">
 			<p class="text-xs text-muted-foreground leading-relaxed">
 				{roleDesc(newAgentRole)}
 			</p>
-		</div>
+		</Card>
 	</div>
 	<Dialog.Footer>
 		<Button variant="outline" onclick={() => showNewAgent = false}>Cancel</Button>
@@ -292,13 +295,13 @@
 	</Dialog.Header>
 	<div class="space-y-4 max-h-64 overflow-y-auto">
 		{#each roles as r}
-			<div class="rounded-lg border border-border p-3 space-y-1">
+			<Card class="p-3 space-y-1">
 				<div class="flex items-center gap-2">
 					<Brain class="size-3.5 text-muted-foreground" />
 					<span class="text-sm font-medium">{r.name}</span>
 				</div>
 				<p class="text-xs text-muted-foreground">{r.definition}</p>
-			</div>
+			</Card>
 		{/each}
 	</div>
 	<div class="border-t border-border pt-3 space-y-3">
@@ -316,86 +319,90 @@
 </Dialog.Root>
 
 <!-- Main Layout -->
-<div style="position: fixed; top: 44px; left: 0; right: 0; bottom: 0; display: flex; flex-direction: row; background: var(--background); overflow: hidden;">
+<div class="fixed inset-0 top-11 flex flex-row bg-background overflow-hidden">
 	<!-- Sidebar -->
-	<aside style="display: flex; flex-direction: column; width: 240px; min-width: 240px; border-right: 1px solid var(--border); background: var(--muted); overflow: hidden;">
-		<div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;">
-			<div style="display: flex; align-items: center; gap: 8px;">
-				<Bot style="width: 14px; height: 14px; color: var(--muted-foreground);" />
-				<span style="font-size: 12px; font-weight: 600; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em;">Agents</span>
+	<aside class="flex flex-col w-60 min-w-60 border-r border-border bg-muted overflow-hidden">
+		<div class="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
+			<div class="flex items-center gap-2">
+				<Bot class="size-3.5 text-muted-foreground" />
+				<span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Agents</span>
 			</div>
-			<div style="display: flex; align-items: center; gap: 4px;">
-				<span style="font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums;">{agents.length}</span>
+			<div class="flex items-center gap-1">
+				<span class="text-xs text-muted-foreground tabular-nums">{agents.length}</span>
 				<Button variant="ghost" size="icon-xs" onclick={() => { loadRoles(); showNewAgent = true; }}>
-					<Plus style="width: 12px; height: 12px;" />
+					<Plus class="size-3" />
 				</Button>
 			</div>
 		</div>
-		<div style="flex: 1; min-height: 0; overflow-y: auto; padding: 6px 8px;">
-			<div style="display: flex; flex-direction: column; gap: 2px;">
+		<div class="flex-1 min-h-0 overflow-y-auto py-1.5 px-2">
+			<div class="flex flex-col gap-0.5">
 				{#each agents as a (a.id)}
-					<div style="display: flex; align-items: center; gap: 2px;">
-						<button
+					<div class="flex items-center gap-0.5 group">
+						<Button
+							variant="ghost"
 							class={cn(
-								"flex items-center gap-2 flex-1 w-0 rounded-md px-2 py-1.5 text-left transition-colors",
-								"hover:bg-accent hover:text-accent-foreground",
-								"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-								selected === a.id && "bg-accent text-accent-foreground border-l-2 border-primary rounded-s-none",
+								"w-full justify-start gap-2 px-2 py-1.5 text-xs font-medium rounded-md",
+								selected === a.id && "bg-accent text-accent-foreground border-l-2 border-primary rounded-s-none"
 							)}
 							onclick={() => selectAgent(a.id)}
 						>
 							<div class={cn("size-1.5 shrink-0 rounded-full", agentStatus(a))}></div>
-							<div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
-								<span style="font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">#{a.id}</span>
-								<Badge variant="outline" style="font-size: 10px; padding: 0 4px; font-weight: 400;">{a.role}</Badge>
+							<div class="flex items-center gap-1.5 min-w-0">
+								<span class="truncate">#{a.id}</span>
+								<Badge variant="outline" class="text-[10px] px-1 py-px font-normal leading-none">{a.role}</Badge>
 							</div>
-						</button>
-						<button
-							class="opacity-0 group-hover:opacity-100 shrink-0 rounded p-0.5 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-opacity"
+						</Button>
+						<Button
+							variant="ghost"
+							size="icon-xs"
+							class="opacity-0 group-hover:opacity-100 shrink-0 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all duration-150"
 							onclick={() => removeAgent(a.id)}
 						>
-							<Trash2 style="width: 12px; height: 12px;" />
-						</button>
+							<Trash2 class="size-3" />
+						</Button>
 					</div>
 				{:else}
-					<div style="display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 32px 0; text-align: center;">
-						<Circle style="width: 24px; height: 24px; color: var(--muted-foreground); opacity: 0.3;" />
-						<p style="font-size: 12px; color: var(--muted-foreground);">No agents yet</p>
-						<Button variant="outline" size="xs" onclick={() => { loadRoles(); showNewAgent = true; }} style="margin-top: 4px;">
-							<Plus style="width: 12px; height: 12px;" /> Create
+					<div class="flex flex-col items-center gap-1.5 py-8 text-center">
+						<Circle class="size-6 text-muted-foreground/30" />
+						<p class="text-xs text-muted-foreground">No agents yet</p>
+						<Button variant="outline" size="xs" onclick={() => { loadRoles(); showNewAgent = true; }} class="mt-1">
+							<Plus class="size-3" /> Create
 						</Button>
 					</div>
 				{/each}
 			</div>
 		</div>
 
+		<Separator />
+
 		<!-- Roles Section -->
-		<div style="border-top: 1px solid var(--border); flex-shrink: 0;">
-			<button
-				style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em; hover:background: var(--accent); transition: colors; cursor: pointer; background: none; border: none;"
+		<div class="shrink-0">
+			<Button
+				variant="ghost"
+				class="w-full justify-between px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider h-auto rounded-none"
 				onclick={() => rolesExpanded = !rolesExpanded}
 			>
-				<div style="display: flex; align-items: center; gap: 8px;">
-					<Brain style="width: 14px; height: 14px;" />
+				<div class="flex items-center gap-2">
+					<Brain class="size-3.5" />
 					<span>Roles</span>
 				</div>
-				<div style="display: flex; align-items: center; gap: 4px;">
+				<div class="flex items-center gap-1">
 					<Button variant="ghost" size="icon-xs" onclick={(e) => { e.stopPropagation(); showRoles = true; }}>
-						<Settings style="width: 12px; height: 12px;" />
+						<Settings class="size-3" />
 					</Button>
 					{#if rolesExpanded}
-						<ChevronDown style="width: 12px; height: 12px;" />
+						<ChevronDown class="size-3 transition-transform" />
 					{:else}
-						<ChevronRight style="width: 12px; height: 12px;" />
+						<ChevronRight class="size-3 transition-transform" />
 					{/if}
 				</div>
-			</button>
+			</Button>
 			{#if rolesExpanded}
-				<div style="padding: 0 12px 8px; display: flex; flex-direction: column; gap: 4px;">
+				<div class="px-3 pb-2 flex flex-col gap-1">
 					{#each roles as r}
-						<div style="display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px;">
-							<div style="width: 6px; height: 6px; border-radius: 50%; background: var(--primary); opacity: 0.4;"></div>
-							<span style="font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{r.name}</span>
+						<div class="flex items-center gap-2 px-2 py-1 rounded">
+							<div class="size-1.5 rounded-full bg-primary/40"></div>
+							<span class="text-xs truncate">{r.name}</span>
 						</div>
 					{/each}
 				</div>
@@ -404,29 +411,27 @@
 	</aside>
 
 	<!-- Main Content -->
-	<div style="display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden;">
+	<div class="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
 		<!-- Tab Bar -->
-		<div class="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-card shrink-0">
-			<button
-				class={cn(
-					"flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-					currentTab === "chat" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-				)}
+		<div class="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-card shrink-0">
+			<Button
+				variant="ghost"
+				size="sm"
+				class={cn("text-xs", currentTab === "chat" && "bg-accent text-accent-foreground")}
 				onclick={() => currentTab = "chat"}
 			>
 				<MessageSquare class="size-3.5" />
 				Chat
-			</button>
-			<button
-				class={cn(
-					"flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-					currentTab === "orchestrate" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-				)}
+			</Button>
+			<Button
+				variant="ghost"
+				size="sm"
+				class={cn("text-xs", currentTab === "orchestrate" && "bg-accent text-accent-foreground")}
 				onclick={() => currentTab = "orchestrate"}
 			>
 				<Blocks class="size-3.5" />
 				Orchestrate
-			</button>
+			</Button>
 			<div class="flex-1"></div>
 			<Button variant="ghost" size="icon-xs" onclick={() => showSettings = true}>
 				<Settings class="size-3.5" />
@@ -438,13 +443,13 @@
 			<div class="flex flex-col flex-1 min-h-0">
 			{#if renderedItems.length === 0}
 				<div class="flex-1 flex items-center justify-center">
-					<div class="flex flex-col items-center gap-3 text-center py-16 max-w-xs">
+					<Card class="flex flex-col items-center gap-3 text-center py-12 px-8 max-w-xs border-dashed">
 						<div class="size-12 rounded-full bg-muted flex items-center justify-center">
 							<MessageSquare class="size-6 text-muted-foreground/30" />
 						</div>
 						<p class="text-sm font-medium text-muted-foreground/60">No messages yet</p>
 						<p class="text-xs text-muted-foreground/40">Select an agent and send a message to begin.</p>
-					</div>
+					</Card>
 				</div>
 			{:else}
 				<div class="flex-1 min-h-0 overflow-y-auto" bind:this={scrollEl}>
@@ -456,7 +461,7 @@
 								{:else if item.role === "user"}
 									<TextBlock text={item.text} html={item.html} role="user" />
 								{:else if item.role === "thinking"}
-									<div class="text-xs text-muted-foreground/60 italic leading-relaxed whitespace-pre-wrap">{item.text}</div>
+									<ThinkingBlock text={item.text} />
 								{:else if item.role === "tool"}
 									<ToolCard name={item.text} result={item.result ?? undefined} status={item.status ?? "done"} />
 								{:else if item.role === "error"}
@@ -469,35 +474,39 @@
 			{/if}
 
 			{#if error}
-				<div class="shrink-0 px-4 py-1.5 bg-destructive/10 border-t border-destructive/20">
+				<Card class="shrink-0 mx-3 mb-2 px-3 py-2 bg-destructive/5 border-destructive/20 border-dashed">
 					<p class="text-xs text-destructive">{error}</p>
-				</div>
+				</Card>
 			{/if}
 
-			<div class="shrink-0 border-t border-border p-3">
+			<div class="shrink-0 bg-card border-t border-border p-3">
 				<form onsubmit={submit} class="mx-auto max-w-3xl flex gap-2 items-end">
-					<Textarea
-						bind:value={input}
-						placeholder={selected != null ? "Type a message..." : "Select an agent first..."}
-						class="min-h-9 max-h-32 resize-none text-sm"
-						disabled={selected == null}
-						onkeydown={(e) => {
-							if (e.key === "Enter" && !e.shiftKey) {
-								e.preventDefault();
-								submit(e);
-							}
-						}}
-					/>
-					<Button type="submit" disabled={!input.trim() || selected == null || loading} class="shrink-0 mb-px">
-						<Send class="size-3.5" />
-					</Button>
+					<div class="flex-1 relative">
+						<Textarea
+							bind:value={input}
+							placeholder={selected != null ? "Type a message..." : "Select an agent first..."}
+							class="min-h-9 max-h-32 resize-none text-sm pr-9"
+							disabled={selected == null}
+							onkeydown={(e) => {
+								if (e.key === "Enter" && !e.shiftKey) {
+									e.preventDefault();
+									submit(e);
+								}
+							}}
+						/>
+						<div class="absolute right-1 bottom-1">
+							<Button type="submit" disabled={!input.trim() || selected == null || loading} size="icon-sm">
+								<Send class="size-3.5" />
+							</Button>
+						</div>
+					</div>
 				</form>
 			</div>
 			</div>
 		{:else}
 			<!-- Orchestrate Tab -->
-			<div class="flex-1 flex items-center justify-center">
-				<div class="flex flex-col items-center gap-3 text-center py-16 max-w-sm">
+			<div class="flex-1 flex items-center justify-center p-8">
+				<Card class="flex flex-col items-center gap-3 text-center py-12 px-8 max-w-sm border-dashed">
 					<div class="size-12 rounded-full bg-muted flex items-center justify-center">
 						<Blocks class="size-6 text-muted-foreground/40" />
 					</div>
@@ -518,7 +527,7 @@
 						</Button>
 						<p class="text-[10px] text-muted-foreground/50">Requires LLM provider with API key configured.</p>
 					</div>
-				</div>
+				</Card>
 			</div>
 		{/if}
 	</div>

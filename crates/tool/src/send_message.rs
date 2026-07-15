@@ -1,12 +1,18 @@
 // ── SendMessage ──────────────────────────────────────────────
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::Deserialize;
-use workflow_agent::{Message, agent_pool::AgentPool, current_agent_id};
+use workflow_agent::{
+    Message, agent_pool::AgentPool, current_agent_id,
+    protocol::{PeerIntent, PeerMessage},
+};
 
 use crate::ToolError;
+
+static NEXT_MSG_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Deserialize)]
 pub struct SendMessageArgs {
@@ -55,6 +61,15 @@ impl Tool for SendMessage {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let from_id = current_agent_id();
+        let msg = PeerMessage {
+            id: NEXT_MSG_ID.fetch_add(1, Ordering::Relaxed),
+            thread_id: 0,
+            from: from_id,
+            to: args.target_id,
+            intent: PeerIntent::Request,
+            reply_to: None,
+            content: args.message,
+        };
 
         let agent = self
             .pool
@@ -63,7 +78,7 @@ impl Tool for SendMessage {
             .ok_or(ToolError::AgentNotFound(args.target_id))?;
 
         agent
-            .send(Message::AgentMessage(from_id, args.message))
+            .send(Message::AgentMessage(msg))
             .await
             .map_err(|source| ToolError::SendFailed {
                 receiver: args.target_id,

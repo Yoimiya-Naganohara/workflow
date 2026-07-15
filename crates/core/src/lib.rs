@@ -154,7 +154,7 @@ impl Runtime {
     pub fn try_new(config: RuntimeConfig) -> Result<Self, RuntimeError> {
         let agent_pool = Arc::new(AgentPool::new(config.agent_capacity));
         let roles = Arc::new(RwLock::new(RolePool::default()));
-        let next_id = Arc::new(AtomicU32::new(1));
+        let next_id = Arc::new(AtomicU32::new(AgentId::default()));
         let observer = Arc::new(RwLock::new(None::<AgentObserver>));
 
         let client = CompletionsClient::builder()
@@ -470,7 +470,11 @@ fn make_agent_factory(
             .tool_server_handle(handle)
             .memory(InMemoryConversationMemory::new())
             .conversation(id.to_string())
-            .preamble(role.definition())
+            .preamble(&format!(
+                "{}\n{}",
+                role.definition(),
+                workflow_agent::protocol::A2A_SYSTEM_PROMPT
+            ))
             .build();
         let agent = Arc::new(Agent::new(id, agent_role, rig_agent));
         if let Some(observer) = observer.read().unwrap().clone() {
@@ -493,7 +497,7 @@ mod tests {
 
         let agents = runtime.list_agents().await;
         assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].id, 1);
+        assert_eq!(agents[0].id, 0);
         assert_eq!(agents[0].role, "planner");
     }
 
@@ -505,9 +509,9 @@ mod tests {
         let executor = runtime.create_agent("executor".to_owned()).await.unwrap();
         let planner = runtime.create_agent("planner".to_owned()).await.unwrap();
 
-        assert_eq!(executor.id, 2);
+        assert_eq!(executor.id, 1);
         assert_eq!(executor.role, "executor");
-        assert_eq!(planner.id, 3);
+        assert_eq!(planner.id, 2);
         assert_eq!(planner.role, "planner");
     }
 }
