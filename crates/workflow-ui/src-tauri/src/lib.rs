@@ -54,7 +54,6 @@ struct StreamDelta {
 struct ChatLog {
     messages: HashMap<AgentId, Vec<UiMessage>>,
     buffer: HashMap<AgentId, String>,
-    streaming: HashMap<AgentId, String>,
 }
 
 struct AgentConfig {
@@ -83,17 +82,11 @@ async fn subscribe_agent(
         match ev {
             AgentEvent::Text(t) => {
                 let mut cs = chat.write().await;
-                let msgs = cs.messages.entry(id).or_default();
-                if msgs
-                    .last()
-                    .map_or(false, |m| matches!(m, UiMessage::Assistant { .. }))
-                {
-                    if let Some(UiMessage::Assistant { text: ref mut last }) = msgs.last_mut() {
-                        last.push_str(&t);
-                    }
-                } else {
-                    msgs.push(UiMessage::Assistant { text: t });
-                }
+                let buf = cs.buffer.entry(id).or_default();
+                buf.push_str(&t);
+                let text = buf.clone();
+                drop(cs);
+                let _ = app.emit("stream", StreamDelta { id, text });
             }
             AgentEvent::Reasoning(t) => {
                 let mut cs = chat.write().await;
@@ -108,6 +101,7 @@ async fn subscribe_agent(
                 } else {
                     msgs.push(UiMessage::Thinking { text: t });
                 }
+                let _ = app.emit("tick", ());
             }
             AgentEvent::ToolCall { name } => {
                 chat.write()
@@ -119,6 +113,7 @@ async fn subscribe_agent(
                         text: name,
                         result: None,
                     });
+                let _ = app.emit("tick", ());
             }
             AgentEvent::ToolResult { name, result } => {
                 let mut cs = chat.write().await;
@@ -137,16 +132,17 @@ async fn subscribe_agent(
                         result: Some(result),
                     });
                 }
+                let _ = app.emit("tick", ());
             }
             AgentEvent::TurnComplete => {
                 let mut cs = chat.write().await;
-                // cs.streaming.remove(&id);
-                // if let Some(text) = cs.buffer.remove(&id) {
-                //     cs.messages
-                //         .entry(id)
-                //         .or_default()
-                //         .push(UiMessage::Assistant { text });
-                // }
+                if let Some(text) = cs.buffer.remove(&id) {
+                    cs.messages
+                        .entry(id)
+                        .or_default()
+                        .push(UiMessage::Assistant { text });
+                }
+                let _ = app.emit("tick", ());
             }
             AgentEvent::Error(e) => {
                 chat.write()
@@ -155,9 +151,9 @@ async fn subscribe_agent(
                     .entry(id)
                     .or_default()
                     .push(UiMessage::Error { text: e });
+                let _ = app.emit("tick", ());
             }
         }
-        let _ = app.emit("tick", ());
     }
 }
 
@@ -428,7 +424,6 @@ pub fn run() {
             let chat = Arc::new(RwLock::new(ChatLog {
                 messages: HashMap::new(),
                 buffer: HashMap::new(),
-                streaming: HashMap::new(),
             }));
 
             app.manage(RwLock::new(AppState {
