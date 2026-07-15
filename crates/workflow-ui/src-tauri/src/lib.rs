@@ -104,15 +104,16 @@ async fn subscribe_agent(
                 let _ = app.emit("tick", ());
             }
             AgentEvent::ToolCall { name } => {
-                chat.write()
-                    .await
-                    .messages
-                    .entry(id)
-                    .or_default()
-                    .push(UiMessage::Tool {
-                        text: name,
-                        result: None,
-                    });
+                let mut cs = chat.write().await;
+                let text = cs.buffer.remove(&id);
+                let msgs = cs.messages.entry(id).or_default();
+                if let Some(t) = text {
+                    msgs.push(UiMessage::Assistant { text: t });
+                }
+                msgs.push(UiMessage::Tool {
+                    text: name,
+                    result: None,
+                });
                 let _ = app.emit("tick", ());
             }
             AgentEvent::ToolResult { name, result } => {
