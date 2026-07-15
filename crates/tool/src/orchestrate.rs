@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use tokio::{sync::Mutex, task::JoinSet};
-use workflow_agent::{Agent, AgentEvent, AgentId, Message, MessageType, agent_pool::AgentPool};
+use workflow_agent::{Agent, AgentEvent, AgentId, Message, agent_pool::AgentPool};
 
 use crate::ToolError;
 
@@ -301,16 +301,9 @@ impl Tool for Orchestrate {
                 // Subscribe before dispatch so a fast completion cannot be
                 // emitted before the scheduler starts listening.
                 let mut receiver = agent.receiver();
-                agent
-                    .sender()
-                    .send(MessageType::Data(Message::User(prompt)))
-                    .await
-                    .map_err(|e| {
-                        ToolError::Orchestrate(format!(
-                            "failed to dispatch task '{}': {e}",
-                            task.id
-                        ))
-                    })?;
+                agent.send(Message::User(prompt)).await.map_err(|e| {
+                    ToolError::Orchestrate(format!("failed to dispatch task '{}': {e}", task.id))
+                })?;
 
                 let task_id = task.id.clone();
                 completions.spawn(async move {

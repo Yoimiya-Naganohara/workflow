@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::Deserialize;
-use workflow_agent::{Message, MessageType, agent_pool::AgentPool, current_agent_id};
+use workflow_agent::{Message, agent_pool::AgentPool, current_agent_id};
 
 use crate::ToolError;
 
@@ -62,11 +62,8 @@ impl Tool for SendMessage {
             .await
             .ok_or(ToolError::AgentNotFound(args.target_id))?;
 
-        let sender = agent.sender().clone();
-        let msg = MessageType::Data(Message::AgentMessage(from_id, args.message));
-
-        sender
-            .send(msg)
+        agent
+            .send(Message::AgentMessage(from_id, args.message))
             .await
             .map_err(|source| ToolError::SendFailed {
                 receiver: args.target_id,

@@ -15,7 +15,7 @@ use serde::Serialize;
 use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
 pub use workflow_agent::agent_pool::AgentInfo;
 use workflow_agent::{
-    Agent, AgentEvent, AgentId, Message, MessageType,
+    Agent, AgentEvent, AgentId, Message,
     agent_pool::{AgentPool, AgentPoolEvent},
 };
 use workflow_role::{Role, RoleId, RolePool};
@@ -261,8 +261,7 @@ impl Runtime {
         let _ = self.events.send(WorkflowEvent::TranscriptChanged(id));
 
         agent
-            .sender()
-            .send(MessageType::Data(Message::User(text)))
+            .send(Message::User(text))
             .await
             .map_err(|error| RuntimeError::SendMessage {
                 agent_id: id,

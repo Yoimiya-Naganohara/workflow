@@ -7863,6 +7863,7 @@ dependencies = [
  "lru",
  "rig",
  "serde",
+ "thiserror",
  "tokio",
 ]
 

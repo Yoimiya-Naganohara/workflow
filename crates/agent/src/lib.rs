@@ -7,13 +7,12 @@ use rig::{
     streaming::StreamedAssistantContent,
 };
 use std::{
-    collections::VecDeque,
     pin::Pin,
     sync::{Arc, Mutex as StdMutex},
 };
 use tokio::sync::{
     RwLock,
-    mpsc::{Receiver, Sender, channel},
+    mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel},
 };
 
 // ── Types ────────────────────────────────────────────────────
@@ -22,6 +21,8 @@ use tokio::sync::{
 pub enum AgentState {
     Idle,
     Running,
+    Hibernating,
+    Stopped,
 }
 
 impl std::fmt::Display for AgentState {
@@ -29,26 +30,34 @@ impl std::fmt::Display for AgentState {
         match self {
             AgentState::Idle => write!(f, "idle"),
             AgentState::Running => write!(f, "running"),
+            AgentState::Hibernating => write!(f, "hibernating"),
+            AgentState::Stopped => write!(f, "stopped"),
         }
     }
 }
 
 /// Data payload (LLM prompts, inter-agent content).
+#[derive(Debug, Clone)]
 pub enum Message {
     User(String),
     AgentMessage(AgentId, String),
 }
 
-/// Control signals (shutdown, persist).
+/// Out-of-band lifecycle controls. These use a separate unbounded channel so
+/// shutdown cannot be delayed behind queued prompts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlMessage {
     Abort,
     Hibernate,
+    Resume,
 }
 
-/// Inbound message discriminated by kind.
-pub enum MessageType {
-    Control(ControlMessage),
-    Data(Message),
+#[derive(Debug, thiserror::Error)]
+pub enum AgentRunError {
+    #[error("agent runtime has already been started")]
+    AlreadyStarted,
+    #[error("agent lifecycle state is poisoned")]
+    LifecyclePoisoned,
 }
 
 /// Streamed output emitted by an [`Agent`] for an external consumer to handle.
@@ -98,6 +107,12 @@ pub type RunFn =
 /// in the external orchestrator, not here. The struct is deliberately
 /// non-generic so an [`AgentPool`] can hold agents backed by *different*
 /// models/providers.
+struct AgentRuntime {
+    run_fn: RunFn,
+    inbox: Receiver<Message>,
+    controls: UnboundedReceiver<ControlMessage>,
+}
+
 pub struct Agent {
     id: AgentId,
     role: String,
@@ -105,9 +120,9 @@ pub struct Agent {
     current_task: Arc<RwLock<Option<String>>>,
     state: Arc<RwLock<AgentState>>,
 
-    run_fn: StdMutex<Option<RunFn>>,
-    inbox: StdMutex<Option<Receiver<MessageType>>>,
-    sender: Sender<MessageType>,
+    runtime: StdMutex<Option<AgentRuntime>>,
+    sender: Sender<Message>,
+    controls: UnboundedSender<ControlMessage>,
 
     receiver: tokio::sync::broadcast::Receiver<AgentEvent>,
     outbox: tokio::sync::broadcast::Sender<AgentEvent>,
@@ -129,7 +144,8 @@ impl Agent {
         const MAX_TURNS: usize = 100;
         const CHANNEL_CAPACITY: usize = 32;
 
-        let (sender, inbox) = channel::<MessageType>(CHANNEL_CAPACITY);
+        let (sender, inbox) = channel::<Message>(CHANNEL_CAPACITY);
+        let (controls, control_inbox) = unbounded_channel::<ControlMessage>();
         let (outbox, receiver) = tokio::sync::broadcast::channel(CHANNEL_CAPACITY);
         let rig_agent = Arc::new(rig_agent);
         let run_fn: RunFn = Box::new(move |prompt| {
@@ -179,9 +195,13 @@ impl Agent {
             role,
             current_task: Arc::new(RwLock::new(None)),
             state: Arc::new(RwLock::new(AgentState::Idle)),
-            run_fn: StdMutex::new(Some(run_fn)),
-            inbox: StdMutex::new(Some(inbox)),
+            runtime: StdMutex::new(Some(AgentRuntime {
+                run_fn,
+                inbox,
+                controls: control_inbox,
+            })),
             sender,
+            controls,
             receiver,
             outbox,
         }
@@ -205,83 +225,115 @@ impl Agent {
 
     /// Run the main event loop. This method may only be called once.
     ///
-    /// Incoming data is queued while a turn is active. Control messages remain
-    /// responsive and `Abort` immediately drops the active model stream.
-    pub async fn run(&self) {
-        let Some(mut inbox) = self.inbox.lock().unwrap().take() else {
-            return;
-        };
-        let Some(run_fn) = self.run_fn.lock().unwrap().take() else {
-            return;
-        };
-
-        let mut pending = VecDeque::new();
+    /// The bounded data inbox provides backpressure while a turn is active.
+    /// Lifecycle controls travel out-of-band, so abort and hibernate remain
+    /// responsive even when the data inbox is full. Hibernating cancels the
+    /// active turn; queued messages remain in the bounded inbox until resume.
+    pub async fn run(&self) -> Result<(), AgentRunError> {
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| AgentRunError::LifecyclePoisoned)?
+            .take()
+            .ok_or(AgentRunError::AlreadyStarted)?;
+        let mut hibernating = false;
 
         'lifecycle: loop {
-            let message = match pending.pop_front() {
-                Some(message) => Some(MessageType::Data(message)),
-                None => inbox.recv().await,
-            };
-
-            let Some(message) = message else {
-                break;
-            };
-
-            match message {
-                MessageType::Control(ControlMessage::Abort) => break,
-                MessageType::Control(ControlMessage::Hibernate) => continue,
-                MessageType::Data(message) => {
-                    let prompt = match message {
-                        Message::User(prompt) => prompt,
-                        Message::AgentMessage(from, content) => format!(
-                            "[message from agent {from}]: {content}\n\
-                             Decide whether a reply is needed. If so, use send_message."
-                        ),
-                    };
-
-                    *self.current_task.write().await = Some(prompt.clone());
-                    *self.state.write().await = AgentState::Running;
-
-                    let mut events = run_fn(prompt);
-                    let mut completed = false;
-                    let mut abort = false;
-
-                    loop {
-                        tokio::select! {
-                            event = events.next() => match event {
-                                Some(AgentEvent::TurnComplete) => completed = true,
-                                Some(event) => {
-                                    let _ = self.outbox.send(event);
-                                }
-                                None => break,
-                            },
-                            incoming = inbox.recv() => match incoming {
-                                Some(MessageType::Data(message)) => pending.push_back(message),
-                                Some(MessageType::Control(ControlMessage::Hibernate)) => {}
-                                Some(MessageType::Control(ControlMessage::Abort)) | None => {
-                                    abort = true;
-                                    break;
-                                }
-                            }
+            if hibernating {
+                *self.state.write().await = AgentState::Hibernating;
+                loop {
+                    match runtime.controls.recv().await {
+                        Some(ControlMessage::Resume) => {
+                            hibernating = false;
+                            *self.state.write().await = AgentState::Idle;
+                            break;
                         }
-                    }
-
-                    *self.current_task.write().await = None;
-                    *self.state.write().await = AgentState::Idle;
-
-                    if completed && !abort {
-                        let _ = self.outbox.send(AgentEvent::TurnComplete);
-                    }
-                    if abort {
-                        break 'lifecycle;
+                        Some(ControlMessage::Hibernate) => {}
+                        Some(ControlMessage::Abort) | None => break 'lifecycle,
                     }
                 }
             }
+
+            let message = tokio::select! {
+                message = runtime.inbox.recv() => match message {
+                    Some(message) => message,
+                    None => break,
+                },
+                control = runtime.controls.recv() => match control {
+                    Some(ControlMessage::Abort) | None => break,
+                    Some(ControlMessage::Hibernate) => {
+                        hibernating = true;
+                        continue;
+                    }
+                    Some(ControlMessage::Resume) => continue,
+                }
+            };
+
+            let prompt = match message {
+                Message::User(prompt) => prompt,
+                Message::AgentMessage(from, content) => {
+                    format!("Message from agent {from}:\n{content}")
+                }
+            };
+
+            *self.current_task.write().await = Some(prompt.clone());
+            *self.state.write().await = AgentState::Running;
+
+            let mut events = (runtime.run_fn)(prompt);
+            let mut completed = false;
+            let mut abort = false;
+
+            loop {
+                tokio::select! {
+                    event = events.next() => match event {
+                        Some(AgentEvent::TurnComplete) => completed = true,
+                        Some(event) => {
+                            let _ = self.outbox.send(event);
+                        }
+                        None => break,
+                    },
+                    control = runtime.controls.recv() => match control {
+                        Some(ControlMessage::Resume) => {}
+                        Some(ControlMessage::Hibernate) => {
+                            hibernating = true;
+                            break;
+                        }
+                        Some(ControlMessage::Abort) | None => {
+                            abort = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            *self.current_task.write().await = None;
+            *self.state.write().await = AgentState::Idle;
+
+            if completed && !abort && !hibernating {
+                let _ = self.outbox.send(AgentEvent::TurnComplete);
+            }
+            if abort {
+                break 'lifecycle;
+            }
         }
+
+        *self.current_task.write().await = None;
+        *self.state.write().await = AgentState::Stopped;
+        Ok(())
     }
 
-    pub fn sender(&self) -> &Sender<MessageType> {
-        &self.sender
+    pub async fn send(
+        &self,
+        message: Message,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<Message>> {
+        self.sender.send(message).await
+    }
+
+    pub fn control(
+        &self,
+        message: ControlMessage,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<ControlMessage>> {
+        self.controls.send(message)
     }
 
     pub fn receiver(&self) -> tokio::sync::broadcast::Receiver<AgentEvent> {

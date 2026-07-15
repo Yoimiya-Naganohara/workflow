@@ -13,3 +13,4 @@ dashmap.workspace = true
 anyhow.workspace = true
 lru.workspace = true
 serde.workspace = true
+thiserror.workspace = true

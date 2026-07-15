@@ -50,7 +50,11 @@ impl AgentPool {
         let id = agent.id();
         let handler = {
             let agent = agent.clone();
-            spawn(async move { agent.run().await })
+            spawn(async move {
+                if let Err(error) = agent.run().await {
+                    eprintln!("agent runtime stopped: {error}");
+                }
+            })
         };
         let entity = Arc::new(AgentEntity {
             agent: Arc::clone(&agent),
