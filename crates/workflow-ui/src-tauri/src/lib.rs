@@ -78,9 +78,9 @@ async fn subscribe_agent(
     chat: Arc<RwLock<ChatLog>>,
 ) {
     let mut rx = agent.receiver();
-    loop {
-        match rx.recv().await {
-            Ok(AgentEvent::Text(t)) => {
+    while let Ok(ev) = rx.recv().await {
+        match ev {
+            AgentEvent::Text(t) => {
                 let mut cs = chat.write().await;
                 let buf = cs.buffer.entry(id).or_default();
                 buf.push_str(&t);
@@ -88,7 +88,7 @@ async fn subscribe_agent(
                 drop(cs);
                 let _ = app.emit("stream", StreamDelta { id, text });
             }
-            Ok(AgentEvent::Reasoning(t)) => {
+            AgentEvent::Reasoning(t) => {
                 let mut cs = chat.write().await;
                 let msgs = cs.messages.entry(id).or_default();
                 if msgs
@@ -103,7 +103,7 @@ async fn subscribe_agent(
                 }
                 let _ = app.emit("tick", ());
             }
-            Ok(AgentEvent::ToolCall { name }) => {
+            AgentEvent::ToolCall { name } => {
                 let mut cs = chat.write().await;
                 let text = cs.buffer.remove(&id);
                 let msgs = cs.messages.entry(id).or_default();
@@ -116,7 +116,7 @@ async fn subscribe_agent(
                 });
                 let _ = app.emit("tick", ());
             }
-            Ok(AgentEvent::ToolResult { name, result }) => {
+            AgentEvent::ToolResult { name, result } => {
                 let mut cs = chat.write().await;
                 let msgs = cs.messages.entry(id).or_default();
                 let idx = msgs.iter().rposition(
@@ -135,7 +135,7 @@ async fn subscribe_agent(
                 }
                 let _ = app.emit("tick", ());
             }
-            Ok(AgentEvent::TurnComplete) => {
+            AgentEvent::TurnComplete => {
                 let mut cs = chat.write().await;
                 if let Some(text) = cs.buffer.remove(&id) {
                     cs.messages
@@ -145,7 +145,7 @@ async fn subscribe_agent(
                 }
                 let _ = app.emit("tick", ());
             }
-            Ok(AgentEvent::Error(e)) => {
+            AgentEvent::Error(e) => {
                 chat.write()
                     .await
                     .messages
@@ -154,11 +154,6 @@ async fn subscribe_agent(
                     .push(UiMessage::Error { text: e });
                 let _ = app.emit("tick", ());
             }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                eprintln!("subscribe_agent({}): lagged by {}", id, n);
-                continue;
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         }
     }
 }
