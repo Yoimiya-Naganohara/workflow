@@ -3,11 +3,12 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use workflow_core::{Runtime, RuntimeConfig, RuntimeSnapshot, WorkflowEvent};
-use workflow_providers::Providers;
+use workflow_providers::service::ProviderService;
+use workflow_providers::ProviderInfo;
 
 struct AppState {
     runtime: Mutex<Option<Arc<Runtime>>>,
-    providers: Mutex<Providers>,
+    service: Mutex<ProviderService>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -69,39 +70,44 @@ fn entry_from_provider(p: &workflow_providers::ProviderInfo) -> ProviderEntry {
 #[tauri::command]
 async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderEntry>, String> {
     {
-        let guard = state.providers.lock().map_err(|e| e.to_string())?;
-        let entries: Vec<ProviderEntry> =
-            guard.get_providers().iter().map(entry_from_provider).collect();
+        let guard = state.service.lock().map_err(|e| e.to_string())?;
+        let entries: Vec<ProviderEntry> = guard
+            .store()
+            .providers()
+            .iter()
+            .map(entry_from_provider)
+            .collect();
         if !entries.is_empty() {
             return Ok(entries);
         }
     }
 
-    // Load from file (lock released before async call)
-    let mut providers = Providers::new();
-    providers.load_from_file(None).await;
-    let entries: Vec<ProviderEntry> = providers
-        .get_providers()
+    // Load from cache (lock released before async call)
+    let mut service = ProviderService::new();
+    service.initialize().await.map_err(|e| e.to_string())?;
+    let entries: Vec<ProviderEntry> = service
+        .store()
+        .providers()
         .iter()
         .map(entry_from_provider)
         .collect();
-    let mut guard = state.providers.lock().map_err(|e| e.to_string())?;
-    *guard = providers;
+    let mut guard = state.service.lock().map_err(|e| e.to_string())?;
+    *guard = service;
     Ok(entries)
 }
 
 #[tauri::command]
 async fn fetch_providers(state: State<'_, AppState>) -> Result<Vec<ProviderEntry>, String> {
-    let mut providers = Providers::new();
-    providers.fetch_provider_informations(None).await;
-    providers.save_to_file(None).await;
-    let entries: Vec<ProviderEntry> = providers
-        .get_providers()
+    let mut service = ProviderService::new();
+    service.refresh().await.map_err(|e| e.to_string())?;
+    let entries: Vec<ProviderEntry> = service
+        .store()
+        .providers()
         .iter()
         .map(entry_from_provider)
         .collect();
-    let mut guard = state.providers.lock().map_err(|e| e.to_string())?;
-    *guard = providers;
+    let mut guard = state.service.lock().map_err(|e| e.to_string())?;
+    *guard = service;
     Ok(entries)
 }
 
@@ -114,9 +120,10 @@ async fn configure_runtime(
     model: String,
 ) -> Result<(), String> {
     let base_url = {
-        let guard = state.providers.lock().map_err(|e| e.to_string())?;
+        let guard = state.service.lock().map_err(|e| e.to_string())?;
         guard
-            .get_providers()
+            .store()
+            .providers()
             .iter()
             .find(|p| p.id == provider_id)
             .and_then(|p| p.api.clone())
@@ -292,9 +299,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let providers = Mutex::new(Providers::new());
+            let service = Mutex::new(ProviderService::new());
             let runtime = Mutex::new(None);
-            app.manage(AppState { runtime, providers });
+            app.manage(AppState { runtime, service });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

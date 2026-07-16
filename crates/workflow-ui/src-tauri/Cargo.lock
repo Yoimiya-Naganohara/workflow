@@ -10328,10 +10328,12 @@ name = "workflow-providers"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dirs",
  "reqwest 0.13.4",
  "rig",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "workflow-tool",
 ]

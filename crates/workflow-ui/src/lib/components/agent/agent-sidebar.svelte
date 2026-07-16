@@ -31,8 +31,8 @@
 	} = $props();
 </script>
 
-<aside class="flex flex-col w-60 min-w-60 border-r border-border bg-muted overflow-hidden shrink-0">
-	<div class="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
+<aside class="flex flex-col w-60 min-w-60 bg-transparent overflow-hidden shrink-0">
+	<div class="flex items-center justify-between px-3 py-2 shrink-0">
 		<div class="flex items-center gap-2">
 			<Bot class="size-3.5 text-muted-foreground" />
 			<span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Agents</span>

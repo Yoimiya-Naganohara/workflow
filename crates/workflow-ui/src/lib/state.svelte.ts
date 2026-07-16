@@ -38,7 +38,7 @@ class AppState {
 
 	#unlisten: (() => void) | null = null;
 
-	get chatItems(): ChatItem[] {
+	chatItems: ChatItem[] = $derived.by(() => {
 		return this.messages.map((m, i) => {
 			if (m.type === "text") {
 				let html = "";
@@ -53,9 +53,9 @@ class AppState {
 			}
 			return { id: i, type: m.type, text: m.text };
 		});
-	}
+	});
 
-	get agentStatuses(): Map<AgentId, AgentStatus> {
+	agentStatuses: Map<AgentId, AgentStatus> = $derived.by(() => {
 		const map = new Map<AgentId, AgentStatus>();
 		for (const a of this.agents) {
 			if (a.current_task) {
@@ -76,7 +76,7 @@ class AppState {
 			}
 		}
 		return map;
-	}
+	});
 
 	openDialog = (id: DialogId) => { this.dialog = id; };
 	closeDialog = () => { this.dialog = null; };
@@ -210,11 +210,12 @@ class AppState {
 	refreshProviders = async () => {
 		this.pendingAction = { type: "refresh-providers" };
 		try {
+			const fetched = await invoke("fetch_providers") as ProviderEntry[];
 			this.providers.length = 0;
-			this.providers.push(...(await invoke("fetch_providers")) as ProviderEntry[]);
+			this.providers.push(...fetched);
 			this.error = "";
 		} catch (e) {
-			this.error = `refresh providers: ${e}`;
+			this.error = e instanceof Error ? e.message : `refresh providers: ${e}`;
 		} finally {
 			this.pendingAction = null;
 		}
@@ -236,9 +237,9 @@ class AppState {
 
 	init = async () => {
 		await this.loadRoles();
-		if (this.configured) {
-			await this.pull(null);
-		}
+		await this.pull(null);
+		await this.loadProviders();
+		this.refreshProviders();
 		this.#unlisten = await listen<UiEvent>("workflow:event", (event) => {
 			const entry: LogEntry = { ts: Date.now(), event: event.payload };
 			this.eventLog.push(entry);
@@ -247,7 +248,7 @@ class AppState {
 				this.error = event.payload.message ?? "runtime error";
 				return;
 			}
-			if (this.configured) this.pull();
+			this.pull();
 		});
 	};
 

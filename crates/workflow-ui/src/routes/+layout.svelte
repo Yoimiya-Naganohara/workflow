@@ -10,7 +10,7 @@
 </script>
 
 <ModeWatcher />
-<div class="flex h-dvh w-screen flex-col bg-background relative">
+<div class="flex h-dvh w-screen flex-col relative">
 	<header class="flex items-center justify-between border-b border-border px-4 h-11 shrink-0 bg-card z-40">
 		<div class="flex items-center gap-2">
 			<div class="size-2 rounded-full bg-primary"></div>

@@ -45,7 +45,7 @@
 		variant="ghost"
 		class={cn(
 			"w-full justify-start gap-2 px-2 py-1.5 text-xs font-medium rounded-md",
-			selected && "bg-accent text-accent-foreground border-l-2 border-primary rounded-s-none"
+			selected && "bg-accent text-accent-foreground"
 		)}
 		onclick={() => onSelect(agent.id)}
 	>

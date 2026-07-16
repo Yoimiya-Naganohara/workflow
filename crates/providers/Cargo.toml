@@ -11,4 +11,9 @@ anyhow.workspace=true
 serde.workspace=true
 serde_json.workspace=true
 tokio.workspace=true
+thiserror.workspace=true
+dirs = "6"
 workflow-tool = {path="../tool"}
+
+[dev-dependencies]
+tempfile.workspace = true

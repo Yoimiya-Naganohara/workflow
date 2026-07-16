@@ -39,7 +39,6 @@
 	refreshing={app.pendingAction?.type === "refresh-providers"}
 	onOpenChange={(o) => { if (!o) app.closeDialog(); }}
 	onConfigure={(pid, key, model) => app.configureRuntime(pid, key, model)}
-	onLoadProviders={() => app.loadProviders()}
 	onRefreshProviders={() => app.refreshProviders()}
 />
 
@@ -50,7 +49,7 @@
 	onOpenChange={(o) => { if (!o) app.closeDialog(); }}
 />
 
-<div class="fixed inset-0 top-11 flex flex-row bg-background overflow-hidden">
+<div class="fixed inset-0 top-11 flex flex-row overflow-hidden">
 	<AgentSidebar
 		agents={app.agents}
 		selected={app.selected}
@@ -64,7 +63,7 @@
 		onToggleRoles={() => app.toggleRoles()}
 	/>
 
-	<div class="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
+	<div class="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden bg-background">
 		<div class="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-card shrink-0">
 			<Button
 				variant="ghost"
