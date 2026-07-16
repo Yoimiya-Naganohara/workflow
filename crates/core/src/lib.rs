@@ -18,6 +18,7 @@ use workflow_agent::{
     Agent, AgentEvent, AgentId, Message,
     agent_pool::{AgentPool, AgentPoolEvent},
 };
+use workflow_config::*;
 use workflow_role::{Role, RoleId, RolePool};
 use workflow_tool::{
     list_agents::ListAgents,
@@ -32,17 +33,55 @@ type AgentObserver = Arc<dyn Fn(Arc<Agent>) + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
-    pub api_key: String,
-    pub base_url: String,
+    pub provider: ProviderConfig,
     pub model: String,
     pub agent_capacity: NonZeroUsize,
+}
+
+impl RuntimeConfig {
+    pub fn resolve() -> Self {
+        let file = FileConfigSource::new(FileConfigSource::default_path());
+        let merged = match merge_configs(&[&DefaultConfigSource, &file, &EnvConfigSource]) {
+            Ok(c) => c,
+            Err(_) => return Self::default(),
+        };
+
+        let provider = merged
+            .iter()
+            .find(|p| p.requires_api_key() && !p.api_key.is_empty())
+            .or_else(|| merged.first());
+
+        let default = Self::default();
+        match provider {
+            Some(p) => {
+                let model = p.models.first().cloned().unwrap_or_else(|| default.model.clone());
+                let mut provider = p.clone();
+                if provider.models.is_empty() {
+                    provider.models.push(model.clone());
+                }
+                Self {
+                    provider,
+                    model,
+                    agent_capacity: default.agent_capacity,
+                }
+            }
+            None => default,
+        }
+    }
 }
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            api_key: std::env::var("OPENCODE_API_KEY").unwrap_or_default(),
-            base_url: "https://opencode.ai/zen/v1".to_owned(),
+            provider: ProviderConfig {
+                id: "opencode".to_owned(),
+                name: "OpenCode AI".to_owned(),
+                protocol: ProviderProtocol::OpenAiCompatible,
+                base_url: "https://opencode.ai/zen/v1".to_owned(),
+                api_key: std::env::var("OPENCODE_API_KEY").unwrap_or_default(),
+                models: vec!["big-pickle".to_owned()],
+                ..Default::default()
+            },
             model: "big-pickle".to_owned(),
             agent_capacity: NonZeroUsize::new(DEFAULT_AGENT_CAPACITY).unwrap(),
         }
@@ -147,7 +186,7 @@ impl Default for Runtime {
 
 impl Runtime {
     pub fn new() -> Self {
-        Self::try_new(RuntimeConfig::default())
+        Self::try_new(RuntimeConfig::resolve())
             .expect("default runtime configuration must be valid")
     }
 
@@ -155,11 +194,14 @@ impl Runtime {
         let agent_pool = Arc::new(AgentPool::new(config.agent_capacity));
         let roles = Arc::new(RwLock::new(RolePool::default()));
         let next_id = Arc::new(AtomicU32::new(AgentId::default()));
-        let observer = Arc::new(RwLock::new(None::<AgentObserver>));
+        let observer: Arc<RwLock<Option<AgentObserver>>> = Arc::new(RwLock::new(None));
 
-        let client = CompletionsClient::builder()
-            .base_url(&config.base_url)
-            .api_key(&config.api_key)
+        let mut client_builder = CompletionsClient::builder()
+            .api_key(&config.provider.api_key as &str);
+        if !config.provider.base_url.is_empty() {
+            client_builder = client_builder.base_url(&config.provider.base_url);
+        }
+        let client = client_builder
             .build()
             .map_err(|error| RuntimeError::Provider(error.to_string()))?;
 

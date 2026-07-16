@@ -1,0 +1,10 @@
+[package]
+name = "workflow-config"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+futures.workspace = true

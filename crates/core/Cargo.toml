@@ -14,3 +14,4 @@ thiserror.workspace = true
 workflow-agent = { path = "../agent" }
 workflow-tool = { path = "../tool" }
 workflow-role = { path = "../role" }
+workflow-config = { path = "../config" }

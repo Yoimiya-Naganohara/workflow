@@ -97,6 +97,15 @@ pub struct ProviderInfo {
     pub models: HashMap<String, ModelInfo>,
 }
 
+pub fn default_cache_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home)
+        .join(".workflow")
+        .join("api.json")
+}
+
 pub struct Providers {
     providers: Vec<ProviderInfo>,
 }
@@ -128,7 +137,8 @@ impl Providers {
     }
 
     pub async fn load_from_file(&mut self, path: Option<&Path>) {
-        let path = path.unwrap_or_else(|| Path::new("api.json"));
+        let cache = default_cache_path();
+        let path = path.unwrap_or_else(|| cache.as_path());
         match std::fs::read_to_string(path) {
             Ok(contents) if !contents.is_empty() => {
                 match serde_json::from_str::<HashMap<String, ProviderInfo>>(&contents) {
@@ -148,11 +158,15 @@ impl Providers {
     }
 
     pub async fn save_to_file(&self, path: Option<&Path>) {
-        let path = path.unwrap_or_else(|| Path::new("api.json"));
-        if let Ok(contents) = serde_json::to_string(&self.providers)
-            && std::fs::write(path, contents).is_err()
-        {
-            eprintln!("providers: write file error: {path:?}");
+        let cache = default_cache_path();
+        let path = path.unwrap_or_else(|| cache.as_path());
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(contents) = serde_json::to_string(&self.providers) {
+            if std::fs::write(path, contents).is_err() {
+                eprintln!("providers: write file error: {path:?}");
+            }
         }
     }
 }

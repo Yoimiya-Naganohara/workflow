@@ -10299,6 +10299,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "workflow-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "workflow-core"
 version = "0.1.0"
 dependencies = [
@@ -10308,7 +10318,21 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "workflow-agent",
+ "workflow-config",
  "workflow-role",
+ "workflow-tool",
+]
+
+[[package]]
+name = "workflow-providers"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest 0.13.4",
+ "rig",
+ "serde",
+ "serde_json",
+ "tokio",
  "workflow-tool",
 ]
 
@@ -10347,7 +10371,9 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tokio",
+ "workflow-config",
  "workflow-core",
+ "workflow-providers",
 ]
 
 [[package]]
