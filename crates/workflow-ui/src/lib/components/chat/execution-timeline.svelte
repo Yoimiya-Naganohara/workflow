@@ -51,7 +51,7 @@
 				</div>
 			</div>
 		{/if}
-		<VirtualList {items} defaultEstimatedItemHeight={60}>
+		<VirtualList {items} defaultEstimatedItemHeight={60} containerClass="virtual-list-container flex-1">
 			{#snippet renderItem(item: ChatItem, index: number)}
 				<div class="mx-auto max-w-3xl px-4 sm:px-6">
 					<div class="flex gap-3">
