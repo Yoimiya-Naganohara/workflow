@@ -98,6 +98,33 @@ pub fn current_agent_id() -> AgentId {
 pub type RunFn =
     Box<dyn Fn(String) -> Pin<Box<dyn Stream<Item = AgentEvent> + Send>> + Send + Sync>;
 
+struct Budget {
+    send_message_budget: u8,
+    used_send_message_budget: u8,
+}
+impl Budget {
+    pub fn new(send_message_budget: u8) -> Self {
+        if send_message_budget == u8::MAX {
+            panic!("NOT ALLOWED VALUE {}", send_message_budget)
+        }
+        Self {
+            send_message_budget,
+            used_send_message_budget: 0,
+        }
+    }
+
+    pub fn request_message(&mut self) -> bool {
+        if self.send_message_budget > self.used_send_message_budget {
+            self.used_send_message_budget += 1;
+            true
+        } else {
+            false
+        }
+    }
+    pub fn reset(&mut self) {
+        self.used_send_message_budget = 0;
+    }
+}
 // ── Agent ────────────────────────────────────────────────────
 
 /// Single-agent runtime.
@@ -119,6 +146,7 @@ struct AgentRuntime {
 pub struct Agent {
     id: AgentId,
     role: String,
+    budget: StdMutex<Budget>,
 
     current_task: Arc<RwLock<Option<String>>>,
     state: Arc<RwLock<AgentState>>,
@@ -144,6 +172,7 @@ impl Agent {
     where
         M: CompletionModel + 'static,
     {
+        //TODO: MAKE THIS CONFIGURABLE
         const MAX_TURNS: usize = 100;
         const CHANNEL_CAPACITY: usize = 32;
 
@@ -208,6 +237,8 @@ impl Agent {
         Self {
             id,
             role,
+            // TODO: GET BUDGET FROM THE ROLE
+            budget: StdMutex::new(Budget::new(10)),
             current_task: Arc::new(RwLock::new(None)),
             state: Arc::new(RwLock::new(AgentState::Idle)),
             runtime: StdMutex::new(Some(AgentRuntime {
@@ -236,6 +267,21 @@ impl Agent {
 
     pub fn current_task(&self) -> &Arc<RwLock<Option<String>>> {
         &self.current_task
+    }
+
+    /// Attempt to consume one `send_message` allowance from this turn's
+    /// budget. Returns `false` when the budget is exhausted.
+    pub fn request_message_budget(&self) -> bool {
+        self.budget
+            .lock()
+            .map(|mut budget| budget.request_message())
+            .unwrap_or(false)
+    }
+
+    fn reset_budget(&self) {
+        if let Ok(mut budget) = self.budget.lock() {
+            budget.reset();
+        }
     }
 
     /// Run the main event loop. This method may only be called once.
@@ -288,6 +334,9 @@ impl Agent {
                 Message::User(prompt) => prompt,
                 Message::AgentMessage(msg) => msg.render_for_model(),
             };
+
+            // Each incoming message opens a fresh turn with a full budget.
+            self.reset_budget();
 
             *self.current_task.write().await = Some(prompt.clone());
             *self.state.write().await = AgentState::Running;
@@ -355,6 +404,28 @@ impl Agent {
 }
 
 // ── Tests ────────────────────────────────────────────────────
+#[cfg(test)]
+mod budget_tests {
+    use super::Budget;
+
+    #[test]
+    fn allows_up_to_limit_then_denies() {
+        let mut budget = Budget::new(2);
+        assert!(budget.request_message());
+        assert!(budget.request_message());
+        assert!(!budget.request_message());
+    }
+
+    #[test]
+    fn reset_restores_allowance() {
+        let mut budget = Budget::new(1);
+        assert!(budget.request_message());
+        assert!(!budget.request_message());
+        budget.reset();
+        assert!(budget.request_message());
+    }
+}
+
 #[cfg(test)]
 use rig::agent::{AgentHook, Flow, StepEvent};
 

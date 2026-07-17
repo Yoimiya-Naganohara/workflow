@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_decoration::WebviewWindowExt;
+use workflow_config::UiConfig;
 use workflow_core::{Runtime, RuntimeConfig, RuntimeSnapshot, WorkflowEvent};
 use workflow_providers::service::ProviderService;
-use workflow_providers::ProviderInfo;
 
 struct AppState {
     runtime: Mutex<Option<Arc<Runtime>>>,
@@ -256,6 +256,16 @@ fn add_role(
     runtime.add_role(name, definition)
 }
 
+#[tauri::command]
+fn save_config(config: UiConfig) -> Result<(), String> {
+    config.save().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_config() -> Result<Option<UiConfig>, String> {
+    UiConfig::load().map_err(|e| e.to_string())
+}
+
 fn spawn_event_bridge(app: AppHandle, runtime: Arc<Runtime>) {
     tauri::async_runtime::spawn(async move {
         let mut events = runtime.subscribe();
@@ -325,6 +335,8 @@ pub fn run() {
             remove_agent,
             get_roles,
             add_role,
+            save_config,
+            load_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

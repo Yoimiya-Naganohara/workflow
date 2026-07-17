@@ -405,6 +405,46 @@ impl ConfigSource for DefaultConfigSource {
     }
 }
 
+// ============================================================================
+//  UiConfig — persisted UI state (selected provider, model, api key)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiConfig {
+    pub selected_provider: String,
+    pub selected_model: String,
+    pub api_key: String,
+}
+
+impl UiConfig {
+    pub fn save(&self) -> Result<()> {
+        let path = Self::path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let data = serde_json::to_string_pretty(self)?;
+        std::fs::write(&path, data)?;
+        Ok(())
+    }
+
+    pub fn load() -> Result<Option<Self>> {
+        let path = Self::path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let data = std::fs::read_to_string(&path)?;
+        let config = serde_json::from_str(&data)?;
+        Ok(Some(config))
+    }
+
+    fn path() -> PathBuf {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".workflow").join("ui-config.json")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

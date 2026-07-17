@@ -18,7 +18,7 @@
 <ModeWatcher />
 <div class="flex h-dvh w-screen flex-col relative">
     <header
-        class="flex items-center justify-between border-b border-border h-8 shrink-0 bg-transparent select-none"
+        class="flex items-center justify-between h-8 shrink-0 bg-transparent select-none"
     >
         <div class="flex items-center gap-1 pr-20">
             <span class="text-xs font-medium text-muted-foreground ml-2">Workflow</span>

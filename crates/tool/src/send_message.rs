@@ -61,6 +61,15 @@ impl Tool for SendMessage {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let from_id = current_agent_id();
+
+        // Charge the sender's per-turn budget before doing any routing work.
+        // A sender outside the pool cannot be charged, so it is allowed through.
+        if let Some(sender) = self.pool.get_agent(&from_id).await
+            && !sender.request_message_budget()
+        {
+            return Err(ToolError::BudgetExhausted(from_id));
+        }
+
         let msg = PeerMessage {
             id: NEXT_MSG_ID.fetch_add(1, Ordering::Relaxed),
             thread_id: 0,

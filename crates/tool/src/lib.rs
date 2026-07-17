@@ -26,6 +26,9 @@ pub enum ToolError {
         #[source]
         source: tokio::sync::mpsc::error::SendError<Message>,
     },
+    /// The sending agent has exhausted its per-turn send_message budget.
+    #[error("agent {0} has exhausted its send_message budget for this turn")]
+    BudgetExhausted(AgentId),
     /// Orchestration planning error (invalid DAG, cycles, etc.).
     #[error("orchestrate: {0}")]
     Orchestrate(String),

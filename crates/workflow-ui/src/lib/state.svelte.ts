@@ -202,6 +202,37 @@ class AppState {
 		}
 	};
 
+	saveUiConfig = async () => {
+		try {
+			await invoke("save_config", {
+				config: {
+					selected_provider: this.selectedProvider,
+					selected_model: this.selectedModel,
+					api_key: this.settingsApiKey,
+				},
+			});
+		} catch (e) {
+			console.error("save config:", e);
+		}
+	};
+
+	loadUiConfig = async () => {
+		try {
+			const cfg = await invoke("load_config") as {
+				selected_provider: string;
+				selected_model: string;
+				api_key: string;
+			} | null;
+			if (cfg) {
+				this.selectedProvider = cfg.selected_provider;
+				this.selectedModel = cfg.selected_model;
+				this.settingsApiKey = cfg.api_key;
+			}
+		} catch (e) {
+			console.error("load config:", e);
+		}
+	};
+
 	loadProviders = async () => {
 		try {
 			this.providers.length = 0;
@@ -234,16 +265,21 @@ class AppState {
 			this.error = "";
 			this.closeDialog();
 			await this.pull(null);
+			await this.saveUiConfig();
 		} catch (e) {
 			this.error = `configure: ${e}`;
 		}
 	};
 
 	init = async () => {
+		await this.loadUiConfig();
 		await this.loadRoles();
 		await this.pull(null);
 		await this.loadProviders();
 		this.refreshProviders();
+		if (this.selectedProvider && this.selectedModel && this.settingsApiKey && !this.configured) {
+			await this.configureRuntime(this.selectedProvider, this.settingsApiKey, this.selectedModel);
+		}
 		this.#unlisten = await listen<UiEvent>("workflow:event", (event) => {
 			const entry: LogEntry = { ts: Date.now(), event: event.payload };
 			this.eventLog.push(entry);

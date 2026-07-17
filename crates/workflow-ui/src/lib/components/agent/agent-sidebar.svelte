@@ -65,8 +65,6 @@
 		</div>
 	</div>
 
-	<Separator />
-
 	<div class="shrink-0">
 		<Button
 			variant="ghost"
