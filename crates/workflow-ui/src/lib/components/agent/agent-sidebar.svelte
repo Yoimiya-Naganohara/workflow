@@ -82,7 +82,7 @@
 		</div>
 	</div>
 
-	<ScrollArea class="flex-1 min-h-0">
+	<ScrollArea class="flex-1 min-h-0 no-scrollbar">
 		<div class="py-1.5 px-2 flex flex-col gap-0.5">
 			{#each agents as agent (agent.id)}
 				{@const status = statuses.get(agent.id) ?? "idle"}
@@ -172,7 +172,7 @@
 			</div>
 		</button>
 		{#if rolesExpanded}
-			<div class="px-3 pb-2 flex flex-col gap-1 max-h-32 overflow-y-auto">
+			<div class="px-3 pb-2 flex flex-col gap-1 max-h-32 overflow-y-auto no-scrollbar">
 				{#each roles as r}
 					<Tooltip>
 						<TooltipTrigger>
