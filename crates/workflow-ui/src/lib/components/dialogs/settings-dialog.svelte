@@ -114,7 +114,7 @@
 						</Button>
 					{/snippet}
 				</Popover.Trigger>
-				<Popover.Content class="w-[var(--radix-popover-trigger-width)] p-0">
+				<Popover.Content class="p-0" style={providerTriggerRef ? `width: ${providerTriggerRef.clientWidth}px` : undefined}>
 					<Command.Root>
 						<Command.Input placeholder="Search provider..." />
 						<Command.List>
@@ -160,7 +160,7 @@
 						</Button>
 					{/snippet}
 				</Popover.Trigger>
-					<Popover.Content class="w-[var(--radix-popover-trigger-width)] p-0">
+					<Popover.Content class="p-0" style={modelTriggerRef ? `width: ${modelTriggerRef.clientWidth}px` : undefined}>
 						<Command.Root>
 							<Command.Input placeholder="Search model..." />
 							<Command.List>

@@ -4,8 +4,8 @@ import { marked } from "marked";
 import type {
 	AgentId, AgentInfo, AgentStatus,
 	ConversationMessage, RuntimeSnapshot, RoleInfo,
-	UiEvent, DialogId, TabId, PendingAction, ChatItem,
-	ProviderEntry,
+	UiEvent, DialogId, PendingAction, ChatItem,
+	ProviderEntry, Conversation,
 } from "./types";
 
 export interface LogEntry {
@@ -21,7 +21,6 @@ class AppState {
 	dialog = $state<DialogId | null>(null);
 	pendingAction = $state<PendingAction>(null);
 	error = $state("");
-	currentTab = $state<TabId>("chat");
 	rolesExpanded = $state(false);
 
 	roles = $state<RoleInfo[]>([]);
@@ -35,6 +34,16 @@ class AppState {
 	input = $state("");
 
 	eventLog = $state<LogEntry[]>([]);
+
+	selectedConversation = $state<number | null>(null);
+
+	conversations: Conversation[] = $derived(
+		this.agents.map(a => ({
+			id: a.id,
+			name: a.role.charAt(0).toUpperCase() + a.role.slice(1),
+			agentIds: [a.id],
+		}))
+	);
 
 	#unlisten: (() => void) | null = null;
 
@@ -80,7 +89,6 @@ class AppState {
 
 	openDialog = (id: DialogId) => { this.dialog = id; };
 	closeDialog = () => { this.dialog = null; };
-	setTab = (tab: TabId) => { this.currentTab = tab; };
 	toggleRoles = () => { this.rolesExpanded = !this.rolesExpanded; };
 
 	loadRoles = async () => {
@@ -99,6 +107,9 @@ class AppState {
 			this.agents.push(...s.agents);
 			if (s.selected !== null && s.selected !== undefined) {
 				this.selected = s.selected as AgentId;
+			}
+			if (this.selectedConversation == null && this.conversations.length > 0) {
+				this.selectedConversation = this.conversations[0].id;
 			}
 			this.messages.length = 0;
 			this.messages.push(...s.messages);
@@ -134,6 +145,11 @@ class AppState {
 			const updated = await invoke("create_agent", { roleName: role }) as AgentInfo[];
 			this.agents.length = 0;
 			this.agents.push(...updated);
+			const last = updated[updated.length - 1];
+			if (last) {
+				this.selectedConversation = last.id;
+				await this.selectAgent(last.id);
+			}
 			this.dialog = null;
 		} catch (e) {
 			this.error = `create agent: ${e}`;
@@ -173,29 +189,17 @@ class AppState {
 		}
 	};
 
-	startOrchestration = async (description: string) => {
-		if (!this.selected) { this.error = "Select an agent first"; return; }
-		const text = `Please orchestrate the following mission by creating sub-agents for each task:\n\n${description}`;
-		this.setTab("chat");
-		this.pendingAction = { type: "send", agentId: this.selected };
-		try {
-			const s = await invoke("send", { target: this.selected, text }) as RuntimeSnapshot;
-			this.agents.length = 0;
-			this.agents.push(...s.agents);
-			this.selected = s.selected as AgentId;
-			this.messages.length = 0;
-			this.messages.push(...s.messages);
-			this.error = "";
-		} catch (e) {
-			this.error = `orchestrate: ${e}`;
-		} finally {
-			this.pendingAction = null;
-		}
-	};
-
 	selectAgent = (id: AgentId) => {
 		this.selected = id;
 		this.pull(id);
+	};
+
+	selectConversation = (id: number) => {
+		this.selectedConversation = id;
+		const conv = this.conversations.find(c => c.id === id);
+		if (conv && conv.agentIds.length > 0) {
+			this.selectAgent(conv.agentIds[0]);
+		}
 	};
 
 	loadProviders = async () => {

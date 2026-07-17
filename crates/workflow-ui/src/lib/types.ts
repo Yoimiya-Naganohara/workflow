@@ -8,6 +8,12 @@ export interface AgentInfo {
 
 export type AgentStatus = "idle" | "thinking" | "running-tool" | "responding" | "error";
 
+export interface Conversation {
+	id: number;
+	name: string;
+	agentIds: AgentId[];
+}
+
 export type ConversationMessage =
 	| { type: "user"; text: string }
 	| { type: "text"; text: string }
@@ -36,8 +42,6 @@ export type UiEvent =
 	| { type: "error"; message: string };
 
 export type DialogId = "new-agent" | "settings" | "roles";
-
-export type TabId = "chat" | "orchestrate";
 
 export type PendingAction =
 	| { type: "send"; agentId: AgentId }

@@ -68,13 +68,6 @@ describe("state", () => {
 		expect(state.dialog).toBeNull();
 	});
 
-	it("setTab changes currentTab", () => {
-		state.setTab("orchestrate");
-		expect(state.currentTab).toBe("orchestrate");
-		state.setTab("chat");
-		expect(state.currentTab).toBe("chat");
-	});
-
 	it("toggleRoles flips rolesExpanded", () => {
 		expect(state.rolesExpanded).toBe(false);
 		state.toggleRoles();

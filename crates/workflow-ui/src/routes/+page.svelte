@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { cn } from "$lib/utils.js";
 	import { Button } from "$lib/components/ui/button";
 	import { Card } from "$lib/components/ui/card";
-	import { Blocks, MessageSquare, Settings } from "@lucide/svelte";
+	import { MessageSquare, GitBranch, Settings, Eye, EyeOff } from "@lucide/svelte";
 
 	import AgentSidebar from "$lib/components/agent/agent-sidebar.svelte";
+	import AgentGraph from "$lib/components/agent/agent-graph.svelte";
 	import ExecutionTimeline from "$lib/components/chat/execution-timeline.svelte";
 	import ChatInput from "$lib/components/chat/chat-input.svelte";
 	import NewAgentDialog from "$lib/components/dialogs/new-agent-dialog.svelte";
@@ -14,9 +14,44 @@
 
 	import { state as app } from "$lib/state.svelte.js";
 
-	let orchestrateInput = $state("");
+	let showGraph = $state(true);
+
+	let rafId: number | null = null;
+	function startResize(e: MouseEvent) {
+		e.preventDefault();
+		const startX = e.clientX;
+		const startWidth = graphWidth;
+		function onMove(ev: MouseEvent) {
+			if (rafId != null) cancelAnimationFrame(rafId);
+			rafId = requestAnimationFrame(() => {
+				rafId = null;
+				graphWidth = startWidth - (ev.clientX - startX);
+			});
+		}
+		function onUp() {
+			if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; }
+			document.removeEventListener("mousemove", onMove);
+			document.removeEventListener("mouseup", onUp);
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+		}
+		document.addEventListener("mousemove", onMove);
+		document.addEventListener("mouseup", onUp);
+		document.body.style.cursor = "col-resize";
+		document.body.style.userSelect = "none";
+	}
+
+	let graphWidth = $state(320);
+
+	function calcDefaultWidth() {
+		if (typeof window === "undefined") return 320;
+		const sidebarW = 240;
+		const available = window.innerWidth - sidebarW;
+		return Math.floor(available / 2);
+	}
 
 	onMount(() => {
+		graphWidth = calcDefaultWidth();
 		app.init();
 		return () => app.destroy();
 	});
@@ -49,15 +84,13 @@
 	onOpenChange={(o) => { if (!o) app.closeDialog(); }}
 />
 
-<div class="fixed inset-0 top-11 flex flex-row overflow-hidden">
+<div class="fixed inset-0 top-8 flex flex-row overflow-hidden">
 	<AgentSidebar
-		agents={app.agents}
-		selected={app.selected}
-		statuses={app.agentStatuses}
+		conversations={app.conversations}
+		selectedConversation={app.selectedConversation}
 		roles={app.roles}
 		rolesExpanded={app.rolesExpanded}
-		onSelect={(id) => app.selectAgent(id)}
-		onRemove={(id) => app.removeAgent(id)}
+		onSelect={(id) => app.selectConversation(id)}
 		onCreateClick={() => app.openDialog("new-agent")}
 		onRolesClick={() => app.openDialog("roles")}
 		onToggleRoles={() => app.toggleRoles()}
@@ -65,32 +98,35 @@
 
 	<div class="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden bg-background">
 		<div class="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-card shrink-0">
-			<Button
-				variant="ghost"
-				size="sm"
-				class={cn("text-xs", app.currentTab === "chat" && "bg-accent text-accent-foreground")}
-				onclick={() => app.setTab("chat")}
-			>
-				<MessageSquare class="size-3.5" />
-				Chat
-			</Button>
-			<Button
-				variant="ghost"
-				size="sm"
-				class={cn("text-xs", app.currentTab === "orchestrate" && "bg-accent text-accent-foreground")}
-				onclick={() => app.setTab("orchestrate")}
-			>
-				<Blocks class="size-3.5" />
-				Orchestrate
-			</Button>
+			<div class="flex items-center gap-1.5 min-w-0">
+				<MessageSquare class="size-3.5 text-muted-foreground shrink-0" />
+				<span class="text-xs font-medium text-muted-foreground">Chat</span>
+			</div>
+			<div class="flex items-center gap-1.5 ml-4 pl-4 border-l border-border">
+				<GitBranch class="size-3.5 text-muted-foreground shrink-0" />
+				<span class="text-xs font-medium text-muted-foreground">Graph</span>
+			</div>
 			<div class="flex-1"></div>
+			<Button
+				variant="ghost"
+				size="icon-xs"
+				class={showGraph ? "bg-accent text-accent-foreground" : "text-muted-foreground/50"}
+				onclick={() => (showGraph = !showGraph)}
+				title={showGraph ? "Hide graph" : "Show graph"}
+			>
+				{#if showGraph}
+					<EyeOff class="size-3.5" />
+				{:else}
+					<Eye class="size-3.5" />
+				{/if}
+			</Button>
 			<Button variant="ghost" size="icon-xs" onclick={() => app.openDialog("settings")}>
 				<Settings class="size-3.5" />
 			</Button>
 		</div>
 
-		{#if app.currentTab === "chat"}
-			<div class="flex flex-col flex-1 min-h-0">
+		<div class="flex flex-1 min-h-0">
+			<div class="flex flex-col flex-1 min-w-0 min-h-0">
 				<ExecutionTimeline
 					items={app.chatItems}
 					empty={app.messages.length === 0}
@@ -113,39 +149,50 @@
 					/>
 				</div>
 			</div>
-		{:else}
-			<div class="flex-1 flex items-center justify-center p-8">
-				<Card class="flex flex-col items-center gap-3 text-center py-12 px-8 max-w-sm border-dashed">
-					<div class="size-12 rounded-full bg-muted flex items-center justify-center">
-						<Blocks class="size-6 text-muted-foreground/40" />
+
+			<div
+				class="relative shrink-0 bg-background flex flex-col min-h-0"
+				class:hidden={!showGraph}
+				style="width: {graphWidth}px"
+			>
+				<div
+					role="presentation"
+					class="absolute inset-y-0 -left-[3px] w-[7px] z-10 cursor-col-resize group"
+					onmousedown={startResize}
+				>
+					<div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border group-hover:bg-accent-foreground/20 group-active:bg-accent-foreground/30 transition-colors"></div>
+					<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-[3px] opacity-0 group-hover:opacity-100 transition-opacity">
+						<div class="size-[3px] rounded-full bg-accent-foreground/30"></div>
+						<div class="size-[3px] rounded-full bg-accent-foreground/30"></div>
+						<div class="size-[3px] rounded-full bg-accent-foreground/30"></div>
 					</div>
-					<div>
-						<p class="text-sm font-medium text-muted-foreground">Mission Orchestration</p>
-						<p class="text-xs text-muted-foreground/60 mt-1">
-							Describe a multi-agent workflow in natural language.
-							Sub-agents will be created and tasks executed in dependency order.
-						</p>
-					</div>
-					<div class="w-full mt-2 space-y-2">
-						<textarea
-							bind:value={orchestrateInput}
-							placeholder={`Example:\nBuild a web app:\n1. Research requirements\n2. Design architecture\n3. Implement backend\n4. Build frontend`}
-							class="min-h-28 resize-none text-sm w-full rounded-lg border border-input bg-transparent px-2.5 py-2 transition-colors focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-3 outline-none placeholder:text-muted-foreground disabled:opacity-50"
-							disabled={app.selected == null || app.pendingAction?.type === "send"}
-						></textarea>
-						<Button
-							class="w-full"
-							disabled={!orchestrateInput.trim() || app.selected == null || app.pendingAction?.type === "send"}
-							onclick={() => app.startOrchestration(orchestrateInput.trim())}
-						>
-							<Blocks class="size-3.5" /> Orchestrate
-						</Button>
-						{#if app.selected == null}
-							<p class="text-[10px] text-muted-foreground/50">Select an agent from the sidebar first.</p>
+				</div>
+				<AgentGraph
+					agents={app.agents}
+					statuses={app.agentStatuses}
+					selected={app.selected}
+					onSelect={(id) => app.selectAgent(id)}
+				/>
+				{#if app.selected != null}
+					{@const agent = app.agents.find(a => a.id === app.selected)}
+					{@const status = app.agentStatuses.get(app.selected) ?? "idle"}
+					{@const statusColor = status === "thinking" || status === "running-tool" ? "#f59e0b" : status === "responding" ? "#22c55e" : status === "error" ? "#ef4444" : "#6b7280"}
+					<div class="shrink-0 border-t border-border p-3 space-y-2">
+						<div class="flex items-center justify-between">
+							<div class="flex items-center gap-2">
+								<div class="size-2 rounded-full" style="background: {statusColor}"></div>
+								<span class="text-xs font-medium">#{agent?.id} {agent?.role}</span>
+							</div>
+							<span class="text-[10px] text-muted-foreground/50 capitalize">{status.replace("-", " ")}</span>
+						</div>
+						{#if agent?.current_task}
+							<div class="text-xs text-muted-foreground/70 bg-muted/50 rounded px-2 py-1.5 truncate" title={agent.current_task}>
+								{agent.current_task}
+							</div>
 						{/if}
 					</div>
-				</Card>
+				{/if}
 			</div>
-		{/if}
+		</div>
 	</div>
 </div>

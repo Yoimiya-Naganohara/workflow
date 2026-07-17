@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_decoration::WebviewWindowExt;
 use workflow_core::{Runtime, RuntimeConfig, RuntimeSnapshot, WorkflowEvent};
 use workflow_providers::service::ProviderService;
 use workflow_providers::ProviderInfo;
@@ -298,10 +299,20 @@ fn spawn_event_bridge(app: AppHandle, runtime: Arc<Runtime>) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_decoration::init())
         .setup(|app| {
             let service = Mutex::new(ProviderService::new());
             let runtime = Mutex::new(None);
             app.manage(AppState { runtime, service });
+
+            #[cfg(desktop)]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.create_overlay_titlebar();
+                    window.show().unwrap();
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
