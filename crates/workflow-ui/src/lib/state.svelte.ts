@@ -196,11 +196,10 @@ class AppState {
 
 	loadUserConfig = async () => {
 		try {
-			const cfg = await invoke("load_config") as {
-				selected_provider: string;
-				selected_model: string;
-				api_key: string;
-			} | null;
+			const cfg = await Promise.race([
+				invoke("load_config") as Promise<{ selected_provider: string; selected_model: string; api_key: string } | null>,
+				new Promise<null>((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000)),
+			]);
 			if (cfg) {
 				this.selectedProvider = cfg.selected_provider;
 				this.selectedModel = cfg.selected_model;
@@ -251,14 +250,15 @@ class AppState {
 	};
 
 	init = async () => {
-		await this.loadUserConfig();
-		await this.loadRoles();
-		await this.pull(null);
-		await this.loadProviders();
+		this.loadUserConfig().then(() => {
+			if (this.selectedProvider && this.selectedModel && this.settingsApiKey && !this.configured) {
+				this.configureRuntime(this.selectedProvider, this.settingsApiKey, this.selectedModel);
+			}
+		});
+		this.loadRoles();
+		this.pull(null);
+		this.loadProviders();
 		this.refreshProviders();
-		if (this.selectedProvider && this.selectedModel && this.settingsApiKey && !this.configured) {
-			await this.configureRuntime(this.selectedProvider, this.settingsApiKey, this.selectedModel);
-		}
 		this.#unlisten = await listen<UiEvent>("workflow:event", (event) => {
 			const entry: LogEntry = { ts: Date.now(), event: event.payload };
 			this.eventLog.push(entry);
