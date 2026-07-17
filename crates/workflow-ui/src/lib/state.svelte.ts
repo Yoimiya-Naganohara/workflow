@@ -180,7 +180,7 @@ class AppState {
 		this.pull(id);
 	};
 
-	saveUiConfig = async () => {
+	saveUserConfig = async () => {
 		try {
 			await invoke("save_config", {
 				config: {
@@ -194,7 +194,7 @@ class AppState {
 		}
 	};
 
-	loadUiConfig = async () => {
+	loadUserConfig = async () => {
 		try {
 			const cfg = await invoke("load_config") as {
 				selected_provider: string;
@@ -244,14 +244,14 @@ class AppState {
 			this.error = "";
 			this.closeDialog();
 			await this.pull(null);
-			await this.saveUiConfig();
+			await this.saveUserConfig();
 		} catch (e) {
 			this.error = `configure: ${e}`;
 		}
 	};
 
 	init = async () => {
-		await this.loadUiConfig();
+		await this.loadUserConfig();
 		await this.loadRoles();
 		await this.pull(null);
 		await this.loadProviders();

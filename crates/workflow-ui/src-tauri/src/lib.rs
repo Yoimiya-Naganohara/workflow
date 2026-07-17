@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_decoration::WebviewWindowExt;
-use workflow_config::UiConfig;
+use workflow_config::UserConfig;
 use workflow_core::{Runtime, RuntimeConfig, RuntimeSnapshot, WorkflowEvent};
 use workflow_providers::service::ProviderService;
 
@@ -257,13 +257,13 @@ fn add_role(
 }
 
 #[tauri::command]
-fn save_config(config: UiConfig) -> Result<(), String> {
+fn save_config(config: UserConfig) -> Result<(), String> {
     config.save().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn load_config() -> Result<Option<UiConfig>, String> {
-    UiConfig::load().map_err(|e| e.to_string())
+fn load_config() -> Result<Option<UserConfig>, String> {
+    UserConfig::load().map_err(|e| e.to_string())
 }
 
 fn spawn_event_bridge(app: AppHandle, runtime: Arc<Runtime>) {

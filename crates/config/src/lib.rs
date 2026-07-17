@@ -406,42 +406,39 @@ impl ConfigSource for DefaultConfigSource {
 }
 
 // ============================================================================
-//  UiConfig — persisted UI state (selected provider, model, api key)
+//  UserConfig — persisted user preferences (last-used provider, model, api key)
 // ============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UiConfig {
+pub struct UserConfig {
     pub selected_provider: String,
     pub selected_model: String,
     pub api_key: String,
 }
 
-impl UiConfig {
+const KEYRING_SERVICE: &str = "workflow";
+const KEYRING_USER: &str = "config";
+
+impl UserConfig {
     pub fn save(&self) -> Result<()> {
-        let path = Self::path();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let data = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, data)?;
+        let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)?;
+        let data = serde_json::to_string(self)?;
+        entry.set_password(&data)?;
         Ok(())
     }
 
     pub fn load() -> Result<Option<Self>> {
-        let path = Self::path();
-        if !path.exists() {
-            return Ok(None);
-        }
-        let data = std::fs::read_to_string(&path)?;
+        let entry = match keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
+            Ok(e) => e,
+            Err(_) => return Ok(None),
+        };
+        let data = match entry.get_password() {
+            Ok(d) => d,
+            Err(keyring::Error::NoEntry) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
         let config = serde_json::from_str(&data)?;
         Ok(Some(config))
-    }
-
-    fn path() -> PathBuf {
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".workflow").join("ui-config.json")
     }
 }
 
