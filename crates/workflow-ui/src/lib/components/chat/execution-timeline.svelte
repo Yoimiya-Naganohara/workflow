@@ -27,6 +27,19 @@
 		agentId?: number | null;
 		agentRole?: string;
 	} = $props();
+
+	let prevLen = $state(0);
+
+	$effect(() => {
+		const len = items.length;
+		if (len > prevLen && len > 0) {
+			requestAnimationFrame(() => {
+				const vp = document.getElementById("virtual-list-viewport");
+				if (vp) vp.scrollTop = vp.scrollHeight;
+			});
+		}
+		prevLen = len;
+	});
 </script>
 
 {#if empty}
