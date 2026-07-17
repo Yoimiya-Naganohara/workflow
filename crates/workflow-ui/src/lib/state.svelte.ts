@@ -239,6 +239,7 @@ class AppState {
 			await invoke("configure_runtime", { providerId, apiKey, model });
 			this.selectedProvider = providerId;
 			this.selectedModel = model;
+			this.settingsApiKey = apiKey;
 			this.configured = true;
 			this.error = "";
 			this.closeDialog();
