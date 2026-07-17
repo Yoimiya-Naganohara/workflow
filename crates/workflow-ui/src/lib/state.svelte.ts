@@ -5,7 +5,7 @@ import type {
 	AgentId, AgentInfo, AgentStatus,
 	ConversationMessage, RuntimeSnapshot, RoleInfo,
 	UiEvent, DialogId, PendingAction, ChatItem,
-	ProviderEntry, Conversation,
+	ProviderEntry,
 } from "./types";
 
 export interface LogEntry {
@@ -34,16 +34,6 @@ class AppState {
 	input = $state("");
 
 	eventLog = $state<LogEntry[]>([]);
-
-	selectedConversation = $state<number | null>(null);
-
-	conversations: Conversation[] = $derived(
-		this.agents.map(a => ({
-			id: a.id,
-			name: a.role.charAt(0).toUpperCase() + a.role.slice(1),
-			agentIds: [a.id],
-		}))
-	);
 
 	#unlisten: (() => void) | null = null;
 
@@ -108,9 +98,6 @@ class AppState {
 			if (s.selected !== null && s.selected !== undefined) {
 				this.selected = s.selected as AgentId;
 			}
-			if (this.selectedConversation == null && this.conversations.length > 0) {
-				this.selectedConversation = this.conversations[0].id;
-			}
 			this.messages.length = 0;
 			this.messages.push(...s.messages);
 			this.error = "";
@@ -147,7 +134,6 @@ class AppState {
 			this.agents.push(...updated);
 			const last = updated[updated.length - 1];
 			if (last) {
-				this.selectedConversation = last.id;
 				await this.selectAgent(last.id);
 			}
 			this.dialog = null;
@@ -192,14 +178,6 @@ class AppState {
 	selectAgent = (id: AgentId) => {
 		this.selected = id;
 		this.pull(id);
-	};
-
-	selectConversation = (id: number) => {
-		this.selectedConversation = id;
-		const conv = this.conversations.find(c => c.id === id);
-		if (conv && conv.agentIds.length > 0) {
-			this.selectAgent(conv.agentIds[0]);
-		}
 	};
 
 	saveUiConfig = async () => {

@@ -8,12 +8,6 @@ export interface AgentInfo {
 
 export type AgentStatus = "idle" | "thinking" | "running-tool" | "responding" | "error";
 
-export interface Conversation {
-	id: number;
-	name: string;
-	agentIds: AgentId[];
-}
-
 export type ConversationMessage =
 	| { type: "user"; text: string }
 	| { type: "text"; text: string }

@@ -86,11 +86,11 @@
 
 <div class="fixed inset-0 top-8 flex flex-row overflow-hidden">
 	<AgentSidebar
-		conversations={app.conversations}
-		selectedConversation={app.selectedConversation}
+		agents={app.agents}
+		selected={app.selected}
 		roles={app.roles}
 		rolesExpanded={app.rolesExpanded}
-		onSelect={(id) => app.selectConversation(id)}
+		onSelect={(id) => app.selectAgent(id)}
 		onCreateClick={() => app.openDialog("new-agent")}
 		onRolesClick={() => app.openDialog("roles")}
 		onToggleRoles={() => app.toggleRoles()}

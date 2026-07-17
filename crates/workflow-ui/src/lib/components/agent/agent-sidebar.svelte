@@ -1,13 +1,12 @@
 <script lang="ts">
 	import { Button } from "$lib/components/ui/button";
-	import { Separator } from "$lib/components/ui/separator";
 	import { Plus, MessageSquare, Brain, Settings as SettingsIcon, ChevronRight, ChevronDown, Circle } from "@lucide/svelte";
 	import { cn } from "$lib/utils.js";
-	import type { Conversation } from "$lib/types";
+	import type { AgentInfo, AgentId } from "$lib/types";
 
 	let {
-		conversations,
-		selectedConversation,
+		agents,
+		selected,
 		onSelect,
 		onCreateClick,
 		onRolesClick,
@@ -15,9 +14,9 @@
 		rolesExpanded,
 		onToggleRoles,
 	}: {
-		conversations: Conversation[];
-		selectedConversation: number | null;
-		onSelect: (id: number) => void;
+		agents: AgentInfo[];
+		selected: AgentId | null;
+		onSelect: (id: AgentId) => void;
 		onCreateClick: () => void;
 		onRolesClick: () => void;
 		roles: import("$lib/types").RoleInfo[];
@@ -30,10 +29,10 @@
 	<div class="flex items-center justify-between px-3 py-2 shrink-0">
 		<div class="flex items-center gap-2">
 			<MessageSquare class="size-3.5 text-muted-foreground" />
-			<span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Conversations</span>
+			<span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Agents</span>
 		</div>
 		<div class="flex items-center gap-1">
-			<span class="text-xs text-muted-foreground tabular-nums">{conversations.length}</span>
+			<span class="text-xs text-muted-foreground tabular-nums">{agents.length}</span>
 			<Button variant="ghost" size="icon-xs" onclick={onCreateClick}>
 				<Plus class="size-3" />
 			</Button>
@@ -42,21 +41,21 @@
 
 	<div class="flex-1 min-h-0 overflow-y-auto py-1.5 px-2">
 		<div class="flex flex-col gap-0.5">
-			{#each conversations as c (c.id)}
+			{#each agents as agent (agent.id)}
 				<button
 					class={cn(
 						"w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-md text-left group",
-						selectedConversation === c.id && "bg-accent text-accent-foreground",
+						selected === agent.id && "bg-accent text-accent-foreground",
 					)}
-					onclick={() => onSelect(c.id)}
+					onclick={() => onSelect(agent.id)}
 				>
 					<MessageSquare class="size-3.5 shrink-0 text-muted-foreground" />
-					<span class="truncate">{c.name}</span>
+					<span class="truncate">{agent.role.charAt(0).toUpperCase() + agent.role.slice(1)}</span>
 				</button>
 			{:else}
 				<div class="flex flex-col items-center gap-1.5 py-8 text-center">
 					<Circle class="size-6 text-muted-foreground/30" />
-					<p class="text-xs text-muted-foreground">No conversations yet</p>
+					<p class="text-xs text-muted-foreground">No agents yet</p>
 					<Button variant="outline" size="xs" onclick={onCreateClick} class="mt-1">
 						<Plus class="size-3" /> New
 					</Button>
