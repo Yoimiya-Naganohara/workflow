@@ -8,6 +8,11 @@
 		role: string;
 	}
 
+	interface GraphEdge {
+		source: number;
+		target: number;
+	}
+
 	let {
 		agents,
 		statuses,
@@ -24,52 +29,70 @@
 	let containerEl: HTMLDivElement;
 	let sim: d3.Simulation<GraphNode, undefined> | null = null;
 	let ro: ResizeObserver;
-	let hoveredId = $state<AgentId | null>(null);
 	let tooltipAgent = $state<AgentInfo | null>(null);
-
-	const palette: Record<string, { fill: string; glow: string }> = {
-		planner:   { fill: "#6366f1", glow: "rgba(99,102,241,0.25)" },
-		executor:  { fill: "#22c55e", glow: "rgba(34,197,94,0.25)" },
-		reviewer:  { fill: "#f59e0b", glow: "rgba(245,158,11,0.25)" },
-		reporter:  { fill: "#06b6d4", glow: "rgba(6,182,212,0.25)" },
-		default:   { fill: "#a78bfa", glow: "rgba(167,139,250,0.25)" },
-	};
 
 	const uniqueRoles = $derived([...new Set(agents.map(a => a.role))]);
 
-	function style(role: string) {
-		return palette[role] ?? palette.default;
+	const roleColors: Record<string, string> = {
+		planner:  "oklch(0.6 0.18 260)",
+		executor: "oklch(0.6 0.18 145)",
+		reviewer: "oklch(0.65 0.18 85)",
+		reporter: "oklch(0.6 0.12 195)",
+		default:  "oklch(0.6 0.18 300)",
+	};
+
+	function roleColor(role: string): string {
+		return roleColors[role] ?? roleColors.default;
 	}
 
-	function rebuild() {
-		if (!svgEl || !containerEl) return;
+	const nodeCache = new Map<number, GraphNode>();
 
-		const svg = d3.select(svgEl);
+	function getNodes(): GraphNode[] {
+		return agents.map(a => {
+			let n = nodeCache.get(a.id);
+			if (!n) {
+				n = { id: a.id, role: a.role, x: NaN, y: NaN };
+				nodeCache.set(a.id, n);
+			}
+			n.role = a.role;
+			return n;
+		});
+	}
 
-		if (agents.length === 0) return;
+	function getEdges(nodes: GraphNode[]): GraphEdge[] {
+		if (nodes.length < 2) return [];
+		const edges: GraphEdge[] = [];
+		for (let i = 1; i < nodes.length; i++) {
+			edges.push({ source: nodes[i - 1].id, target: nodes[i].id });
+		}
+		return edges;
+	}
+
+	let g: d3.Selection<SVGGElement, unknown, null, undefined>;
+	let nodeGroup: d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>;
+	let edgeLines: d3.Selection<SVGLineElement, GraphEdge, SVGGElement, unknown>;
+
+	function init() {
+		if (!svgEl || !containerEl || agents.length === 0) return;
 
 		if (sim) { sim.stop(); sim = null; }
 
-		svg.selectAll("*").remove();
-
 		const width = containerEl.clientWidth;
 		const height = containerEl.clientHeight;
+		if (width === 0 || height === 0) return;
+
+		const svg = d3.select(svgEl);
+		svg.selectAll("*").remove();
 
 		const defs = svg.append("defs");
 
-		for (const [role, c] of Object.entries(palette)) {
-			const g = defs.append("radialGradient").attr("id", `g-${role}`).attr("cx", "35%").attr("cy", "35%").attr("r", "65%");
-			g.append("stop").attr("offset", "0%").attr("stop-color", "#fff").attr("stop-opacity", "0.35");
-			g.append("stop").attr("offset", "100%").attr("stop-color", c.fill).attr("stop-opacity", "1");
-		}
+		const gl = defs.append("filter").attr("id", "g-glow").attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
+		gl.append("feGaussianBlur").attr("stdDeviation", "4").attr("result", "b");
+		const gm = gl.append("feMerge");
+		gm.append("feMergeNode").attr("in", "b");
+		gm.append("feMergeNode").attr("in", "SourceGraphic");
 
-		const flt = defs.append("filter").attr("id", "gl").attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
-		flt.append("feGaussianBlur").attr("stdDeviation", "3").attr("result", "b");
-		const m = flt.append("feMerge");
-		m.append("feMergeNode").attr("in", "b");
-		m.append("feMergeNode").attr("in", "SourceGraphic");
-
-		const g = svg.append("g").attr("class", "graph-root");
+		g = svg.append("g").attr("class", "graph-root");
 
 		const zoom = d3.zoom<SVGSVGElement, unknown>()
 			.extent([[0, 0], [width, height]])
@@ -77,19 +100,17 @@
 			.on("zoom", (event) => g.attr("transform", event.transform.toString()));
 		svg.call(zoom);
 
-		const nodes: GraphNode[] = agents.map((a) => ({ id: a.id, role: a.role }));
-		const pairs = d3.pairs(nodes);
+		const nodes = getNodes();
+		const edges = getEdges(nodes);
 
-		const edge = g.selectAll<SVGLineElement, [GraphNode, GraphNode]>("line")
-			.data(pairs)
+		edgeLines = g.selectAll<SVGLineElement, GraphEdge>("line")
+			.data(edges)
 			.join("line")
 			.attr("stroke", "currentColor")
-			.attr("stroke-opacity", 0.06)
+			.attr("stroke-opacity", 0.08)
 			.attr("stroke-width", 1);
 
-		const r = 22;
-
-		const node = g.selectAll<SVGGElement, GraphNode>("g")
+		nodeGroup = g.selectAll<SVGGElement, GraphNode>("g")
 			.data(nodes, (d: GraphNode) => String(d.id))
 			.join("g")
 			.attr("data-id", (d: GraphNode) => d.id)
@@ -101,73 +122,65 @@
 			.on("mouseleave", () => {
 				tooltipAgent = null;
 			})
-			.on("mouseenter", (_event: any, d: GraphNode) => {
-				hoveredId = d.id;
-				tooltipAgent = agents.find(a => a.id === d.id) ?? null;
-				d3.select(svgEl).selectAll<SVGGElement, GraphNode>(".agent-node")
-					.attr("opacity", (n: GraphNode) => (n.id === d.id ? 1 : 0.5));
-			})
-			.on("mouseleave", () => {
-				hoveredId = null;
-				tooltipAgent = null;
-				d3.select(svgEl).selectAll(".agent-node").attr("opacity", 1);
-			})
 			.call(d3.drag<SVGGElement, GraphNode>()
 				.on("start", (event, d) => { d.fx = d.x; d.fy = d.y; })
-				.on("drag", (event, d) => { if (sim) { sim.alpha(0.01); sim.restart(); } d.fx = event.x; d.fy = event.y; })
+				.on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
 				.on("end", () => { sim?.alphaTarget(0); }) as any,
 			);
 
-		node.append("circle").attr("class", "glow-ring").attr("r", r + 4)
-			.attr("fill", (d: GraphNode) => style(d.role).glow)
-			.attr("filter", "url(#gl)").attr("opacity", 0.5);
+		const r = 20;
 
-		node.append("circle").attr("class", "node-body").attr("r", r)
-			.attr("fill", (d: GraphNode) => `url(#g-${d.role})`)
-			.attr("stroke", (d: GraphNode) => style(d.role).fill)
-			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 3 : 1.5))
-			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.5));
+		nodeGroup.append("circle").attr("class", "glow-ring").attr("r", r + 6)
+			.attr("fill", "none")
+			.attr("stroke", (d: GraphNode) => roleColor(d.role))
+			.attr("stroke-width", 2)
+			.attr("opacity", 0.08)
+			.attr("filter", "url(#g-glow)");
 
-		node.append("circle").attr("class", "pulse-ring").attr("r", r + 6)
-			.attr("fill", "none").attr("stroke", (d: GraphNode) => style(d.role).fill)
-			.attr("stroke-width", 2).attr("opacity", 0);
+		nodeGroup.append("circle").attr("class", "node-body").attr("r", r)
+			.style("fill", (d: GraphNode) => roleColor(d.role))
+			.attr("fill-opacity", 0.85)
+			.attr("stroke", (d: GraphNode) => roleColor(d.role))
+			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
+			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
 
-		node.append("text").attr("class", "node-id").attr("text-anchor", "middle").attr("dy", "0.35em")
-			.attr("fill", "white").attr("font-size", "12").attr("font-family", "monospace").attr("font-weight", "700")
+		nodeGroup.append("circle").attr("class", "pulse-ring").attr("r", r + 5)
+			.attr("fill", "none")
+			.attr("stroke", (d: GraphNode) => roleColor(d.role))
+			.attr("stroke-width", 2)
+			.attr("opacity", 0);
+
+		nodeGroup.append("text").attr("class", "node-id").attr("text-anchor", "middle").attr("dy", "0.35em")
+			.attr("fill", "white").attr("font-size", "11").attr("font-family", "monospace").attr("font-weight", "700")
 			.text((d: GraphNode) => `#${d.id}`);
 
-		node.append("text").attr("class", "node-role").attr("text-anchor", "middle")
-			.attr("dy", (d: GraphNode) => (d.id === selected ? r + 16 : r + 12))
-			.attr("fill", "currentColor").attr("font-size", "10").attr("opacity", 0.6)
+		nodeGroup.append("text").attr("class", "node-role").attr("text-anchor", "middle")
+			.attr("dy", (d: GraphNode) => (d.id === selected ? r + 14 : r + 11))
+			.attr("fill", "currentColor").attr("font-size", "9").attr("opacity", 0.5)
 			.text((d: GraphNode) => d.role);
 
 		sim = d3.forceSimulation(nodes)
+			.force("charge", d3.forceManyBody().strength(-180))
+			.force("collision", d3.forceCollide().radius(42))
 			.force("center", d3.forceCenter(width / 2, height / 2))
-			.force("charge", d3.forceManyBody().strength(-300))
-			.force("collision", d3.forceCollide().radius(50))
+			.alphaDecay(0.08)
+			.velocityDecay(0.65)
 			.on("tick", () => {
-				edge.attr("x1", (d: any) => d[0].x).attr("y1", (d: any) => d[0].y)
-					.attr("x2", (d: any) => d[1].x).attr("y2", (d: any) => d[1].y);
-				node.attr("transform", (d: GraphNode) => `translate(${d.x},${d.y})`);
+				edgeLines
+					.attr("x1", (e: GraphEdge) => sim!.nodes().find(n => n.id === e.source)!.x!)
+					.attr("y1", (e: GraphEdge) => sim!.nodes().find(n => n.id === e.source)!.y!)
+					.attr("x2", (e: GraphEdge) => sim!.nodes().find(n => n.id === e.target)!.x!)
+					.attr("y2", (e: GraphEdge) => sim!.nodes().find(n => n.id === e.target)!.y!);
+				nodeGroup.attr("transform", (d: GraphNode) => `translate(${d.x},${d.y})`);
 			});
 
 		sim.alpha(1).restart();
-		updateStatusPulses(svg);
+		applyStatusPulses();
 	}
 
-	function updateSelection() {
+	function applyStatusPulses() {
 		if (!svgEl) return;
 		const svg = d3.select(svgEl);
-		svg.selectAll<SVGCircleElement, GraphNode>(".node-body")
-			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 3 : 1.5))
-			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.5));
-		svg.selectAll<SVGTextElement, GraphNode>(".node-role")
-			.attr("dy", (d: GraphNode) => (d.id === selected ? 38 : 34));
-	}
-
-	function updateStatusPulses(svg?: d3.Selection<SVGSVGElement, unknown, null, undefined>) {
-		if (!svg) svg = d3.select(svgEl);
-		if (svg.empty()) return;
 		for (const [id, status] of statuses) {
 			const pulse = svg.selectAll<SVGCircleElement, GraphNode>(".agent-node")
 				.filter((d: GraphNode) => d.id === id)
@@ -176,39 +189,157 @@
 				pulse.attr("opacity", 1);
 				if (pulse.select("animate").empty()) {
 					pulse.append("animate").attr("attributeName", "r")
-						.attr("values", `${22 + 6};${22 + 14};${22 + 6}`)
+						.attr("values", `${20 + 5};${20 + 12};${20 + 5}`)
 						.attr("dur", "1.8s").attr("repeatCount", "indefinite");
 					pulse.append("animate").attr("attributeName", "opacity")
-						.attr("values", "0.6;0;0.6")
+						.attr("values", "0.5;0;0.5")
 						.attr("dur", "1.8s").attr("repeatCount", "indefinite");
 				}
 				svg.selectAll<SVGCircleElement, GraphNode>(".agent-node")
 					.filter((d: GraphNode) => d.id === id)
 					.select(".node-body")
-					.attr("opacity", 0.8);
+					.attr("fill-opacity", 0.95);
 			} else {
 				pulse.attr("opacity", 0);
 				pulse.selectAll("animate").remove();
 				svg.selectAll<SVGCircleElement, GraphNode>(".agent-node")
 					.filter((d: GraphNode) => d.id === id)
 					.select(".node-body")
-					.attr("opacity", 1);
+					.attr("fill-opacity", 0.85);
 			}
 		}
+	}
+
+	function syncNodes() {
+		if (!sim || !svgEl) return;
+		const svgNodes = sim.nodes() as GraphNode[];
+		const live = getNodes();
+
+		const ids = new Set(live.map(n => n.id));
+
+		const removed = svgNodes.filter(n => !ids.has(n.id));
+		for (const n of removed) {
+			nodeCache.delete(n.id);
+		}
+
+		for (const n of live) {
+			if (!svgNodes.find(s => s.id === n.id)) {
+				n.x = containerEl!.clientWidth / 2 + (Math.random() - 0.5) * 60;
+				n.y = containerEl!.clientHeight / 2 + (Math.random() - 0.5) * 60;
+				svgNodes.push(n);
+			}
+		}
+
+		sim.nodes(svgNodes);
+
+		const edges = getEdges(live);
+		edgeLines = edgeLines
+			.data(edges, (e: GraphEdge) => `${e.source}-${e.target}`)
+			.join(
+				enter => enter.append("line")
+					.attr("stroke", "currentColor")
+					.attr("stroke-opacity", 0.08)
+					.attr("stroke-width", 1),
+				update => update,
+				exit => exit.remove(),
+			);
+
+		nodeGroup = nodeGroup
+			.data(svgNodes, (d: GraphNode) => String(d.id))
+			.join(
+				enter => {
+					const gEnter = enter.append("g")
+						.attr("class", "agent-node cursor-pointer")
+						.attr("data-id", (d: GraphNode) => d.id)
+						.on("click", (_event: any, d: GraphNode) => { onSelect(d.id); })
+						.on("mouseenter", (_event: any, d: GraphNode) => {
+							tooltipAgent = agents.find(a => a.id === d.id) ?? null;
+						})
+						.on("mouseleave", () => { tooltipAgent = null; })
+						.call(d3.drag<SVGGElement, GraphNode>()
+							.on("start", (event, d) => { d.fx = d.x; d.fy = d.y; })
+							.on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
+							.on("end", () => { sim?.alphaTarget(0); }) as any);
+
+					gEnter.append("circle").attr("class", "glow-ring").attr("r", 26)
+						.attr("fill", "none")
+						.attr("stroke", (d: GraphNode) => roleColor(d.role))
+						.attr("stroke-width", 2)
+						.attr("opacity", 0.08)
+						.attr("filter", "url(#g-glow)");
+
+					gEnter.append("circle").attr("class", "node-body").attr("r", 20)
+						.style("fill", (d: GraphNode) => roleColor(d.role))
+						.attr("fill-opacity", 0.85)
+						.attr("stroke", (d: GraphNode) => roleColor(d.role))
+						.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
+						.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
+
+					gEnter.append("circle").attr("class", "pulse-ring").attr("r", 25)
+						.attr("fill", "none")
+						.attr("stroke", (d: GraphNode) => roleColor(d.role))
+						.attr("stroke-width", 2)
+						.attr("opacity", 0);
+
+					gEnter.append("text").attr("class", "node-id")
+						.attr("text-anchor", "middle").attr("dy", "0.35em")
+						.attr("fill", "white").attr("font-size", "11")
+						.attr("font-family", "monospace").attr("font-weight", "700")
+						.text((d: GraphNode) => `#${d.id}`);
+
+					gEnter.append("text").attr("class", "node-role")
+						.attr("text-anchor", "middle")
+						.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31))
+						.attr("fill", "currentColor").attr("font-size", "9").attr("opacity", 0.5)
+						.text((d: GraphNode) => d.role);
+
+					return gEnter;
+				},
+				update => {
+					update.select(".node-body")
+						.style("fill", (d: GraphNode) => roleColor(d.role))
+						.attr("stroke", (d: GraphNode) => roleColor(d.role))
+						.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
+						.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
+					update.select(".node-role")
+						.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31));
+					return update;
+				},
+				exit => exit.remove(),
+			);
+
+		sim.alpha(0.3).restart();
 	}
 
 	$effect(() => {
 		if (agents.length === 0) { tooltipAgent = null; }
 	});
 
-	$effect(() => { selected; if (svgEl) updateSelection(); });
-	$effect(() => { statuses; if (svgEl) updateStatusPulses(); });
+	$effect(() => {
+		if (svgEl && agents.length > 0) {
+			if (!sim) {
+				init();
+			} else {
+				syncNodes();
+			}
+		}
+	});
+
+	$effect(() => { selected; if (svgEl && sim) applySelection(); });
+	$effect(() => { statuses; if (svgEl && sim) applyStatusPulses(); });
+
+	function applySelection() {
+		if (!svgEl) return;
+		const svg = d3.select(svgEl);
+		svg.selectAll<SVGCircleElement, GraphNode>(".node-body")
+			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
+			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
+		svg.selectAll<SVGTextElement, GraphNode>(".node-role")
+			.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31));
+	}
 
 	onMount(() => {
 		let rafId: number | null = null;
-		requestAnimationFrame(() => {
-			if (svgEl && agents.length > 0) rebuild();
-		});
 		ro = new ResizeObserver((entries) => {
 			if (rafId != null) cancelAnimationFrame(rafId);
 			rafId = requestAnimationFrame(() => {
@@ -250,7 +381,7 @@
 		<div class="absolute bottom-2 left-2 right-2 flex flex-wrap gap-x-3 gap-y-1 justify-center">
 			{#each uniqueRoles as role}
 				<div class="flex items-center gap-1.5">
-					<div class="size-2 rounded-full" style="background: {style(role).fill}"></div>
+					<div class="size-2 rounded-full" style="background: {roleColor(role)}"></div>
 					<span class="text-[10px] text-muted-foreground/60">{role}</span>
 				</div>
 			{/each}
