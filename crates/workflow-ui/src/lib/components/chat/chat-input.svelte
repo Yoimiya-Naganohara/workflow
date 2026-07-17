@@ -16,42 +16,22 @@
 		onSubmit: (e?: Event) => void;
 	} = $props();
 
-	let textareaEl: HTMLTextAreaElement | undefined = $state();
-
-	function autoResize() {
-		if (!textareaEl) return;
-		textareaEl.style.height = "auto";
-		textareaEl.style.height = Math.min(textareaEl.scrollHeight, 128) + "px";
-	}
-
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === "Enter" && !e.shiftKey) {
 			e.preventDefault();
 			onSubmit(e);
 		}
 	}
-
-	function handleInput() {
-		autoResize();
-	}
-
-	$effect(() => {
-		if (!value && textareaEl) {
-			textareaEl.style.height = "";
-		}
-	});
 </script>
 
 <form onsubmit={onSubmit} class="mx-auto max-w-3xl flex gap-2 items-end">
 	<div class="flex-1 relative">
 		<Textarea
-			bind:ref={textareaEl}
 			bind:value
-			class="min-h-9 resize-none text-sm pr-9 overflow-y-auto"
+			class="min-h-9 max-h-32 resize-none text-sm pr-9"
 			placeholder={disabled ? "Select an agent first..." : "Type a message..."}
 			{disabled}
 			onkeydown={handleKeydown}
-			oninput={handleInput}
 		/>
 		<div class="absolute right-1 bottom-1">
 			<Button
