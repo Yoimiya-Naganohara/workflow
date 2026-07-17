@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::Mutex, task::JoinSet};
 use workflow_agent::{Agent, AgentEvent, AgentId, Message, agent_pool::AgentPool};
 
-use crate::ToolError;
+use crate::{RoleChecker, ToolError};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TaskDef {
@@ -46,15 +46,17 @@ pub struct Orchestrate {
     pool: Arc<AgentPool>,
     next_id: Arc<AtomicU32>,
     factory: AgentFactory,
+    roles: Arc<dyn RoleChecker>,
     execution_lock: Mutex<()>,
 }
 
 impl Orchestrate {
-    pub fn new(pool: Arc<AgentPool>, factory: AgentFactory) -> Self {
+    pub fn new(pool: Arc<AgentPool>, factory: AgentFactory, roles: Arc<dyn RoleChecker>) -> Self {
         Self {
             pool,
             next_id: Arc::new(AtomicU32::new(1)),
             factory,
+            roles,
             execution_lock: Mutex::new(()),
         }
     }
@@ -63,11 +65,13 @@ impl Orchestrate {
         pool: Arc<AgentPool>,
         factory: AgentFactory,
         next_id: Arc<AtomicU32>,
+        roles: Arc<dyn RoleChecker>,
     ) -> Self {
         Self {
             pool,
             next_id,
             factory,
+            roles,
             execution_lock: Mutex::new(()),
         }
     }
@@ -161,6 +165,20 @@ impl Tool for Orchestrate {
 
         if tasks.is_empty() {
             return Err(ToolError::Orchestrate("task list is empty".into()));
+        }
+
+        // Validate that all requested roles exist. If any are missing, return
+        // suggestions so the model can pick an existing role or create one.
+        let available = self.roles.list_roles();
+        for task in &tasks {
+            if !self.roles.exists(&task.role) {
+                let suggestions = suggest_roles(&task.role, &available);
+                return Err(ToolError::RoleNotFound {
+                    requested: task.role.clone(),
+                    suggestions,
+                    available,
+                });
+            }
         }
 
         let mut by_id: HashMap<String, usize> = HashMap::new();
@@ -363,5 +381,86 @@ impl Tool for Orchestrate {
             task_count,
             critical_path,
         })
+    }
+}
+
+/// Score available roles by word overlap with the requested name.
+/// Returns up to 3 suggestions sorted by relevance.
+fn suggest_roles(requested: &str, available: &[String]) -> Vec<String> {
+    let requested_lower = requested.to_lowercase();
+    let requested_words: Vec<&str> = requested_lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 2)
+        .collect();
+
+    if requested_words.is_empty() {
+        return available.to_vec();
+    }
+
+    let mut scored: Vec<(String, usize)> = available
+        .iter()
+        .map(|name| {
+            let name_lower = name.to_lowercase();
+            let name_words: Vec<&str> = name_lower
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .collect();
+
+            let score = requested_words
+                .iter()
+                .filter(|rw| {
+                    name_words
+                        .iter()
+                        .any(|nw| nw.contains(**rw) || rw.contains(nw))
+                })
+                .count();
+
+            (name.clone(), score)
+        })
+        .filter(|(_, score)| *score > 0)
+        .collect();
+
+    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.into_iter().take(3).map(|(name, _)| name).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suggest_roles_finds_word_overlap() {
+        let available = vec![
+            "planner".to_string(),
+            "executor".to_string(),
+            "code-reviewer".to_string(),
+            "coder".to_string(),
+            "tester".to_string(),
+        ];
+
+        let suggestions = suggest_roles("coder", &available);
+        assert!(suggestions.contains(&"coder".to_string()));
+        assert!(suggestions.contains(&"code-reviewer".to_string()));
+    }
+
+    #[test]
+    fn suggest_roles_limits_to_three() {
+        let available = vec![
+            "code-a".to_string(),
+            "code-b".to_string(),
+            "code-c".to_string(),
+            "code-d".to_string(),
+            "other".to_string(),
+        ];
+
+        let suggestions = suggest_roles("code", &available);
+        assert!(suggestions.len() <= 3);
+    }
+
+    #[test]
+    fn suggest_roles_returns_all_when_no_words() {
+        let available = vec!["planner".to_string(), "executor".to_string()];
+        let suggestions = suggest_roles("ab", &available);
+        assert_eq!(suggestions, available);
     }
 }

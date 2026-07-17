@@ -416,29 +416,39 @@ pub struct UserConfig {
     pub api_key: String,
 }
 
-const KEYRING_SERVICE: &str = "workflow";
-const KEYRING_USER: &str = "config";
-
 impl UserConfig {
     pub fn save(&self) -> Result<()> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)?;
-        let data = serde_json::to_string(self)?;
-        entry.set_password(&data)?;
+        let path = Self::path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(f) = std::fs::File::create(&path) {
+                let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+            }
+        }
+        let data = serde_json::to_string_pretty(self)?;
+        std::fs::write(&path, data)?;
         Ok(())
     }
 
     pub fn load() -> Result<Option<Self>> {
-        let entry = match keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-            Ok(e) => e,
-            Err(_) => return Ok(None),
-        };
-        let data = match entry.get_password() {
-            Ok(d) => d,
-            Err(keyring::Error::NoEntry) => return Ok(None),
-            Err(e) => return Err(e.into()),
-        };
+        let path = Self::path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let data = std::fs::read_to_string(&path)?;
         let config = serde_json::from_str(&data)?;
         Ok(Some(config))
+    }
+
+    fn path() -> PathBuf {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".workflow").join("config.json")
     }
 }
 

@@ -1,14 +1,19 @@
 <script lang="ts">
 	import { Button } from "$lib/components/ui/button";
-	import { Plus, MessageSquare, Brain, Settings as SettingsIcon, ChevronRight, ChevronDown, Circle } from "@lucide/svelte";
+	import { Badge } from "$lib/components/ui/badge";
+	import { ScrollArea } from "$lib/components/ui/scroll-area";
+	import { Tooltip, TooltipContent, TooltipTrigger } from "$lib/components/ui/tooltip";
+	import { Plus, MessageSquare, Brain, Settings as SettingsIcon, ChevronRight, ChevronDown, X, Loader2, CircleDot, AlertCircle } from "@lucide/svelte";
 	import { cn } from "$lib/utils.js";
-	import type { AgentInfo, AgentId } from "$lib/types";
+	import type { AgentInfo, AgentId, AgentStatus } from "$lib/types";
 
 	let {
 		agents,
 		selected,
+		statuses,
 		onSelect,
 		onCreateClick,
+		onRemoveAgent,
 		onRolesClick,
 		roles,
 		rolesExpanded,
@@ -16,13 +21,51 @@
 	}: {
 		agents: AgentInfo[];
 		selected: AgentId | null;
+		statuses: Map<AgentId, AgentStatus>;
 		onSelect: (id: AgentId) => void;
 		onCreateClick: () => void;
+		onRemoveAgent: (id: AgentId) => void;
 		onRolesClick: () => void;
 		roles: import("$lib/types").RoleInfo[];
 		rolesExpanded: boolean;
 		onToggleRoles: () => void;
 	} = $props();
+
+	function statusColor(status: AgentStatus): string {
+		switch (status) {
+			case "thinking":
+			case "running-tool":
+				return "bg-amber-500";
+			case "responding":
+				return "bg-emerald-500";
+			case "error":
+				return "bg-red-500";
+			default:
+				return "bg-muted-foreground/30";
+		}
+	}
+
+	function statusIcon(status: AgentStatus) {
+		switch (status) {
+			case "thinking":
+			case "running-tool":
+				return Loader2;
+			case "error":
+				return AlertCircle;
+			default:
+				return CircleDot;
+		}
+	}
+
+	function statusLabel(status: AgentStatus): string {
+		switch (status) {
+			case "thinking": return "Thinking";
+			case "running-tool": return "Running tool";
+			case "responding": return "Responding";
+			case "error": return "Error";
+			default: return "Idle";
+		}
+	}
 </script>
 
 <aside class="flex flex-col w-60 min-w-60 bg-transparent overflow-hidden shrink-0">
@@ -31,51 +74,94 @@
 			<MessageSquare class="size-3.5 text-muted-foreground" />
 			<span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Agents</span>
 		</div>
-		<div class="flex items-center gap-1">
-			<span class="text-xs text-muted-foreground tabular-nums">{agents.length}</span>
-			<Button variant="ghost" size="icon-xs" onclick={onCreateClick}>
+		<div class="flex items-center gap-1.5">
+			<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 min-w-0">{agents.length}</Badge>
+			<Button variant="ghost" size="icon-xs" onclick={onCreateClick} title="New agent">
 				<Plus class="size-3" />
 			</Button>
 		</div>
 	</div>
 
-	<div class="flex-1 min-h-0 overflow-y-auto py-1.5 px-2">
-		<div class="flex flex-col gap-0.5">
+	<ScrollArea class="flex-1 min-h-0">
+		<div class="py-1.5 px-2 flex flex-col gap-0.5">
 			{#each agents as agent (agent.id)}
+				{@const status = statuses.get(agent.id) ?? "idle"}
+				{@const StatusIcon = statusIcon(status)}
+				{@const isActive = status === "thinking" || status === "running-tool" || status === "responding"}
 				<button
 					class={cn(
-						"w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-md text-left group",
-						selected === agent.id && "bg-accent text-accent-foreground",
+						"w-full flex items-start gap-2 px-2 py-1.5 text-xs rounded-md text-left group relative",
+						selected === agent.id
+							? "bg-accent text-accent-foreground"
+							: "hover:bg-muted/50",
 					)}
 					onclick={() => onSelect(agent.id)}
 				>
-					<MessageSquare class="size-3.5 shrink-0 text-muted-foreground" />
-					<span class="truncate">{agent.role.charAt(0).toUpperCase() + agent.role.slice(1)}</span>
+					<div class="relative shrink-0 mt-0.5">
+						<div class={cn("size-2 rounded-full", statusColor(status))}></div>
+						{#if isActive}
+							<div class={cn("absolute inset-0 size-2 rounded-full animate-ping opacity-75", statusColor(status))}></div>
+						{/if}
+					</div>
+					<div class="flex-1 min-w-0">
+						<div class="flex items-center gap-1">
+							<span class="font-medium truncate">{agent.role.charAt(0).toUpperCase() + agent.role.slice(1)}</span>
+							<span class="text-[10px] text-muted-foreground/50 tabular-nums">#{agent.id}</span>
+						</div>
+						{#if agent.current_task}
+							<Tooltip>
+								<TooltipTrigger>
+									<p class="text-[11px] text-muted-foreground/70 truncate mt-0.5 leading-tight">
+										{agent.current_task}
+									</p>
+								</TooltipTrigger>
+								<TooltipContent side="right" class="max-w-48">
+									<p class="text-xs">{agent.current_task}</p>
+								</TooltipContent>
+							</Tooltip>
+						{:else if status !== "idle"}
+							<p class="text-[11px] text-muted-foreground/50 mt-0.5 leading-tight flex items-center gap-1">
+								<StatusIcon class={cn("size-2.5", isActive && "animate-spin")} />
+								{statusLabel(status)}
+							</p>
+						{/if}
+					</div>
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						class="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+						onclick={(e) => { e.stopPropagation(); onRemoveAgent(agent.id); }}
+						title="Remove agent"
+					>
+						<X class="size-3" />
+					</Button>
 				</button>
 			{:else}
-				<div class="flex flex-col items-center gap-1.5 py-8 text-center">
-					<Circle class="size-6 text-muted-foreground/30" />
+				<div class="flex flex-col items-center gap-2 py-12 text-center px-4">
+					<div class="size-10 rounded-full bg-muted/50 flex items-center justify-center">
+						<MessageSquare class="size-4 text-muted-foreground/40" />
+					</div>
 					<p class="text-xs text-muted-foreground">No agents yet</p>
-					<Button variant="outline" size="xs" onclick={onCreateClick} class="mt-1">
-						<Plus class="size-3" /> New
+					<Button variant="outline" size="xs" onclick={onCreateClick}>
+						<Plus class="size-3" /> New Agent
 					</Button>
 				</div>
 			{/each}
 		</div>
-	</div>
+	</ScrollArea>
 
-	<div class="shrink-0">
-		<Button
-			variant="ghost"
-			class="w-full justify-between px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider h-auto rounded-none"
+	<div class="shrink-0 border-t border-border/50">
+		<button
+			class="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:bg-muted/30 transition-colors"
 			onclick={onToggleRoles}
 		>
 			<div class="flex items-center gap-2">
 				<Brain class="size-3.5" />
 				<span>Roles</span>
+				<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 min-w-0">{roles.length}</Badge>
 			</div>
 			<div class="flex items-center gap-1">
-				<Button variant="ghost" size="icon-xs" onclick={(e) => { e.stopPropagation(); onRolesClick(); }}>
+				<Button variant="ghost" size="icon-xs" onclick={(e) => { e.stopPropagation(); onRolesClick(); }} title="Manage roles">
 					<SettingsIcon class="size-3" />
 				</Button>
 				{#if rolesExpanded}
@@ -84,14 +170,22 @@
 					<ChevronRight class="size-3 transition-transform" />
 				{/if}
 			</div>
-		</Button>
+		</button>
 		{#if rolesExpanded}
-			<div class="px-3 pb-2 flex flex-col gap-1">
+			<div class="px-3 pb-2 flex flex-col gap-1 max-h-32 overflow-y-auto">
 				{#each roles as r}
-					<div class="flex items-center gap-2 px-2 py-1 rounded">
-						<div class="size-1.5 rounded-full bg-primary/40"></div>
-						<span class="text-xs truncate">{r.name}</span>
-					</div>
+					<Tooltip>
+						<TooltipTrigger>
+							<div class="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/30 transition-colors cursor-default">
+								<div class="size-1.5 rounded-full bg-primary/40 shrink-0"></div>
+								<span class="text-xs truncate">{r.name}</span>
+							</div>
+						</TooltipTrigger>
+						<TooltipContent side="right" class="max-w-48">
+							<p class="text-xs font-medium">{r.name}</p>
+							<p class="text-[11px] text-muted-foreground mt-0.5">{r.definition}</p>
+						</TooltipContent>
+					</Tooltip>
 				{/each}
 			</div>
 		{/if}

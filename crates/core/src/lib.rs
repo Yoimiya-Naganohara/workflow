@@ -21,6 +21,7 @@ use workflow_agent::{
 use workflow_config::*;
 use workflow_role::{Role, RoleId, RolePool};
 use workflow_tool::{
+    RoleChecker,
     list_agents::ListAgents,
     orchestrate::{AgentFactory, Orchestrate},
     send_message::SendMessage,
@@ -30,6 +31,84 @@ const DEFAULT_AGENT_CAPACITY: usize = 100;
 const EVENT_CAPACITY: usize = 256;
 
 type AgentObserver = Arc<dyn Fn(Arc<Agent>) + Send + Sync>;
+
+struct RolePoolChecker(Arc<RwLock<RolePool>>);
+
+impl RoleChecker for RolePoolChecker {
+    fn exists(&self, role: &str) -> bool {
+        self.0.read().unwrap().get(&role.to_string()).is_some()
+    }
+
+    fn list_roles(&self) -> Vec<String> {
+        self.0
+            .read()
+            .unwrap()
+            .list()
+            .into_iter()
+            .map(|r| r.name().to_owned())
+            .collect()
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CreateRoleArgs {
+    name: String,
+    definition: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum CreateRoleError {
+    #[error("failed to create role: {0}")]
+    Failed(String),
+}
+
+struct CreateRole {
+    roles: Arc<RwLock<RolePool>>,
+}
+
+impl CreateRole {
+    fn new(roles: Arc<RwLock<RolePool>>) -> Self {
+        Self { roles }
+    }
+}
+
+impl rig::tool::Tool for CreateRole {
+    const NAME: &'static str = "create_role";
+
+    type Error = CreateRoleError;
+    type Args = CreateRoleArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
+        rig::completion::ToolDefinition {
+            name: "create_role".to_string(),
+            description: "Create a new agent role with a name and definition. \
+                The definition should describe the role's responsibilities and behavior."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique role identifier (e.g. 'coder', 'reviewer')"
+                    },
+                    "definition": {
+                        "type": "string",
+                        "description": "Description of the role's responsibilities and behavior"
+                    }
+                },
+                "required": ["name", "definition"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let role_id = RoleId::from(args.name.clone());
+        let role = Role::new(args.name, args.definition, vec![]);
+        self.roles.write().unwrap().add(role_id, role);
+        Ok("Role created successfully".to_string())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
@@ -214,6 +293,7 @@ impl Runtime {
             Arc::clone(&handle_cell),
             Arc::clone(&observer),
         );
+        let role_checker: Arc<dyn RoleChecker> = Arc::new(RolePoolChecker(Arc::clone(&roles)));
         let tool_handle = ToolServer::new()
             .tool(SendMessage::new(Arc::clone(&agent_pool)))
             .tool(ListAgents::new(Arc::clone(&agent_pool)))
@@ -221,7 +301,9 @@ impl Runtime {
                 Arc::clone(&agent_pool),
                 Arc::clone(&factory),
                 Arc::clone(&next_id),
+                Arc::clone(&role_checker),
             ))
+            .tool(CreateRole::new(Arc::clone(&roles)))
             .run();
         *handle_cell.lock().unwrap() = Some(tool_handle);
 
