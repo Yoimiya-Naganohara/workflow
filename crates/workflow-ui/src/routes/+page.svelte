@@ -84,19 +84,21 @@
 	onOpenChange={(o) => { if (!o) app.closeDialog(); }}
 />
 
-<div class="fixed inset-0 top-8 flex flex-row overflow-hidden">
+<div class="fixed inset-0 top-8 flex flex-row p-1 gap-1 overflow-hidden">
 	<AgentSidebar
 		agents={app.agents}
 		selected={app.selected}
+		statuses={app.agentStatuses}
 		roles={app.roles}
 		rolesExpanded={app.rolesExpanded}
 		onSelect={(id) => app.selectAgent(id)}
 		onCreateClick={() => app.openDialog("new-agent")}
+		onRemoveAgent={(id) => app.removeAgent(id)}
 		onRolesClick={() => app.openDialog("roles")}
 		onToggleRoles={() => app.toggleRoles()}
 	/>
 
-	<div class="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden bg-background">
+	<div class="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden rounded-lg bg-background">
 		<div class="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-card shrink-0">
 			<div class="flex items-center gap-1.5 min-w-0">
 				<MessageSquare class="size-3.5 text-muted-foreground shrink-0" />
