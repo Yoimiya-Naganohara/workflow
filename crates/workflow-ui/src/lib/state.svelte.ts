@@ -249,7 +249,7 @@ class AppState {
 		}
 	};
 
-	init = async () => {
+	init = () => {
 		this.loadUserConfig().then(() => {
 			if (this.selectedProvider && this.selectedModel && this.settingsApiKey && !this.configured) {
 				this.configureRuntime(this.selectedProvider, this.settingsApiKey, this.selectedModel);
@@ -259,7 +259,7 @@ class AppState {
 		this.pull(null);
 		this.loadProviders();
 		this.refreshProviders();
-		this.#unlisten = await listen<UiEvent>("workflow:event", (event) => {
+		listen<UiEvent>("workflow:event", (event) => {
 			const entry: LogEntry = { ts: Date.now(), event: event.payload };
 			this.eventLog.push(entry);
 			if (this.eventLog.length > 500) this.eventLog.splice(0, this.eventLog.length - 500);
@@ -268,6 +268,8 @@ class AppState {
 				return;
 			}
 			this.pull();
+		}).then((unlisten) => {
+			this.#unlisten = unlisten;
 		});
 	};
 
