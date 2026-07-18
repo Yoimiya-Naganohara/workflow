@@ -3,14 +3,13 @@ use std::{
     num::NonZeroUsize,
     sync::{
         Arc, Mutex, RwLock,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicU32, Ordering},
     },
 };
 
 use rig::{
     client::CompletionClient, memory::InMemoryConversationMemory,
     providers::openai::CompletionsClient, tool::server::ToolServer,
-    vector_store::VectorStoreIndexDyn,
 };
 use serde::Serialize;
 use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
@@ -22,7 +21,8 @@ use workflow_agent::{
 use workflow_config::*;
 use workflow_role::{Role, RoleId, RolePool};
 use workflow_tool::{
-    RoleChecker,
+    RoleChecker, ToolError,
+    dynamic_tools::DynamicTools,
     list_agents::ListAgents,
     orchestrate::{AgentFactory, Orchestrate},
     send_message::SendMessage,
@@ -110,83 +110,6 @@ impl rig::tool::Tool for CreateRole {
         self.roles.write().unwrap().add(role_id, role);
         let _ = self.events.send(WorkflowEvent::RolesChanged);
         Ok("Role created successfully".to_string())
-    }
-}
-
-// ── DynamicTools — toggles create_role tool availability ───────
-
-struct DynamicTools {
-    create_role: Arc<AtomicBool>,
-}
-
-impl DynamicTools {
-    pub fn new() -> Self {
-        Self { create_role: Arc::new(AtomicBool::new(false)) }
-    }
-    pub fn with_flag(flag: Arc<AtomicBool>) -> Self {
-        Self { create_role: flag }
-    }
-    pub fn set_create_role(&mut self, create_role: bool) {
-        self.create_role.store(create_role, std::sync::atomic::Ordering::Relaxed)
-    }
-    pub fn flag(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.create_role)
-    }
-}
-impl VectorStoreIndexDyn for DynamicTools {
-    fn top_n<'a>(
-        &'a self,
-        _req: rig::vector_store::VectorSearchRequest<
-            rig::vector_store::request::Filter<serde_json::Value>,
-        >,
-    ) -> rig::wasm_compat::WasmBoxedFuture<'a, rig::vector_store::TopNResults> {
-        let enabled = self.create_role.load(std::sync::atomic::Ordering::Relaxed);
-        Box::pin(async move {
-            if !enabled {
-                return Ok(Vec::new());
-            }
-            Ok(vec![(
-                1.0,
-                "create_role".to_string(),
-                serde_json::json!({
-                    "name": "create_role",
-                    "description": "Create a new agent role with a name and definition. \
-                        The definition should describe the role's responsibilities and behavior.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "Unique role identifier (e.g. 'coder', 'reviewer')"
-                            },
-                            "definition": {
-                                "type": "string",
-                                "description": "Description of the role's responsibilities and behavior"
-                            }
-                        },
-                        "required": ["name", "definition"]
-                    }
-                }),
-            )])
-        })
-    }
-
-    fn top_n_ids<'a>(
-        &'a self,
-        _req: rig::vector_store::VectorSearchRequest<
-            rig::vector_store::request::Filter<serde_json::Value>,
-        >,
-    ) -> rig::wasm_compat::WasmBoxedFuture<
-        'a,
-        Result<Vec<(f64, String)>, rig::vector_store::VectorStoreError>,
-    > {
-        let enabled = self.create_role.load(Ordering::Relaxed);
-        Box::pin(async move {
-            if !enabled {
-                return Ok(Vec::new());
-            }
-            Ok(vec![(1.0, "create_role".to_string())])
-        })
     }
 }
 
