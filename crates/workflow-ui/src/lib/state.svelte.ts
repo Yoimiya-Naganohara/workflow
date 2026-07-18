@@ -83,8 +83,7 @@ class AppState {
 
 	loadRoles = async () => {
 		try {
-			this.roles.length = 0;
-			this.roles.push(...(await invoke("get_roles")) as RoleInfo[]);
+			this.roles = await invoke("get_roles") as RoleInfo[];
 		} catch (e) {
 			this.error = `load roles: ${e}`;
 		}
@@ -93,13 +92,11 @@ class AppState {
 	pull = async (sel?: AgentId | null) => {
 		try {
 			const s = await invoke("snapshot", { selected: sel ?? this.selected }) as RuntimeSnapshot;
-			this.agents.length = 0;
-			this.agents.push(...s.agents);
+			this.agents = s.agents;
 			if (s.selected !== null && s.selected !== undefined) {
 				this.selected = s.selected as AgentId;
 			}
-			this.messages.length = 0;
-			this.messages.push(...s.messages);
+			this.messages = s.messages;
 			this.error = "";
 		} catch (e) {
 			this.error = `snapshot: ${e}`;
@@ -113,11 +110,9 @@ class AppState {
 		this.pendingAction = { type: "send", agentId: this.selected };
 		try {
 			const s = await invoke("send", { target: this.selected, text }) as RuntimeSnapshot;
-			this.agents.length = 0;
-			this.agents.push(...s.agents);
+			this.agents = s.agents;
 			this.selected = s.selected as AgentId;
-			this.messages.length = 0;
-			this.messages.push(...s.messages);
+			this.messages = s.messages;
 			this.error = "";
 		} catch (e) {
 			this.error = `send: ${e}`;
@@ -130,8 +125,7 @@ class AppState {
 		this.pendingAction = { type: "create-agent" };
 		try {
 			const updated = await invoke("create_agent", { roleName: role }) as AgentInfo[];
-			this.agents.length = 0;
-			this.agents.push(...updated);
+			this.agents = updated;
 			const last = updated[updated.length - 1];
 			if (last) {
 				await this.selectAgent(last.id);
@@ -148,8 +142,7 @@ class AppState {
 		this.pendingAction = { type: "remove-agent", agentId: id };
 		try {
 			const updated = await invoke("remove_agent", { id }) as AgentInfo[];
-			this.agents.length = 0;
-			this.agents.push(...updated);
+			this.agents = updated;
 			if (this.selected === id) {
 				this.selected = this.agents[0]?.id ?? null;
 				await this.pull(this.selected);
@@ -165,9 +158,7 @@ class AppState {
 		if (!name.trim() || !def.trim()) return;
 		this.pendingAction = { type: "add-role" };
 		try {
-			const updated = await invoke("add_role", { name: name.trim(), definition: def.trim() }) as RoleInfo[];
-			this.roles.length = 0;
-			this.roles.push(...updated);
+			this.roles = await invoke("add_role", { name: name.trim(), definition: def.trim() }) as RoleInfo[];
 		} catch (e) {
 			this.error = `add role: ${e}`;
 		} finally {
@@ -212,8 +203,7 @@ class AppState {
 
 	loadProviders = async () => {
 		try {
-			this.providers.length = 0;
-			this.providers.push(...(await invoke("list_providers")) as ProviderEntry[]);
+			this.providers = await invoke("list_providers") as ProviderEntry[];
 		} catch (e) {
 			this.error = `load providers: ${e}`;
 		}
@@ -222,9 +212,7 @@ class AppState {
 	refreshProviders = async () => {
 		this.pendingAction = { type: "refresh-providers" };
 		try {
-			const fetched = await invoke("fetch_providers") as ProviderEntry[];
-			this.providers.length = 0;
-			this.providers.push(...fetched);
+			this.providers = await invoke("fetch_providers") as ProviderEntry[];
 			this.error = "";
 		} catch (e) {
 			this.error = e instanceof Error ? e.message : `refresh providers: ${e}`;
