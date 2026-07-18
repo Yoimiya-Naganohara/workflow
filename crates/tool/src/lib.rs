@@ -4,6 +4,7 @@
 //!
 //! Each tool implements [`rig::tool::Tool`] and can be registered on a
 //! [`rig::tool::server::ToolServer`].
+pub mod dynamic_tools;
 pub mod list_agents;
 pub mod orchestrate;
 pub mod send_message;
