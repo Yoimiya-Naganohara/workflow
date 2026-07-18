@@ -45,8 +45,11 @@
 			localProvider = selectedProvider;
 			localModel = selectedModel;
 			localApiKey = apiKey;
-			onRefreshProviders();
 		}
+	});
+
+	$effect(() => {
+		if (open) onRefreshProviders();
 	});
 
 	const currentProvider = $derived(providers.find(p => p.id === localProvider));

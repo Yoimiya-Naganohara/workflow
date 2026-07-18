@@ -192,10 +192,7 @@ class AppState {
 
 	loadUserConfig = async () => {
 		try {
-			const cfg = await Promise.race([
-				invoke("load_config") as Promise<{ selected_provider: string; selected_model: string; api_key: string } | null>,
-				new Promise<null>((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000)),
-			]);
+			const cfg = await invoke("load_config") as { selected_provider: string; selected_model: string; api_key: string } | null;
 			if (cfg) {
 				this.selectedProvider = cfg.selected_provider;
 				this.selectedModel = cfg.selected_model;
