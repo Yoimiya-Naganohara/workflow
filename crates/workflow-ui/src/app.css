@@ -84,7 +84,6 @@
   body {
     background-color: transparent;
     color: var(--foreground);
-    background-image: radial-gradient(ellipse at 20% 50%, color-mix(in srgb, var(--primary) 4%, transparent) 0%, transparent 70%);
   }
 }
 
@@ -93,14 +92,12 @@
     backdrop-filter: blur(var(--acrylic-blur));
     background: var(--acrylic-bg);
     border: 1px solid var(--acrylic-border);
-    background-image: radial-gradient(ellipse at 30% 20%, color-mix(in srgb, var(--primary) 6%, transparent), transparent 70%);
   }
 
   .acrylic-heavy {
     backdrop-filter: blur(calc(var(--acrylic-blur) * 2));
     background: var(--acrylic-bg);
     border: 1px solid var(--acrylic-border);
-    background-image: radial-gradient(ellipse at 30% 20%, color-mix(in srgb, var(--primary) 10%, transparent), transparent 70%);
   }
 }
 
