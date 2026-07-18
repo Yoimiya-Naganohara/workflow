@@ -58,8 +58,8 @@ struct CreateRoleArgs {
 
 #[derive(Debug, thiserror::Error)]
 enum CreateRoleError {
-    #[error("failed to create role: {0}")]
-    Failed(String),
+    #[error("{0}")]
+    AlreadyExists(String),
 }
 
 struct CreateRole {
@@ -80,26 +80,18 @@ impl rig::tool::Tool for CreateRole {
     type Args = CreateRoleArgs;
     type Output = String;
 
-    async fn definition(&self, prompt: String) -> rig::completion::ToolDefinition {
-        let existing: Vec<String> = self.roles.read().unwrap().list().iter().map(|r| r.name().to_owned()).collect();
-        let exists = existing.iter().any(|n| prompt.contains(n));
-        let (desc, name_desc) = if exists {
-            ("This role already exists. Use an existing role instead of creating a duplicate.".to_string(),
-             "Must be a new role name not already in the pool".to_string())
-        } else {
-            ("Create a new agent role with a name and definition. \
-             The definition should describe the role's responsibilities and behavior.".to_string(),
-             "Unique role identifier (e.g. 'coder', 'reviewer')".to_string())
-        };
+    async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
         rig::completion::ToolDefinition {
             name: "create_role".to_string(),
-            description: desc,
+            description: "Create a new agent role with a name and definition. \
+                The definition should describe the role's responsibilities and behavior."
+                .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": name_desc
+                        "description": "Unique role identifier (e.g. 'coder', 'reviewer')"
                     },
                     "definition": {
                         "type": "string",
@@ -112,17 +104,20 @@ impl rig::tool::Tool for CreateRole {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let guard = self.roles.read().unwrap();
-        let existing = guard.list();
-        if existing.iter().any(|r| r.name() == args.name) {
-            return Ok(format!("Role '{}' already exists, not creating duplicate", args.name));
-        }
-        drop(guard);
         let role_id = RoleId::from(args.name.clone());
+        {
+            let roles = self.roles.read().unwrap();
+            if roles.get(&role_id).is_some() {
+                return Err(CreateRoleError::AlreadyExists(
+                    format!("Role '{}' already exists in the pool. Use the existing role instead of creating a duplicate.", args.name)
+                ));
+            }
+        }
+        let role_name = args.name.clone();
         let role = Role::new(args.name, args.definition, vec![]);
         self.roles.write().unwrap().add(role_id, role);
         let _ = self.events.send(WorkflowEvent::RolesChanged);
-        Ok("Role created successfully".to_string())
+        Ok(format!("Role '{}' created successfully", role_name))
     }
 }
 
