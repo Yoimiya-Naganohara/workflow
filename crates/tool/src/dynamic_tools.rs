@@ -3,23 +3,34 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use rig::vector_store::VectorStoreIndexDyn;
 
-/// Dynamic tool toggle that controls whether `create_role` is available
-/// to the LLM. When the flag is `false`, the index returns empty results
-/// and the tool is not injected into prompts.
+/// Controls whether `create_role` is injected into LLM prompts.
+///
+/// When [`DynamicTools::set_create_role(true)`] is called, the tool server
+/// includes `create_role` in the tool definitions sent to the model on each
+/// prompt. Setting it to `false` hides the tool from the model.
+///
+/// The flag is shared across all agents via [`Arc<AtomicBool>`]. Multiple
+/// [`DynamicTools`] instances can reference the same flag via [`with_flag`].
 pub struct DynamicTools {
     create_role: Arc<AtomicBool>,
 }
 
 impl DynamicTools {
     pub fn new() -> Self {
-        Self { create_role: Arc::new(AtomicBool::new(false)) }
+        Self {
+            create_role: Arc::new(AtomicBool::new(false)),
+        }
     }
+
     pub fn with_flag(flag: Arc<AtomicBool>) -> Self {
         Self { create_role: flag }
     }
-    pub fn set_create_role(&mut self, enabled: bool) {
-        self.create_role.store(enabled, Ordering::Relaxed)
+
+    pub fn set_create_role(&mut self, create_role: bool) {
+        self.create_role
+            .store(create_role, Ordering::Relaxed)
     }
+
     pub fn flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.create_role)
     }
