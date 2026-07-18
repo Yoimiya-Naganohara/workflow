@@ -329,6 +329,11 @@
 			}
 			applyStatusPulses();
 			applySelection();
+		} else if (svgEl && agents.length === 0 && sim) {
+			sim.stop();
+			sim = null;
+			d3.select(svgEl).selectAll("*").remove();
+			nodeCache.clear();
 		}
 	});
 
