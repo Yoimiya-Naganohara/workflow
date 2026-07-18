@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import * as d3 from "d3";
+	import { formatRole } from "$lib/utils.js";
 	import type { AgentInfo, AgentId, AgentStatus } from "$lib/types";
 
 	interface GraphNode extends d3.SimulationNodeDatum {
@@ -110,7 +111,7 @@
 			.attr("text-anchor", "middle")
 			.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31))
 			.attr("fill", "currentColor").attr("font-size", "9").attr("opacity", 0.5)
-			.text((d: GraphNode) => d.role);
+			.text((d: GraphNode) => formatRole(d.role));
 
 		return gEnter;
 	}

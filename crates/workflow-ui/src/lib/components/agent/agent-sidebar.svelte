@@ -4,7 +4,7 @@
 	import { ScrollArea } from "$lib/components/ui/scroll-area";
 	import { Tooltip, TooltipContent, TooltipTrigger } from "$lib/components/ui/tooltip";
 	import { Plus, MessageSquare, Brain, Settings as SettingsIcon, ChevronRight, ChevronDown, X, Loader2, CircleDot, AlertCircle } from "@lucide/svelte";
-	import { cn } from "$lib/utils.js";
+	import { cn, formatRole } from "$lib/utils.js";
 	import type { AgentInfo, AgentId, AgentStatus } from "$lib/types";
 
 	let {
@@ -105,7 +105,7 @@
 					</div>
 					<div class="flex-1 min-w-0">
 						<div class="flex items-center gap-1">
-							<span class="font-medium truncate">{agent.role.charAt(0).toUpperCase() + agent.role.slice(1)}</span>
+							<span class="font-medium truncate">{formatRole(agent.role)}</span>
 							<span class="text-[10px] text-muted-foreground/50 tabular-nums">#{agent.id}</span>
 						</div>
 						{#if agent.current_task}

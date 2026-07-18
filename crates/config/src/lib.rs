@@ -5,9 +5,8 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use aes_gcm::{
-    AeadCore, KeyInit,
-    aead::{OsRng, Aead},
-    Aes256Gcm, Key, Nonce,
+    AeadCore, Aes256Gcm, Key, KeyInit, Nonce,
+    aead::{Aead, OsRng},
 };
 use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -477,7 +476,9 @@ fn enc_key_path() -> PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".workflow").join(".encryption_key")
+    PathBuf::from(home)
+        .join(".workflow")
+        .join(".encryption_key")
 }
 
 fn load_or_generate_key() -> Result<[u8; 32]> {
@@ -503,7 +504,7 @@ fn load_or_generate_key() -> Result<[u8; 32]> {
             let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
         }
     }
-    std::fs::write(&path, &key)?;
+    std::fs::write(&path, key)?;
     Ok(key)
 }
 

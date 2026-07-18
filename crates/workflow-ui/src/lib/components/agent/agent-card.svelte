@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { cn } from "$lib/utils.js";
+    import { cn, formatRole } from "$lib/utils.js";
     import { Button } from "$lib/components/ui/button";
     import Badge from "$lib/components/ui/badge/badge.svelte";
     import { Trash2 } from "@lucide/svelte";
@@ -67,7 +67,7 @@
             <Badge
                 variant="outline"
                 class="text-[10px] px-1 py-px font-normal leading-none shrink-0"
-                >{agent.role}</Badge
+                >{formatRole(agent.role)}</Badge
             >
         </div>
         {#if agent.current_task}

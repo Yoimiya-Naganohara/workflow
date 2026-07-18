@@ -4,12 +4,11 @@ pub mod protocol;
 use async_stream::stream;
 use futures::{Stream, StreamExt};
 use rig::{
-    agent::MultiTurnStreamItem,
-    completion::CompletionModel,
-    message::{Reasoning, Text},
-    streaming::StreamedAssistantContent,
+    agent::MultiTurnStreamItem, completion::CompletionModel, message::Text,
+    streaming::{StreamedAssistantContent, StreamedUserContent},
 };
 use std::{
+    collections::HashMap,
     pin::Pin,
     sync::{Arc, Mutex as StdMutex},
 };
@@ -189,6 +188,8 @@ impl Agent {
                     .stream()
                     .await;
 
+                let mut pending_tool_names: HashMap<String, String> = HashMap::new();
+
                 while let Some(item) = stream.next().await {
                     let event = match item {
                         Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
@@ -200,25 +201,29 @@ impl Agent {
                             {
                                 Some(AgentEvent::Reasoning(reasoning))
                             }
-                            // StreamedAssistantContent::Reasoning(Reasoning{content,..})=>{
-                            //     dbg!(&content);
-                            //     content.iter().for_each(|v|{
-                            //         match v {
-                            //             rig::message::ReasoningContent::Text{text,..}=>{
-                            //                 dbg!(text);
-                            //             }
-                            //             _ => {},
-                            //         }
-                            //     });
-                            //     Some(AgentEvent::Reasoning(String::new()))
-                            // }
-                            StreamedAssistantContent::ToolCall { tool_call, .. } => {
+                            StreamedAssistantContent::ToolCall { tool_call, internal_call_id } => {
+                                let name = tool_call.function.name.clone();
+                                pending_tool_names.insert(internal_call_id.clone(), name.clone());
                                 Some(AgentEvent::ToolCall {
-                                    name: tool_call.function.name,
+                                    name,
                                     params: tool_call.function.arguments.to_string(),
                                 })
                             }
                             _ => None,
+                        },
+                        Ok(MultiTurnStreamItem::StreamUserItem(content)) => match content {
+                            StreamedUserContent::ToolResult { tool_result, internal_call_id } => {
+                                let name = pending_tool_names.remove(&internal_call_id)
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                let result_text = tool_result.content.iter()
+                                    .filter_map(|c| match c {
+                                        rig::completion::message::ToolResultContent::Text(t) => Some(t.text.clone()),
+                                        _ => None,
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                Some(AgentEvent::ToolResult { name, result: result_text })
+                            }
                         },
                         Ok(MultiTurnStreamItem::FinalResponse(_)) => {
                             Some(AgentEvent::TurnComplete)

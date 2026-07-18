@@ -17,9 +17,7 @@
 <div class="flex items-start gap-3">
     {#if role === "user"}
         <div
-            class="size-7 rounded-full {role === 'user'
-                ? 'bg-primary/10'
-                : 'bg-muted-foreground/10'} flex items-center justify-center shrink-0 mt-0.5"
+            class="size-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5"
         >
             <User class="size-3.5 text-primary/70" />
         </div>

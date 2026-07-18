@@ -57,12 +57,6 @@ struct CreateRoleArgs {
     definition: String,
 }
 
-#[derive(Debug, thiserror::Error)]
-enum CreateRoleError {
-    #[error("failed to create role: {0}")]
-    Failed(String),
-}
-
 struct CreateRole {
     roles: Arc<RwLock<RolePool>>,
     events: broadcast::Sender<WorkflowEvent>,
@@ -77,7 +71,7 @@ impl CreateRole {
 impl rig::tool::Tool for CreateRole {
     const NAME: &'static str = "create_role";
 
-    type Error = CreateRoleError;
+    type Error = std::convert::Infallible;
     type Args = CreateRoleArgs;
     type Output = String;
 
@@ -315,10 +309,15 @@ impl Runtime {
                 Arc::clone(&role_checker),
                 Arc::clone(&dt_flag),
             ))
-            .dynamic_tools(1, DynamicTools::with_flag(Arc::clone(&dt_flag)),
-                rig::tool::ToolSet::from_tools_boxed(vec![
-                    Box::new(CreateRole::new(Arc::clone(&roles), events.clone())) as Box<dyn rig::tool::ToolDyn>,
-                ]))
+            .dynamic_tools(
+                1,
+                DynamicTools::with_flag(Arc::clone(&dt_flag)),
+                rig::tool::ToolSet::from_tools_boxed(vec![Box::new(CreateRole::new(
+                    Arc::clone(&roles),
+                    events.clone(),
+                ))
+                    as Box<dyn rig::tool::ToolDyn>]),
+            )
             .run();
         *handle_cell.lock().unwrap() = Some(tool_handle);
         Ok(Self {
@@ -533,7 +532,7 @@ impl Runtime {
                     result: tool_result,
                     ..
                 }) = messages.iter_mut().rev().find(|message| {
-                    matches!(message, ConversationMessage::Tool { text, result: None } if text.starts_with(name))
+                    matches!(message, ConversationMessage::Tool { text, result: None } if text.split(": ").next() == Some(name.as_str()))
                 }) {
                     *tool_result = Some(result.clone());
                 } else {
@@ -579,13 +578,12 @@ struct DynamicTools {
 
 impl DynamicTools {
     pub fn new() -> Self {
-        Self { create_role: Arc::new(AtomicBool::new(false)) }
+        Self {
+            create_role: Arc::new(AtomicBool::new(false)),
+        }
     }
     pub fn with_flag(flag: Arc<AtomicBool>) -> Self {
         Self { create_role: flag }
-    }
-    pub fn set_create_role(&mut self, create_role: bool) {
-        self.create_role.store(create_role, std::sync::atomic::Ordering::Relaxed)
     }
     pub fn flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.create_role)

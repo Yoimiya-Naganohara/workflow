@@ -18,3 +18,7 @@ export type WithoutChildrenOrChild<T> = WithoutChildren<WithoutChild<T>>;
 export type WithElementRef<T, U extends HTMLElement = HTMLElement> = T & {
 	ref?: U | null;
 };
+
+export function formatRole(role: string): string {
+	return role.charAt(0).toUpperCase() + role.slice(1);
+}

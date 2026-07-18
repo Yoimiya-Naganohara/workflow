@@ -34,7 +34,9 @@ pub enum ToolError {
         source: tokio::sync::mpsc::error::SendError<Message>,
     },
     /// The requested role does not exist; suggestions are provided.
-    #[error("role '{requested}' not found. Did you mean: {suggestions:?}? Available roles: {available:?}. Use the `create_role` tool to create a new role.")]
+    #[error(
+        "role '{requested}' not found. Did you mean: {suggestions:?}? Available roles: {available:?}. Use the `create_role` tool to create a new role."
+    )]
     RoleNotFound {
         requested: String,
         suggestions: Vec<String>,

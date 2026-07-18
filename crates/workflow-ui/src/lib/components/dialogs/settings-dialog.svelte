@@ -48,8 +48,10 @@
 		}
 	});
 
+	let wasOpen = $state(false);
 	$effect(() => {
-		if (open) onRefreshProviders();
+		if (open && !wasOpen) onRefreshProviders();
+		wasOpen = open;
 	});
 
 	const currentProvider = $derived(providers.find(p => p.id === localProvider));

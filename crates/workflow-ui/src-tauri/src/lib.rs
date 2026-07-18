@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use std::path::PathBuf;
@@ -272,54 +273,103 @@ struct SavedRole {
     definition: String,
 }
 
-#[tauri::command]
-fn add_role(
-    state: State<'_, AppState>,
-    name: String,
-    definition: String,
-) -> Vec<workflow_core::RoleInfo> {
-    let runtime = match state.runtime.lock().unwrap().clone() {
-        Some(r) => r,
-        None => return Vec::new(),
+fn default_roles() -> Vec<workflow_core::RoleInfo> {
+    vec![
+        workflow_core::RoleInfo {
+            id: "planner".into(),
+            name: "planner".into(),
+            definition: "I should help user to plan".into(),
+        },
+        workflow_core::RoleInfo {
+            id: "executor".into(),
+            name: "executor".into(),
+            definition: "I should execute the plan".into(),
+        },
+    ]
+}
+
+fn read_saved_roles() -> Vec<SavedRole> {
+    let path = roles_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    let data = match std::fs::read_to_string(&path) {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
     };
-    let roles = runtime.add_role(name, definition);
-    let saved: Vec<SavedRole> = roles.iter().map(|r| SavedRole {
-        name: r.name.clone(),
-        definition: r.definition.clone(),
-    }).collect();
-    if let Ok(data) = serde_json::to_string_pretty(&saved) {
+    serde_json::from_str(&data).unwrap_or_default()
+}
+
+fn write_saved_roles(roles: &[SavedRole]) {
+    if let Ok(data) = serde_json::to_string_pretty(roles) {
         let path = roles_path();
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         let _ = std::fs::write(&path, data);
     }
-    roles
+}
+
+fn merge_roles(defaults: Vec<workflow_core::RoleInfo>, saved: Vec<SavedRole>) -> Vec<workflow_core::RoleInfo> {
+    let mut names: HashSet<String> = defaults.iter().map(|r| r.name.clone()).collect();
+    let mut merged = defaults;
+    for s in saved {
+        if names.insert(s.name.clone()) {
+            merged.push(workflow_core::RoleInfo {
+                id: s.name.clone(),
+                name: s.name,
+                definition: s.definition,
+            });
+        }
+    }
+    merged
+}
+
+#[tauri::command]
+fn add_role(
+    state: State<'_, AppState>,
+    name: String,
+    definition: String,
+) -> Vec<workflow_core::RoleInfo> {
+    if let Some(runtime) = state.runtime.lock().unwrap().clone() {
+        let roles = runtime.add_role(name.clone(), definition.clone());
+        let saved: Vec<SavedRole> = roles.iter().map(|r| SavedRole {
+            name: r.name.clone(),
+            definition: r.definition.clone(),
+        }).collect();
+        write_saved_roles(&saved);
+        return roles;
+    }
+
+    let mut saved = read_saved_roles();
+    if !saved.iter().any(|r| r.name == name) {
+        saved.push(SavedRole { name, definition });
+    }
+    write_saved_roles(&saved);
+    merge_roles(default_roles(), saved)
 }
 
 #[tauri::command]
 fn load_roles(state: State<'_, AppState>) -> Vec<workflow_core::RoleInfo> {
-    let path = roles_path();
-    if !path.exists() { return Vec::new(); }
-    let data = match std::fs::read_to_string(&path) {
-        Ok(d) => d,
-        Err(_) => return Vec::new(),
-    };
-    let saved: Vec<SavedRole> = match serde_json::from_str(&data) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    let runtime = match state.runtime.lock().unwrap().clone() {
-        Some(r) => r,
-        None => return Vec::new(),
-    };
-    for role in &saved {
-        let existing = runtime.list_roles();
-        if !existing.iter().any(|r| r.name == role.name) {
-            runtime.add_role(role.name.clone(), role.definition.clone());
+    if let Some(runtime) = state.runtime.lock().unwrap().clone() {
+        let saved = read_saved_roles();
+        for role in &saved {
+            let existing = runtime.list_roles();
+            if !existing.iter().any(|r| r.name == role.name) {
+                runtime.add_role(role.name.clone(), role.definition.clone());
+            }
         }
+        let all = runtime.list_roles();
+        let saved: Vec<SavedRole> = all.iter().map(|r| SavedRole {
+            name: r.name.clone(),
+            definition: r.definition.clone(),
+        }).collect();
+        write_saved_roles(&saved);
+        return all;
     }
-    runtime.list_roles()
+
+    let saved = read_saved_roles();
+    merge_roles(default_roles(), saved)
 }
 
 #[tauri::command]

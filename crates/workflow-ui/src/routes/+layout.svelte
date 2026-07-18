@@ -33,8 +33,8 @@
                     <Bug class="size-3.5" />
                 </Button>
                 <Button variant="ghost" size="icon-xs" onclick={toggleMode}>
-                    <Sun data-icon="inline-start" class="dark:hidden" />
-                    <Moon data-icon="inline-start" class="hidden dark:block" />
+                    <Sun class="dark:hidden" />
+                    <Moon class="hidden dark:block" />
                 </Button>
             </div>
         </header>

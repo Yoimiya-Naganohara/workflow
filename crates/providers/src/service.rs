@@ -31,11 +31,7 @@ impl ProviderService {
     }
 
     pub async fn refresh(&mut self) -> Result<bool> {
-        match self
-            .repository
-            .fetch("https://models.dev/api.json")
-            .await?
-        {
+        match self.repository.fetch("https://models.dev/api.json").await? {
             FetchResult::NotModified => Ok(false),
             FetchResult::Updated(data) => {
                 let changed = self.store.replace(data.clone());

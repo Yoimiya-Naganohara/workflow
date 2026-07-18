@@ -18,14 +18,25 @@
 		onOpenChange: (open: boolean) => void;
 	} = $props();
 
-	let selectedRole = $state("planner");
+	let selectedRole = $state("");
+	let wasOpen = $state(false);
+
+	$effect(() => {
+		if (open && !wasOpen) {
+			selectedRole = roles[0]?.name ?? "";
+		}
+		wasOpen = open;
+	});
 
 	const roleDesc = $derived.by(() => {
 		const r = roles.find(r => r.name === selectedRole);
 		return r ? r.definition : "";
 	});
 
+	const canCreate = $derived(!!selectedRole);
+
 	function handleCreate() {
+		if (!canCreate) return;
 		onCreate(selectedRole);
 	}
 </script>
@@ -41,7 +52,7 @@
 			<label class="text-xs font-medium text-muted-foreground" for="new-role">Role</label>
 			<Select.Root bind:value={selectedRole} type="single">
 				<Select.Trigger class="w-full text-xs h-8" id="new-role">
-					{selectedRole}
+					{selectedRole || "Select a role..."}
 				</Select.Trigger>
 				<Select.Content>
 					{#each roles as r}
@@ -56,7 +67,7 @@
 	</div>
 	<Dialog.Footer>
 		<Button variant="outline" onclick={() => onOpenChange(false)}>Cancel</Button>
-		<Button onclick={handleCreate}><Bot class="size-3.5" /> Create Agent</Button>
+		<Button onclick={handleCreate} disabled={!canCreate}><Bot class="size-3.5" /> Create Agent</Button>
 	</Dialog.Footer>
 </Dialog.Content>
 </Dialog.Root>

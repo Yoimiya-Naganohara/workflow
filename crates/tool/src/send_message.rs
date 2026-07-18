@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::Deserialize;
 use workflow_agent::{
-    Message, agent_pool::AgentPool, current_agent_id,
+    Message,
+    agent_pool::AgentPool,
+    current_agent_id,
     protocol::{PeerIntent, PeerMessage},
 };
 

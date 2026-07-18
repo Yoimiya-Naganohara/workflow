@@ -69,7 +69,7 @@
 							{:else if item.type === "thinking"}
 								<ThinkingBlock text={item.text} />
 							{:else if item.type === "tool"}
-								<ToolCard name={item.text} result={item.result ?? undefined} status={item.status ?? "done"} />
+								<ToolCard name={item.text} result={item.result == null ? undefined : item.result} status={item.status ?? "done"} />
 							{:else if item.type === "error"}
 								<ErrorBlock text={item.text} />
 							{/if}

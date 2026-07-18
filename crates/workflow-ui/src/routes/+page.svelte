@@ -3,6 +3,7 @@
 	import { Button } from "$lib/components/ui/button";
 	import { Card } from "$lib/components/ui/card";
 	import { MessageSquare, GitBranch, Settings, Eye, EyeOff } from "@lucide/svelte";
+	import { formatRole } from "$lib/utils.js";
 
 	import AgentSidebar from "$lib/components/agent/agent-sidebar.svelte";
 	import AgentGraph from "$lib/components/agent/agent-graph.svelte";
@@ -45,8 +46,7 @@
 
 	function calcDefaultWidth() {
 		if (typeof window === "undefined") return 320;
-		const sidebarW = 240;
-		const available = window.innerWidth - sidebarW;
+		const available = window.innerWidth - 240;
 		return Math.floor(available / 2);
 	}
 
@@ -183,7 +183,7 @@
 						<div class="flex items-center justify-between">
 							<div class="flex items-center gap-2">
 								<div class="size-2 rounded-full" style="background: {statusColor}"></div>
-								<span class="text-xs font-medium">#{agent?.id} {agent?.role}</span>
+								<span class="text-xs font-medium">#{agent?.id} {agent ? formatRole(agent.role) : ""}</span>
 							</div>
 							<span class="text-[10px] text-muted-foreground/50 capitalize">{status.replace("-", " ")}</span>
 						</div>
