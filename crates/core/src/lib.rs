@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     num::NonZeroUsize,
-    path::PathBuf,
     sync::{
         Arc, Mutex, RwLock,
         atomic::{AtomicU32, Ordering},
@@ -12,7 +11,7 @@ use rig::{
     client::CompletionClient, memory::InMemoryConversationMemory,
     providers::openai::CompletionsClient, tool::server::ToolServer,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
 pub use workflow_agent::agent_pool::AgentInfo;
 use workflow_agent::{
@@ -63,29 +62,6 @@ enum CreateRoleError {
     Failed(String),
 }
 
-#[derive(Serialize, Deserialize)]
-struct SavedRole {
-    name: String,
-    definition: String,
-}
-
-fn roles_path() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".workflow").join("roles.json")
-}
-
-fn save_roles_list(saved: &[SavedRole]) {
-    if let Ok(data) = serde_json::to_string_pretty(saved) {
-        let path = roles_path();
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(&path, data);
-    }
-}
-
 struct CreateRole {
     roles: Arc<RwLock<RolePool>>,
     events: broadcast::Sender<WorkflowEvent>,
@@ -129,17 +105,15 @@ impl rig::tool::Tool for CreateRole {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let role_id = RoleId::from(args.name.clone());
-        let role = Role::new(args.name, args.definition, vec![]);
+        let guard = self.roles.read().unwrap();
+        if guard.get(&role_id).is_some() {
+            return Ok(format!("Role '{}' already exists", args.name));
+        }
+        drop(guard);
+        let role = Role::new(args.name.clone(), args.definition, vec![]);
         self.roles.write().unwrap().add(role_id, role);
         let _ = self.events.send(WorkflowEvent::RolesChanged);
-        let pool = self.roles.read().unwrap();
-        let saved: Vec<SavedRole> = pool.list().iter().map(|r| SavedRole {
-            name: r.name().to_string(),
-            definition: r.definition().to_string(),
-        }).collect();
-        drop(pool);
-        save_roles_list(&saved);
-        Ok("Role created successfully".to_string())
+        Ok(format!("Role '{}' created", args.name))
     }
 }
 
