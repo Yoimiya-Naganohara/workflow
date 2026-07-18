@@ -3,14 +3,13 @@ use std::{
     num::NonZeroUsize,
     sync::{
         Arc, Mutex, RwLock,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicU32, Ordering},
     },
 };
 
 use rig::{
     client::CompletionClient, memory::InMemoryConversationMemory,
     providers::openai::CompletionsClient, tool::server::ToolServer,
-    vector_store::VectorStoreIndexDyn,
 };
 use serde::Serialize;
 use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
@@ -23,6 +22,7 @@ use workflow_config::*;
 use workflow_role::{Role, RoleId, RolePool};
 use workflow_tool::{
     RoleChecker,
+    dynamic_tools::DynamicTools,
     list_agents::ListAgents,
     orchestrate::{AgentFactory, Orchestrate},
     send_message::SendMessage,
@@ -110,83 +110,6 @@ impl rig::tool::Tool for CreateRole {
         self.roles.write().unwrap().add(role_id, role);
         let _ = self.events.send(WorkflowEvent::RolesChanged);
         Ok("Role created successfully".to_string())
-    }
-}
-
-// ── DynamicTools — toggles create_role tool availability ───────
-
-struct DynamicTools {
-    create_role: Arc<AtomicBool>,
-}
-
-impl DynamicTools {
-    pub fn new() -> Self {
-        Self { create_role: Arc::new(AtomicBool::new(false)) }
-    }
-    pub fn with_flag(flag: Arc<AtomicBool>) -> Self {
-        Self { create_role: flag }
-    }
-    pub fn set_create_role(&mut self, create_role: bool) {
-        self.create_role.store(create_role, std::sync::atomic::Ordering::Relaxed)
-    }
-    pub fn flag(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.create_role)
-    }
-}
-impl VectorStoreIndexDyn for DynamicTools {
-    fn top_n<'a>(
-        &'a self,
-        _req: rig::vector_store::VectorSearchRequest<
-            rig::vector_store::request::Filter<serde_json::Value>,
-        >,
-    ) -> rig::wasm_compat::WasmBoxedFuture<'a, rig::vector_store::TopNResults> {
-        let enabled = self.create_role.load(std::sync::atomic::Ordering::Relaxed);
-        Box::pin(async move {
-            if !enabled {
-                return Ok(Vec::new());
-            }
-            Ok(vec![(
-                1.0,
-                "create_role".to_string(),
-                serde_json::json!({
-                    "name": "create_role",
-                    "description": "Create a new agent role with a name and definition. \
-                        The definition should describe the role's responsibilities and behavior.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "Unique role identifier (e.g. 'coder', 'reviewer')"
-                            },
-                            "definition": {
-                                "type": "string",
-                                "description": "Description of the role's responsibilities and behavior"
-                            }
-                        },
-                        "required": ["name", "definition"]
-                    }
-                }),
-            )])
-        })
-    }
-
-    fn top_n_ids<'a>(
-        &'a self,
-        _req: rig::vector_store::VectorSearchRequest<
-            rig::vector_store::request::Filter<serde_json::Value>,
-        >,
-    ) -> rig::wasm_compat::WasmBoxedFuture<
-        'a,
-        Result<Vec<(f64, String)>, rig::vector_store::VectorStoreError>,
-    > {
-        let enabled = self.create_role.load(Ordering::Relaxed);
-        Box::pin(async move {
-            if !enabled {
-                return Ok(Vec::new());
-            }
-            Ok(vec![(1.0, "create_role".to_string())])
-        })
     }
 }
 
@@ -328,76 +251,6 @@ impl WorkflowEvent {
             _ => None,
         }
     }
-}
-
-// ── Helpers used by Runtime ────────────────────────────────────
-
-fn append_text(messages: &mut Vec<ConversationMessage>, text: &str, reasoning: bool) {
-    match (messages.last_mut(), reasoning) {
-        (Some(ConversationMessage::Text { text: current }), false)
-        | (Some(ConversationMessage::Thinking { text: current }), true) => current.push_str(text),
-        (_, false) => messages.push(ConversationMessage::Text {
-            text: text.to_owned(),
-        }),
-        (_, true) => messages.push(ConversationMessage::Thinking {
-            text: text.to_owned(),
-        }),
-    }
-}
-
-fn role_info(role: &Role) -> RoleInfo {
-    RoleInfo {
-        id: role.name().to_owned(),
-        name: role.name().to_owned(),
-        definition: role.definition().to_owned(),
-    }
-}
-
-fn make_agent_factory(
-    client: &CompletionsClient,
-    model: &str,
-    roles: Arc<RwLock<RolePool>>,
-    handle_cell: Arc<Mutex<Option<rig::tool::server::ToolServerHandle>>>,
-    observer: Arc<RwLock<Option<AgentObserver>>>,
-) -> AgentFactory {
-    let client = client.clone();
-    let model = model.to_owned();
-    Arc::new(move |id, requested_role| {
-        let handle = handle_cell
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("tool server is initialized before agents are created");
-        let role = {
-            let roles = roles.read().unwrap();
-            roles
-                .get(&RoleId::from(requested_role.clone()))
-                .or_else(|| roles.get(&RoleId::default()))
-                .cloned()
-                .expect("the default role must exist")
-        };
-        let agent_role = if requested_role.is_empty() {
-            role.name().to_owned()
-        } else {
-            requested_role
-        };
-        let rig_agent = client
-            .agent(&model)
-            .tool_server_handle(handle)
-            .memory(InMemoryConversationMemory::new())
-            .conversation(id.to_string())
-            .preamble(&format!(
-                "{}\n{}",
-                role.definition(),
-                workflow_agent::protocol::A2A_SYSTEM_PROMPT
-            ))
-            .build();
-        let agent = Arc::new(Agent::new(id, agent_role, rig_agent));
-        if let Some(observer) = observer.read().unwrap().clone() {
-            observer(Arc::clone(&agent));
-        }
-        agent
-    })
 }
 
 pub struct Runtime {
@@ -698,6 +551,73 @@ impl Runtime {
             AgentEvent::TurnComplete => {}
         }
     }
+}
+
+fn append_text(messages: &mut Vec<ConversationMessage>, text: &str, reasoning: bool) {
+    match (messages.last_mut(), reasoning) {
+        (Some(ConversationMessage::Text { text: current }), false)
+        | (Some(ConversationMessage::Thinking { text: current }), true) => current.push_str(text),
+        (_, false) => messages.push(ConversationMessage::Text {
+            text: text.to_owned(),
+        }),
+        (_, true) => messages.push(ConversationMessage::Thinking {
+            text: text.to_owned(),
+        }),
+    }
+}
+
+fn role_info(role: &Role) -> RoleInfo {
+    RoleInfo {
+        id: role.name().to_owned(),
+        name: role.name().to_owned(),
+        definition: role.definition().to_owned(),
+    }
+}
+fn make_agent_factory(
+    client: &CompletionsClient,
+    model: &str,
+    roles: Arc<RwLock<RolePool>>,
+    handle_cell: Arc<Mutex<Option<rig::tool::server::ToolServerHandle>>>,
+    observer: Arc<RwLock<Option<AgentObserver>>>,
+) -> AgentFactory {
+    let client = client.clone();
+    let model = model.to_owned();
+    Arc::new(move |id, requested_role| {
+        let handle = handle_cell
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("tool server is initialized before agents are created");
+        let role = {
+            let roles = roles.read().unwrap();
+            roles
+                .get(&RoleId::from(requested_role.clone()))
+                .or_else(|| roles.get(&RoleId::default()))
+                .cloned()
+                .expect("the default role must exist")
+        };
+        let agent_role = if requested_role.is_empty() {
+            role.name().to_owned()
+        } else {
+            requested_role
+        };
+        let rig_agent = client
+            .agent(&model)
+            .tool_server_handle(handle)
+            .memory(InMemoryConversationMemory::new())
+            .conversation(id.to_string())
+            .preamble(&format!(
+                "{}\n{}",
+                role.definition(),
+                workflow_agent::protocol::A2A_SYSTEM_PROMPT
+            ))
+            .build();
+        let agent = Arc::new(Agent::new(id, agent_role, rig_agent));
+        if let Some(observer) = observer.read().unwrap().clone() {
+            observer(Arc::clone(&agent));
+        }
+        agent
+    })
 }
 
 #[cfg(test)]
