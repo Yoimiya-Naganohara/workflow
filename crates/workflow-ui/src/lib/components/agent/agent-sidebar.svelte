@@ -103,7 +103,7 @@
 							<div class={cn("absolute inset-0 size-2 rounded-full animate-ping opacity-75", statusColor(status))}></div>
 						{/if}
 					</div>
-					<div class="flex-1 min-w-0">
+					<div class="flex-1 min-w-0 pr-6">
 						<div class="flex items-center gap-1">
 							<span class="font-medium truncate">{agent.role.charAt(0).toUpperCase() + agent.role.slice(1)}</span>
 							<span class="text-[10px] text-muted-foreground/50 tabular-nums">#{agent.id}</span>
