@@ -24,7 +24,7 @@
 	}
 </script>
 
-<form onsubmit={onSubmit} class="mx-auto max-w-3xl flex gap-2 items-end">
+<form onsubmit={(e) => { e.preventDefault(); onSubmit(e); }} class="mx-auto max-w-3xl flex gap-2 items-end">
 	<div class="flex-1 relative">
 		<Textarea
 			bind:value
