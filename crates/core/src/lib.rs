@@ -292,23 +292,34 @@ impl Runtime {
             .build()
             .map_err(|error| RuntimeError::Provider(error.to_string()))?;
 
-        let dynamic_tools = DynamicTools::new();
-        let dt_flag = dynamic_tools.flag();
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let role_checker: Arc<dyn RoleChecker> = Arc::new(RolePoolChecker(Arc::clone(&roles)));
-        let factory_cell: Arc<Mutex<Option<AgentFactory>>> = Arc::new(Mutex::new(None));
+        let dynamic_tools = DynamicTools::new();
+        let dt_flag = dynamic_tools.flag();
+        let handle_cell: Arc<Mutex<Option<rig::tool::server::ToolServerHandle>>> =
+            Arc::new(Mutex::new(None));
         let factory = make_agent_factory(
             &client,
             &config.model,
-            Arc::clone(&agent_pool),
             Arc::clone(&roles),
-            Arc::clone(&factory_cell),
-            Arc::clone(&next_id),
-            Arc::clone(&role_checker),
+            Arc::clone(&handle_cell),
             Arc::clone(&observer),
-            events.clone(),
         );
-        *factory_cell.lock().unwrap() = Some(factory.clone());
+        let tool_handle = ToolServer::new()
+            .tool(SendMessage::new(Arc::clone(&agent_pool)))
+            .tool(ListAgents::new(Arc::clone(&agent_pool)))
+            .tool(Orchestrate::with_id_allocator(
+                Arc::clone(&agent_pool),
+                Arc::clone(&factory),
+                Arc::clone(&next_id),
+                Arc::clone(&role_checker),
+            ))
+            .dynamic_tools(1, DynamicTools::with_flag(Arc::clone(&dt_flag)),
+                rig::tool::ToolSet::from_tools_boxed(vec![
+                    Box::new(CreateRole::new(Arc::clone(&roles), events.clone())) as Box<dyn rig::tool::ToolDyn>,
+                ]))
+            .run();
+        *handle_cell.lock().unwrap() = Some(tool_handle);
         Ok(Self {
             agent_pool,
             roles,
@@ -638,19 +649,18 @@ impl VectorStoreIndexDyn for DynamicTools {
 fn make_agent_factory(
     client: &CompletionsClient,
     model: &str,
-    agent_pool: Arc<AgentPool>,
     roles: Arc<RwLock<RolePool>>,
-    factory_cell: Arc<Mutex<Option<AgentFactory>>>,
-    next_id: Arc<AtomicU32>,
-    role_checker: Arc<dyn RoleChecker>,
+    handle_cell: Arc<Mutex<Option<rig::tool::server::ToolServerHandle>>>,
     observer: Arc<RwLock<Option<AgentObserver>>>,
-    events: broadcast::Sender<WorkflowEvent>,
 ) -> AgentFactory {
     let client = client.clone();
     let model = model.to_owned();
-    let dt = DynamicTools::new();
-    let dt_flag = dt.flag();
     Arc::new(move |id, requested_role| {
+        let handle = handle_cell
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("tool server is initialized before agents are created");
         let role = {
             let roles = roles.read().unwrap();
             roles
@@ -664,21 +674,9 @@ fn make_agent_factory(
         } else {
             requested_role
         };
-        let factory = factory_cell.lock().unwrap().clone()
-            .expect("factory cell must be initialized");
         let rig_agent = client
             .agent(&model)
-            .tool(SendMessage::new(Arc::clone(&agent_pool)))
-            .tool(ListAgents::new(Arc::clone(&agent_pool)))
-            .tool(Orchestrate::with_id_allocator(
-                Arc::clone(&agent_pool),
-                factory,
-                Arc::clone(&next_id),
-                Arc::clone(&role_checker),
-            ))
-            .dynamic_tools(1, DynamicTools::with_flag(Arc::clone(&dt_flag)), rig::tool::ToolSet::from_tools_boxed(vec![
-                Box::new(CreateRole::new(Arc::clone(&roles), events.clone())) as Box<dyn rig::tool::ToolDyn>,
-            ]))
+            .tool_server_handle(handle)
             .memory(InMemoryConversationMemory::new())
             .conversation(id.to_string())
             .preamble(&format!(
