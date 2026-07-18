@@ -32,6 +32,7 @@ export type UiEvent =
 	| { type: "agent_removed"; agent_id: AgentId }
 	| { type: "agent_output"; agent_id: AgentId }
 	| { type: "transcript_changed"; agent_id: AgentId }
+	| { type: "roles_changed" }
 	| { type: "resync_required" }
 	| { type: "error"; message: string };
 

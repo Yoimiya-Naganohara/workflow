@@ -15,6 +15,7 @@
 			case "agent_removed": return `agent ${e.agent_id} removed`;
 			case "agent_output": return `agent ${e.agent_id} output`;
 			case "transcript_changed": return `agent ${e.agent_id} transcript changed`;
+			case "roles_changed": return "roles changed";
 			case "resync_required": return "resync required";
 			case "error": return `error: ${e.message}`;
 		}
@@ -26,6 +27,7 @@
 			case "agent_removed": return "text-destructive";
 			case "agent_output": return "text-amber-500";
 			case "transcript_changed": return "text-sky-500";
+			case "roles_changed": return "text-violet-500";
 			case "resync_required": return "text-orange-500";
 			case "error": return "text-destructive font-bold";
 		}

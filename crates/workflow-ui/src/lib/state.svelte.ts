@@ -258,6 +258,10 @@ class AppState {
 				this.error = event.payload.message ?? "runtime error";
 				return;
 			}
+			if (event.payload.type === "roles_changed") {
+				this.loadRoles();
+				return;
+			}
 			this.pull();
 		}).then((unlisten) => {
 			this.#unlisten = unlisten;

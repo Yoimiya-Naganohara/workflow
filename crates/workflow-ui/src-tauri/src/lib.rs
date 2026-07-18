@@ -35,6 +35,7 @@ enum UiEvent {
     AgentRemoved { agent_id: u32 },
     AgentOutput { agent_id: u32 },
     TranscriptChanged { agent_id: u32 },
+    RolesChanged,
     ResyncRequired,
     Error { message: String },
 }
@@ -46,6 +47,7 @@ impl From<WorkflowEvent> for UiEvent {
             WorkflowEvent::AgentRemoved(agent_id) => Self::AgentRemoved { agent_id },
             WorkflowEvent::AgentOutput { agent_id, .. } => Self::AgentOutput { agent_id },
             WorkflowEvent::TranscriptChanged(agent_id) => Self::TranscriptChanged { agent_id },
+            WorkflowEvent::RolesChanged => Self::RolesChanged,
             WorkflowEvent::ResyncRequired => Self::ResyncRequired,
         }
     }
