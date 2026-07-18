@@ -37,11 +37,20 @@ class AppState {
 
 	#unlisten: (() => void) | null = null;
 
+	#htmlCache = new Map<string, string>();
+
 	chatItems: ChatItem[] = $derived.by(() => {
 		return this.messages.map((m, i) => {
 			if (m.type === "text") {
-				let html = "";
-				try { html = String(marked.parse(m.text, { async: false })); } catch { /* ignore */ }
+				let html = this.#htmlCache.get(m.text);
+				if (html === undefined) {
+					try { html = String(marked.parse(m.text, { async: false })); } catch { /* ignore */ }
+					this.#htmlCache.set(m.text, html ?? "");
+					if (this.#htmlCache.size > 200) {
+						const key = this.#htmlCache.keys().next().value;
+						if (key !== undefined) this.#htmlCache.delete(key);
+					}
+				}
 				return { id: i, type: "assistant", text: m.text, html };
 			}
 			if (m.type === "tool") {
@@ -57,22 +66,18 @@ class AppState {
 	agentStatuses: Map<AgentId, AgentStatus> = $derived.by(() => {
 		const map = new Map<AgentId, AgentStatus>();
 		for (const a of this.agents) {
-			if (a.current_task) {
-				map.set(a.id, "thinking");
-			} else {
-				map.set(a.id, "idle");
-			}
+			map.set(a.id, a.current_task ? "thinking" : "idle");
 		}
-		for (const m of this.messages) {
-			if (m.type === "thinking") {
-				map.set(this.selected ?? 0, "thinking");
-			} else if (m.type === "tool" && m.result === null) {
-				map.set(this.selected ?? 0, "running-tool");
-			} else if (m.type === "error") {
-				map.set(this.selected ?? 0, "error");
-			} else if (m.type === "text") {
-				map.set(this.selected ?? 0, "responding");
-			}
+		if (this.selected == null) return map;
+		for (let i = this.messages.length - 1; i >= 0; i--) {
+			const m = this.messages[i];
+			if (m.type === "user") continue;
+			const st: AgentStatus | null = m.type === "thinking" ? "thinking"
+				: m.type === "tool" && m.result === null ? "running-tool"
+				: m.type === "error" ? "error"
+				: m.type === "text" ? "responding"
+				: null;
+			if (st) { map.set(this.selected, st); break; }
 		}
 		return map;
 	});
