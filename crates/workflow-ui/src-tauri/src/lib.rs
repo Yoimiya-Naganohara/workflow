@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_decoration::WebviewWindowExt;
 use workflow_config::UserConfig;
@@ -243,6 +244,20 @@ fn get_roles(state: State<'_, AppState>) -> Vec<workflow_core::RoleInfo> {
     runtime.list_roles()
 }
 
+fn roles_path() -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".workflow").join("roles.json")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedRole {
+    name: String,
+    definition: String,
+}
+
 #[tauri::command]
 fn add_role(
     state: State<'_, AppState>,
@@ -253,7 +268,44 @@ fn add_role(
         Some(r) => r,
         None => return Vec::new(),
     };
-    runtime.add_role(name, definition)
+    let roles = runtime.add_role(name, definition);
+    let saved: Vec<SavedRole> = roles.iter().map(|r| SavedRole {
+        name: r.name.clone(),
+        definition: r.definition.clone(),
+    }).collect();
+    if let Ok(data) = serde_json::to_string_pretty(&saved) {
+        let path = roles_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, data);
+    }
+    roles
+}
+
+#[tauri::command]
+fn load_roles(state: State<'_, AppState>) -> Vec<workflow_core::RoleInfo> {
+    let path = roles_path();
+    if !path.exists() { return Vec::new(); }
+    let data = match std::fs::read_to_string(&path) {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    let saved: Vec<SavedRole> = match serde_json::from_str(&data) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    let runtime = match state.runtime.lock().unwrap().clone() {
+        Some(r) => r,
+        None => return Vec::new(),
+    };
+    for role in &saved {
+        let existing = runtime.list_roles();
+        if !existing.iter().any(|r| r.name == role.name) {
+            runtime.add_role(role.name.clone(), role.definition.clone());
+        }
+    }
+    runtime.list_roles()
 }
 
 #[tauri::command]
@@ -337,6 +389,7 @@ pub fn run() {
             add_role,
             save_config,
             load_config,
+            load_roles,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

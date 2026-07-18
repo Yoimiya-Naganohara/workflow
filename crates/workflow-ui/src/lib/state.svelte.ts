@@ -88,7 +88,7 @@ class AppState {
 
 	loadRoles = async () => {
 		try {
-			this.roles = await invoke("get_roles") as RoleInfo[];
+			this.roles = await invoke("load_roles") as RoleInfo[];
 		} catch (e) {
 			this.error = `load roles: ${e}`;
 		}
@@ -232,6 +232,7 @@ class AppState {
 			this.configured = true;
 			this.error = "";
 			this.closeDialog();
+			this.roles = await invoke("load_roles") as RoleInfo[];
 			await this.pull(null);
 			await this.saveUserConfig();
 		} catch (e) {
