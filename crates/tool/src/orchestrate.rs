@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
-use tokio::{sync::Mutex, task::JoinSet};
+use tokio::task::JoinSet;
 use workflow_agent::{Agent, AgentEvent, AgentId, Message, agent_pool::AgentPool};
 
 use crate::{RoleChecker, ToolError};
@@ -42,51 +42,13 @@ pub struct ExecutionPlan {
 
 pub type AgentFactory = Arc<dyn Fn(AgentId, String) -> Arc<Agent> + Send + Sync>;
 
-pub struct Orchestrate {
+struct WaveRunner {
     pool: Arc<AgentPool>,
     next_id: Arc<AtomicU32>,
     factory: AgentFactory,
-    roles: Arc<dyn RoleChecker>,
-    create_role_flag: Arc<AtomicBool>,
-    execution_lock: Mutex<()>,
 }
 
-impl Orchestrate {
-    pub fn new(
-        pool: Arc<AgentPool>,
-        factory: AgentFactory,
-        roles: Arc<dyn RoleChecker>,
-        create_role_flag: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
-            pool,
-            next_id: Arc::new(AtomicU32::new(1)),
-            factory,
-            roles,
-            create_role_flag,
-            execution_lock: Mutex::new(()),
-        }
-    }
-
-    pub fn with_id_allocator(
-        pool: Arc<AgentPool>,
-        factory: AgentFactory,
-        next_id: Arc<AtomicU32>,
-        roles: Arc<dyn RoleChecker>,
-        create_role_flag: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
-            pool,
-            next_id,
-            factory,
-            roles,
-            create_role_flag,
-            execution_lock: Mutex::new(()),
-        }
-    }
-}
-
-impl Orchestrate {
+impl WaveRunner {
     async fn get_or_create_agent(
         &self,
         role: &str,
@@ -110,6 +72,47 @@ impl Orchestrate {
             .await
             .map_err(|e| ToolError::Orchestrate(format!("failed to create agent: {e}")))?;
         Ok(agent)
+    }
+}
+
+pub struct Orchestrate {
+    pool: Arc<AgentPool>,
+    next_id: Arc<AtomicU32>,
+    factory: AgentFactory,
+    roles: Arc<dyn RoleChecker>,
+    create_role_flag: Arc<AtomicBool>,
+}
+
+impl Orchestrate {
+    pub fn new(
+        pool: Arc<AgentPool>,
+        factory: AgentFactory,
+        roles: Arc<dyn RoleChecker>,
+        create_role_flag: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            pool,
+            next_id: Arc::new(AtomicU32::new(1)),
+            factory,
+            roles,
+            create_role_flag,
+        }
+    }
+
+    pub fn with_id_allocator(
+        pool: Arc<AgentPool>,
+        factory: AgentFactory,
+        next_id: Arc<AtomicU32>,
+        roles: Arc<dyn RoleChecker>,
+        create_role_flag: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            pool,
+            next_id,
+            factory,
+            roles,
+            create_role_flag,
+        }
     }
 }
 
@@ -166,10 +169,6 @@ impl Tool for Orchestrate {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // Agent availability and assignment are check-then-act operations. Keep
-        // one orchestration run at a time so concurrent tool calls cannot
-        // reserve the same idle agent.
-        let _execution_guard = self.execution_lock.lock().await;
         let tasks = args.tasks;
 
         if tasks.is_empty() {
@@ -292,99 +291,127 @@ impl Tool for Orchestrate {
         }
         critical_path.reverse();
 
-        // ── Dispatch tasks ────────────────────────────────────
+        // ── Build plan (empty results) ────────────────────────
         let mut plan_waves: Vec<Vec<TaskAssignment>> = Vec::new();
-        let mut task_results: HashMap<String, String> = HashMap::new();
-
         for wave in &waves {
             let mut assigned = Vec::new();
-            let mut reserved = HashSet::new();
-            let mut completions = JoinSet::new();
-
             for &idx in wave {
                 let task = &tasks[idx];
-                let agent = self.get_or_create_agent(&task.role, &reserved).await?;
-                let agent_id = agent.id();
-                reserved.insert(agent_id);
-
-                let prompt = if task.depend_on.is_empty() {
-                    task.task.clone()
-                } else {
-                    let dependency_context = task
-                        .depend_on
-                        .iter()
-                        .filter_map(|dependency| {
-                            task_results
-                                .get(dependency)
-                                .map(|result| format!("[{dependency}]\n{result}"))
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n\n");
-                    format!(
-                        "{}\n\nDependency results:\n{}",
-                        task.task, dependency_context
-                    )
-                };
-
-                // Subscribe before dispatch so a fast completion cannot be
-                // emitted before the scheduler starts listening.
-                let mut receiver = agent.receiver();
-                agent.send(Message::User(prompt)).await.map_err(|e| {
-                    ToolError::Orchestrate(format!("failed to dispatch task '{}': {e}", task.id))
-                })?;
-
-                let task_id = task.id.clone();
-                completions.spawn(async move {
-                    let mut output = String::new();
-                    loop {
-                        match receiver.recv().await {
-                            Ok(AgentEvent::Text(text)) => output.push_str(&text),
-                            Ok(AgentEvent::TurnComplete) => return Ok((task_id, output)),
-                            Ok(AgentEvent::Error(error)) => {
-                                return Err(format!("task '{task_id}' failed: {error}"));
-                            }
-                            Ok(_) => {}
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                                return Err(format!(
-                                    "task '{task_id}' event stream lagged by {skipped} messages"
-                                ));
-                            }
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                return Err(format!("task '{task_id}' agent stopped unexpectedly"));
-                            }
-                        }
-                    }
-                });
-
                 assigned.push(TaskAssignment {
                     id: task.id.clone(),
                     role: task.role.clone(),
                     task: task.task.clone(),
                     wave: id_to_wave[idx],
-                    agent_id,
+                    agent_id: 0,
                     result: String::new(),
                 });
-            }
-
-            while let Some(result) = completions.join_next().await {
-                let (task_id, output) = result
-                    .map_err(|error| {
-                        ToolError::Orchestrate(format!("task waiter failed: {error}"))
-                    })?
-                    .map_err(ToolError::Orchestrate)?;
-                task_results.insert(task_id, output);
-            }
-
-            for assignment in &mut assigned {
-                assignment.result = task_results
-                    .get(&assignment.id)
-                    .cloned()
-                    .unwrap_or_default();
             }
             plan_waves.push(assigned);
         }
 
         let task_count = tasks.len();
+
+        // ── Spawn background execution ────────────────────────
+        let runner = WaveRunner {
+            pool: self.pool.clone(),
+            next_id: self.next_id.clone(),
+            factory: self.factory.clone(),
+        };
+        let waves_owned = waves.clone();
+        let tasks_owned = tasks.clone();
+
+        tokio::spawn(async move {
+            let mut task_results: HashMap<String, String> = HashMap::new();
+
+            for wave in &waves_owned {
+                let mut reserved = HashSet::new();
+                let mut completions = JoinSet::new();
+
+                for &idx in wave {
+                    let task = &tasks_owned[idx];
+                    let agent = match runner
+                        .get_or_create_agent(&task.role, &reserved)
+                        .await
+                    {
+                        Ok(a) => a,
+                        Err(e) => {
+                            eprintln!("orchestrate: failed to get/create agent for task '{}': {e}", task.id);
+                            continue;
+                        }
+                    };
+                    let agent_id = agent.id();
+                    reserved.insert(agent_id);
+
+                    let prompt = if task.depend_on.is_empty() {
+                        task.task.clone()
+                    } else {
+                        let dependency_context = task
+                            .depend_on
+                            .iter()
+                            .filter_map(|dependency| {
+                                task_results
+                                    .get(dependency)
+                                    .map(|result| format!("[{dependency}]\n{result}"))
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
+                        format!(
+                            "{}\n\nDependency results:\n{}",
+                            task.task, dependency_context
+                        )
+                    };
+
+                    let mut receiver = agent.receiver();
+                    if let Err(e) = agent.send(Message::User(prompt)).await {
+                        eprintln!("orchestrate: failed to dispatch task '{}': {e}", task.id);
+                        continue;
+                    }
+
+                    let task_id = task.id.clone();
+                    completions.spawn(async move {
+                        let mut output = String::new();
+                        loop {
+                            match receiver.recv().await {
+                                Ok(AgentEvent::Text(text)) => output.push_str(&text),
+                                Ok(AgentEvent::TurnComplete) => {
+                                    return Ok((task_id, output));
+                                }
+                                Ok(AgentEvent::Error(error)) => {
+                                    return Err(format!("task '{task_id}' failed: {error}"));
+                                }
+                                Ok(_) => {}
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(
+                                    skipped,
+                                )) => {
+                                    return Err(format!(
+                                        "task '{task_id}' event stream lagged by {skipped} messages"
+                                    ));
+                                }
+                                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                    return Err(format!(
+                                        "task '{task_id}' agent stopped unexpectedly"
+                                    ));
+                                }
+                            }
+                        }
+                    });
+                }
+
+                while let Some(result) = completions.join_next().await {
+                    match result {
+                        Ok(Ok((task_id, output))) => {
+                            task_results.insert(task_id, output);
+                        }
+                        Ok(Err(e)) => {
+                            eprintln!("orchestrate: task failed: {e}");
+                        }
+                        Err(e) => {
+                            eprintln!("orchestrate: task join error: {e}");
+                        }
+                    }
+                }
+            }
+        });
 
         Ok(ExecutionPlan {
             waves: plan_waves,

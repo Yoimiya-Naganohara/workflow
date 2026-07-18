@@ -51,9 +51,13 @@ impl AgentPool {
         let handler = {
             let agent = agent.clone();
             spawn(async move {
-                if let Err(error) = agent.run().await {
-                    eprintln!("agent runtime stopped: {error}");
-                }
+                crate::CURRENT_AGENT_ID
+                    .scope(id, async move {
+                        if let Err(error) = agent.run().await {
+                            eprintln!("agent runtime stopped: {error}");
+                        }
+                    })
+                    .await;
             })
         };
         let entity = Arc::new(AgentEntity {

@@ -7,6 +7,7 @@
 	interface GraphNode extends d3.SimulationNodeDatum {
 		id: number;
 		role: string;
+		task: string | null;
 	}
 
 	interface GraphEdge {
@@ -34,16 +35,22 @@
 
 	const uniqueRoles = $derived([...new Set(agents.map(a => a.role))]);
 
-	const roleColors: Record<string, string> = {
-		planner:  "oklch(0.6 0.18 260)",
-		executor: "oklch(0.6 0.18 145)",
-		reviewer: "oklch(0.65 0.18 85)",
-		reporter: "oklch(0.6 0.12 195)",
-		default:  "oklch(0.6 0.18 300)",
-	};
-
 	function roleColor(role: string): string {
-		return roleColors[role] ?? roleColors.default;
+		let hash = 0;
+		for (let i = 0; i < role.length; i++) {
+			hash = role.charCodeAt(i) + ((hash << 5) - hash);
+		}
+		const hue = ((Math.abs(hash) % 360) + 360) % 360;
+		return `oklch(0.6 0.18 ${hue})`;
+	}
+
+	function statusColor(s: AgentStatus): string {
+		switch (s) {
+			case "thinking": case "running-tool": return "#f59e0b";
+			case "responding": return "#22c55e";
+			case "error": return "#ef4444";
+			default: return "#6b7280";
+		}
 	}
 
 	const nodeCache = new Map<number, GraphNode>();
@@ -52,10 +59,11 @@
 		return agents.map(a => {
 			let n = nodeCache.get(a.id);
 			if (!n) {
-				n = { id: a.id, role: a.role, x: NaN, y: NaN };
+				n = { id: a.id, role: a.role, task: a.current_task, x: NaN, y: NaN };
 				nodeCache.set(a.id, n);
 			}
 			n.role = a.role;
+			n.task = a.current_task;
 			return n;
 		});
 	}
@@ -69,9 +77,13 @@
 		return edges;
 	}
 
+	function roleIndex(role: string): number {
+		return uniqueRoles.indexOf(role);
+	}
+
 	function buildNodeEnter(enter: d3.Selection<d3.EnterElement, GraphNode, SVGGElement, unknown>) {
 		const gEnter = enter.append("g")
-			.attr("class", "agent-node cursor-pointer")
+			.attr("class", "agent-node")
 			.attr("data-id", (d: GraphNode) => d.id)
 			.on("click", (_event: any, d: GraphNode) => { onSelect(d.id); })
 			.on("mouseenter", (_event: any, d: GraphNode) => {
@@ -93,8 +105,15 @@
 			.style("fill", (d: GraphNode) => roleColor(d.role))
 			.attr("fill-opacity", 0.85)
 			.attr("stroke", (d: GraphNode) => roleColor(d.role))
-			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
-			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
+			.attr("stroke-width", 1.5)
+			.attr("stroke-opacity", 0.35);
+
+		gEnter.append("circle").attr("class", "status-ring").attr("r", 24)
+			.attr("fill", "none")
+			.attr("stroke-width", 2.5)
+			.attr("stroke-opacity", 0)
+			.attr("stroke-linecap", "round")
+			.style("stroke-dasharray", "0 151");
 
 		gEnter.append("circle").attr("class", "pulse-ring").attr("r", 25)
 			.attr("fill", "none")
@@ -109,9 +128,22 @@
 
 		gEnter.append("text").attr("class", "node-role")
 			.attr("text-anchor", "middle")
-			.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31))
+			.attr("dy", 31)
 			.attr("fill", "currentColor").attr("font-size", "9").attr("opacity", 0.5)
 			.text((d: GraphNode) => formatRole(d.role));
+
+		gEnter.append("text").attr("class", "node-task")
+			.attr("text-anchor", "middle")
+			.attr("dy", 42)
+			.attr("fill", "currentColor").attr("font-size", "7").attr("opacity", 0.35)
+			.style("pointer-events", "none")
+			.each(function (d: GraphNode) {
+				const el = d3.select(this);
+				if (d.task) {
+					const text = d.task.length > 28 ? d.task.slice(0, 28) + "…" : d.task;
+					el.text(text);
+				}
+			});
 
 		return gEnter;
 	}
@@ -119,11 +151,16 @@
 	function buildNodeUpdate(update: d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>) {
 		update.select(".node-body")
 			.style("fill", (d: GraphNode) => roleColor(d.role))
-			.attr("stroke", (d: GraphNode) => roleColor(d.role))
-			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
-			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
-		update.select(".node-role")
-			.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31));
+			.attr("stroke", (d: GraphNode) => roleColor(d.role));
+		update.select(".node-task").each(function (d: GraphNode) {
+			const el = d3.select(this);
+			if (d.task) {
+				const text = d.task.length > 28 ? d.task.slice(0, 28) + "…" : d.task;
+				el.text(text).attr("opacity", 0.35);
+			} else {
+				el.text("").attr("opacity", 0);
+			}
+		});
 		return update;
 	}
 
@@ -135,6 +172,7 @@
 		if (!svgEl || !containerEl || agents.length === 0) return;
 
 		if (sim) { sim.stop(); sim = null; }
+		nodeCache.clear();
 
 		const width = containerEl.clientWidth;
 		const height = containerEl.clientHeight;
@@ -151,6 +189,19 @@
 		gm.append("feMergeNode").attr("in", "b");
 		gm.append("feMergeNode").attr("in", "SourceGraphic");
 
+		defs.append("marker")
+			.attr("id", "arrowhead")
+			.attr("viewBox", "0 0 10 10")
+			.attr("refX", "28")
+			.attr("refY", "5")
+			.attr("markerWidth", "6")
+			.attr("markerHeight", "6")
+			.attr("orient", "auto")
+			.append("path")
+			.attr("d", "M 0 0 L 10 5 L 0 10 z")
+			.attr("fill", "currentColor")
+			.attr("opacity", 0.15);
+
 		g = svg.append("g").attr("class", "graph-root");
 
 		const zoom = d3.zoom<SVGSVGElement, unknown>()
@@ -161,13 +212,15 @@
 
 		const nodes = getNodes();
 		const edges = getEdges(nodes);
+		const rc = uniqueRoles.length;
 
 		edgeLines = g.selectAll<SVGLineElement, GraphEdge>("line")
 			.data(edges)
 			.join("line")
 			.attr("stroke", "currentColor")
-			.attr("stroke-opacity", 0.08)
-			.attr("stroke-width", 1);
+			.attr("stroke-opacity", 0.06)
+			.attr("stroke-width", 1)
+			.attr("marker-end", "url(#arrowhead)");
 
 		nodeGroup = g.selectAll<SVGGElement, GraphNode>("g")
 			.data(nodes, (d: GraphNode) => String(d.id))
@@ -177,20 +230,64 @@
 		sim = d3.forceSimulation(nodes)
 			.force("charge", d3.forceManyBody().strength(-180))
 			.force("collision", d3.forceCollide().radius(42))
+			.force("x", d3.forceX((d: GraphNode) => {
+				const idx = roleIndex(d.role);
+				return rc > 1 ? (width / (rc + 1)) * (idx + 1) : width / 2;
+			}).strength(rc > 1 ? 0.15 : 0))
+			.force("y", d3.forceY(height / 2).strength(0.05))
 			.force("center", d3.forceCenter(width / 2, height / 2))
 			.alphaDecay(0.08)
 			.velocityDecay(0.65)
 			.on("tick", () => {
+				const simNodes = sim!.nodes();
 				edgeLines
-					.attr("x1", (e: GraphEdge) => sim!.nodes().find(n => n.id === e.source)!.x!)
-					.attr("y1", (e: GraphEdge) => sim!.nodes().find(n => n.id === e.source)!.y!)
-					.attr("x2", (e: GraphEdge) => sim!.nodes().find(n => n.id === e.target)!.x!)
-					.attr("y2", (e: GraphEdge) => sim!.nodes().find(n => n.id === e.target)!.y!);
+					.attr("x1", (e: GraphEdge) => {
+						const n = simNodes.find(n => n.id === e.source);
+						return n?.x ?? 0;
+					})
+					.attr("y1", (e: GraphEdge) => {
+						const n = simNodes.find(n => n.id === e.source);
+						return n?.y ?? 0;
+					})
+					.attr("x2", (e: GraphEdge) => {
+						const n = simNodes.find(n => n.id === e.target);
+						return n?.x ?? 0;
+					})
+					.attr("y2", (e: GraphEdge) => {
+						const n = simNodes.find(n => n.id === e.target);
+						return n?.y ?? 0;
+					});
 				nodeGroup.attr("transform", (d: GraphNode) => `translate(${d.x},${d.y})`);
 			});
 
 		sim.alpha(1).restart();
+		applyStatusRings();
 		applyStatusPulses();
+		applySelection();
+	}
+
+	function applyStatusRings() {
+		if (!svgEl) return;
+		const svg = d3.select(svgEl);
+		for (const [id, st] of statuses) {
+			const node = svg.select(`[data-id="${id}"]`);
+			if (node.empty()) continue;
+			const ring = node.select(".status-ring");
+			if (st !== "idle") {
+				const color = statusColor(st);
+				const circumference = 2 * Math.PI * 24;
+				ring.attr("stroke", color)
+					.attr("stroke-opacity", st === "error" ? 0.7 : 0.4)
+					.style("stroke-dasharray", st === "error" ? `${circumference} ${circumference}` : `${circumference * 0.35} ${circumference}`);
+				if (ring.select("animate").empty()) {
+					ring.append("animate").attr("attributeName", "stroke-dashoffset")
+						.attr("from", "0").attr("to", st === "error" ? "0" : `-${circumference}`)
+						.attr("dur", "2s").attr("repeatCount", "indefinite");
+				}
+			} else {
+				ring.attr("stroke-opacity", 0).selectAll("animate").remove();
+			}
+		}
 	}
 
 	function applyStatusPulses() {
@@ -228,7 +325,6 @@
 		const liveById = new Map(live.map(n => [n.id, n]));
 		const oldById = new Map(svgNodes.map(n => [n.id, n]));
 
-		// Remove dead nodes from cache; preserve positions for survivors
 		for (const n of svgNodes) {
 			if (!liveById.has(n.id)) {
 				nodeCache.delete(n.id);
@@ -238,7 +334,6 @@
 			}
 		}
 
-		// Position brand-new nodes
 		for (const n of live) {
 			if (!oldById.has(n.id)) {
 				n.x = containerEl!.clientWidth / 2 + (Math.random() - 0.5) * 60;
@@ -247,6 +342,12 @@
 		}
 
 		sim.nodes(live);
+		sim.force("x", d3.forceX((d: GraphNode) => {
+			const idx = roleIndex(d.role);
+			const w = containerEl!.clientWidth;
+			const rc = uniqueRoles.length;
+			return rc > 1 ? (w / (rc + 1)) * (idx + 1) : w / 2;
+		}).strength(uniqueRoles.length > 1 ? 0.15 : 0));
 
 		const edges = getEdges(live);
 		edgeLines = edgeLines
@@ -254,8 +355,9 @@
 			.join(
 				enter => enter.append("line")
 					.attr("stroke", "currentColor")
-					.attr("stroke-opacity", 0.08)
-					.attr("stroke-width", 1),
+					.attr("stroke-opacity", 0.06)
+					.attr("stroke-width", 1)
+					.attr("marker-end", "url(#arrowhead)"),
 				update => update,
 				exit => exit.remove(),
 			);
@@ -283,6 +385,7 @@
 				syncNodes();
 			}
 			applyStatusPulses();
+			applyStatusRings();
 			applySelection();
 		} else if (svgEl && agents.length === 0 && sim) {
 			sim.stop();
@@ -293,17 +396,20 @@
 	});
 
 	$effect(() => { selected; if (svgEl && sim) applySelection(); });
-	$effect(() => { statuses; if (svgEl && sim) applyStatusPulses(); });
+	$effect(() => { statuses; if (svgEl && sim) { applyStatusPulses(); applyStatusRings(); } });
 
 	function applySelection() {
 		if (!svgEl) return;
 		d3.select(svgEl).selectAll<SVGGElement, GraphNode>(".agent-node")
 			.select(".node-body")
-			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
+			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1.5))
 			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
 		d3.select(svgEl).selectAll<SVGGElement, GraphNode>(".agent-node")
 			.select(".node-role")
-			.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31));
+			.attr("dy", (d: GraphNode) => (d.id === selected ? 30 : 31));
+		d3.select(svgEl).selectAll<SVGGElement, GraphNode>(".agent-node")
+			.select(".glow-ring")
+			.attr("opacity", (d: GraphNode) => (d.id === selected ? 0.2 : 0.08));
 	}
 
 	onMount(() => {
@@ -319,6 +425,14 @@
 				if (w === 0 || h === 0) return;
 				const center = sim.force("center") as d3.ForceCenter<GraphNode> | undefined;
 				if (center) center.x(w / 2).y(h / 2);
+				const fx = sim.force("x") as d3.ForceX<GraphNode> | undefined;
+				if (fx && uniqueRoles.length > 1) {
+					fx.x((d: GraphNode) => {
+						const idx = roleIndex(d.role);
+						return (w / (uniqueRoles.length + 1)) * (idx + 1);
+					});
+				}
+				sim.alpha(0.2).restart();
 			});
 		});
 		ro.observe(containerEl);
@@ -337,7 +451,7 @@
 
 	{#if tooltipAgent}
 		{@const st = statuses.get(tooltipAgent.id) ?? "idle"}
-		{@const sc = st === "thinking" || st === "running-tool" ? "#f59e0b" : st === "responding" ? "#22c55e" : st === "error" ? "#ef4444" : "#6b7280"}
+		{@const sc = statusColor(st)}
 		<div class="absolute top-2 left-2 flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-background/90 border border-border text-xs shadow-sm backdrop-blur-sm">
 			<div class="size-2 rounded-full" style="background: {sc}"></div>
 			<span class="font-medium">#{tooltipAgent.id} {tooltipAgent.role}</span>
@@ -350,7 +464,7 @@
 			{#each uniqueRoles as role}
 				<div class="flex items-center gap-1.5">
 					<div class="size-2 rounded-full" style="background: {roleColor(role)}"></div>
-					<span class="text-[10px] text-muted-foreground/60">{role}</span>
+					<span class="text-[10px] text-muted-foreground/60">{formatRole(role)}</span>
 				</div>
 			{/each}
 		</div>

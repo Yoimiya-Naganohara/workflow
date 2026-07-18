@@ -1,11 +1,15 @@
 <script lang="ts">
+	import { getContext } from "svelte";
+	import { toggleMode } from "mode-watcher";
 	import { Button } from "$lib/components/ui/button";
 	import { Badge } from "$lib/components/ui/badge";
 	import { ScrollArea } from "$lib/components/ui/scroll-area";
 	import { Tooltip, TooltipContent, TooltipTrigger } from "$lib/components/ui/tooltip";
-	import { Plus, MessageSquare, Brain, Settings as SettingsIcon, ChevronRight, ChevronDown, X, Loader2, CircleDot, AlertCircle } from "@lucide/svelte";
+	import { Plus, MessageSquare, Brain, Settings as SettingsIcon, ChevronRight, ChevronDown, X, Loader2, CircleDot, AlertCircle, Sun, Moon, Bug } from "@lucide/svelte";
 	import { cn, formatRole } from "$lib/utils.js";
 	import type { AgentInfo, AgentId, AgentStatus } from "$lib/types";
+
+	const eventLog = getContext<{ open: boolean; toggle: () => void }>("event-log");
 
 	let {
 		agents,
@@ -191,5 +195,25 @@
 				{/each}
 			</div>
 		{/if}
+	</div>
+
+	<div class="shrink-0 border-t border-border/50 px-3 py-2 flex items-center justify-between">
+		<button
+			onclick={toggleMode}
+			class="flex items-center gap-2 text-xs text-muted-foreground/60 hover:text-foreground/80 transition-colors"
+		>
+			<Sun class="size-3.5 dark:hidden" />
+			<Moon class="size-3.5 hidden dark:block" />
+			<span class="dark:hidden">Light</span>
+			<span class="hidden dark:inline">Dark</span>
+		</button>
+		<button
+			onclick={eventLog.toggle}
+			class="flex items-center gap-1.5 text-xs text-muted-foreground/60 hover:text-foreground/80 transition-colors"
+			title="Event log"
+		>
+			<Bug class="size-3.5" />
+			<span>Debug</span>
+		</button>
 	</div>
 </aside>
