@@ -3,14 +3,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use rig::vector_store::VectorStoreIndexDyn;
 
-/// Controls whether the `create_role` tool is injected into LLM prompts.
-///
-/// The flag is shared via `Arc<AtomicBool>` so it can be toggled from
-/// [`Orchestrate`](crate::orchestrate::Orchestrate) when a missing role
-/// is detected, and read by the tool server's dynamic tools index to
-/// decide whether `create_role` appears in the prompt.
+/// Dynamic tool toggle that controls whether `create_role` is available
+/// to the LLM. When the flag is `false`, the index returns empty results
+/// and the tool is not injected into prompts.
 pub struct DynamicTools {
-    pub(crate) create_role: Arc<AtomicBool>,
+    create_role: Arc<AtomicBool>,
 }
 
 impl DynamicTools {
@@ -20,8 +17,8 @@ impl DynamicTools {
     pub fn with_flag(flag: Arc<AtomicBool>) -> Self {
         Self { create_role: flag }
     }
-    pub fn set_create_role(&mut self, create_role: bool) {
-        self.create_role.store(create_role, Ordering::Relaxed)
+    pub fn set_create_role(&mut self, enabled: bool) {
+        self.create_role.store(enabled, Ordering::Relaxed)
     }
     pub fn flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.create_role)
