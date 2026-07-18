@@ -322,6 +322,8 @@
 			} else {
 				syncNodes();
 			}
+			applyStatusPulses();
+			applySelection();
 		}
 	});
 
