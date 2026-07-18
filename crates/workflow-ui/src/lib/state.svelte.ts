@@ -241,8 +241,9 @@ class AppState {
 	};
 
 	init = () => {
-		this.loadUserConfig().then(() => {
+		this.loadUserConfig().then(async () => {
 			if (this.selectedProvider && this.selectedModel && this.settingsApiKey && !this.configured) {
+				await this.loadProviders();
 				this.configureRuntime(this.selectedProvider, this.settingsApiKey, this.selectedModel);
 			}
 		});

@@ -4,7 +4,13 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
 
+use aes_gcm::{
+    AeadCore, KeyInit,
+    aead::{OsRng, Aead},
+    Aes256Gcm, Key, Nonce,
+};
 use anyhow::Result;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 
@@ -407,13 +413,17 @@ impl ConfigSource for DefaultConfigSource {
 
 // ============================================================================
 //  UserConfig — persisted user preferences (last-used provider, model, api key)
+//  The API key is encrypted at rest using AES-256-GCM.
 // ============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserConfig {
     pub selected_provider: String,
     pub selected_model: String,
+    #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
+    pub encrypted: bool,
 }
 
 impl UserConfig {
@@ -429,8 +439,15 @@ impl UserConfig {
                 let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
             }
         }
-        let data = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, data)?;
+        let mut data = self.clone();
+        if !data.api_key.is_empty() {
+            data.api_key = encrypt_api_key(&data.api_key)?;
+            data.encrypted = true;
+        } else {
+            data.encrypted = false;
+        }
+        let json = serde_json::to_string_pretty(&data)?;
+        std::fs::write(&path, json)?;
         Ok(())
     }
 
@@ -439,8 +456,12 @@ impl UserConfig {
         if !path.exists() {
             return Ok(None);
         }
-        let data = std::fs::read_to_string(&path)?;
-        let config = serde_json::from_str(&data)?;
+        let json = std::fs::read_to_string(&path)?;
+        let mut config: UserConfig = serde_json::from_str(&json)?;
+        if config.encrypted && !config.api_key.is_empty() {
+            config.api_key = decrypt_api_key(&config.api_key)?;
+        }
+        config.encrypted = false;
         Ok(Some(config))
     }
 
@@ -450,6 +471,71 @@ impl UserConfig {
             .unwrap_or_else(|_| ".".to_string());
         PathBuf::from(home).join(".workflow").join("config.json")
     }
+}
+
+fn enc_key_path() -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".workflow").join(".encryption_key")
+}
+
+fn load_or_generate_key() -> Result<[u8; 32]> {
+    let path = enc_key_path();
+    if path.exists() {
+        let data = std::fs::read(&path)?;
+        if data.len() == 32 {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&data);
+            return Ok(key);
+        }
+    }
+    let mut key = [0u8; 32];
+    use aes_gcm::aead::rand_core::RngCore;
+    aes_gcm::aead::OsRng.fill_bytes(&mut key);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(f) = std::fs::File::create(&path) {
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    std::fs::write(&path, &key)?;
+    Ok(key)
+}
+
+fn encrypt_api_key(plaintext: &str) -> Result<String> {
+    let key_bytes = load_or_generate_key()?;
+    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let cipher = Aes256Gcm::new(key);
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let ciphertext = cipher
+        .encrypt(&nonce, plaintext.as_bytes())
+        .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))?;
+    let mut buf = nonce.to_vec();
+    buf.extend_from_slice(&ciphertext);
+    Ok(BASE64.encode(&buf))
+}
+
+fn decrypt_api_key(encoded: &str) -> Result<String> {
+    let key_bytes = load_or_generate_key()?;
+    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let cipher = Aes256Gcm::new(key);
+    let data = BASE64
+        .decode(encoded)
+        .map_err(|e| anyhow::anyhow!("base64 decode failed: {e}"))?;
+    if data.len() < 12 {
+        anyhow::bail!("invalid encrypted data");
+    }
+    let (nonce_bytes, ciphertext) = data.split_at(12);
+    let nonce = Nonce::from_slice(nonce_bytes);
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| anyhow::anyhow!("decryption failed: {e}"))?;
+    String::from_utf8(plaintext).map_err(|e| anyhow::anyhow!("invalid utf-8: {e}"))
 }
 
 #[cfg(test)]

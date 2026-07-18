@@ -123,6 +123,18 @@ async fn configure_runtime(
     api_key: String,
     model: String,
 ) -> Result<(), String> {
+    let needs_init = state
+        .service
+        .lock()
+        .map_err(|e| e.to_string())?
+        .store()
+        .providers()
+        .is_empty();
+    if needs_init {
+        let mut svc = ProviderService::new();
+        svc.initialize().await.map_err(|e| e.to_string())?;
+        *state.service.lock().map_err(|e| e.to_string())? = svc;
+    }
     let base_url = {
         let guard = state.service.lock().map_err(|e| e.to_string())?;
         guard
