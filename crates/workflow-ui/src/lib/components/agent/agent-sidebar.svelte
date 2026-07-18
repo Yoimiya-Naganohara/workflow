@@ -103,7 +103,7 @@
 							<div class={cn("absolute inset-0 size-2 rounded-full animate-ping opacity-75", statusColor(status))}></div>
 						{/if}
 					</div>
-					<div class="flex-1 min-w-0 pr-6">
+					<div class="flex-1 min-w-0">
 						<div class="flex items-center gap-1">
 							<span class="font-medium truncate">{agent.role.charAt(0).toUpperCase() + agent.role.slice(1)}</span>
 							<span class="text-[10px] text-muted-foreground/50 tabular-nums">#{agent.id}</span>
@@ -126,15 +126,17 @@
 							</p>
 						{/if}
 					</div>
-					<Button
-						variant="ghost"
-						size="icon-xs"
-						class="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-						onclick={(e) => { e.stopPropagation(); onRemoveAgent(agent.id); }}
-						title="Remove agent"
-					>
-						<X class="size-3" />
-					</Button>
+					<div class="absolute right-1 inset-y-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+						<Button
+							variant="ghost"
+							size="icon-xs"
+							class="text-muted-foreground hover:text-destructive"
+							onclick={(e) => { e.stopPropagation(); onRemoveAgent(agent.id); }}
+							title="Remove agent"
+						>
+							<X class="size-3" />
+						</Button>
+					</div>
 				</button>
 			{:else}
 				<div class="flex flex-col items-center gap-2 py-12 text-center px-4">
