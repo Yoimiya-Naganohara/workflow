@@ -20,9 +20,10 @@ use workflow_agent::{
 };
 use workflow_config::*;
 use workflow_role::{Role, RoleId, RolePool};
+mod dynamic_tools;
+use dynamic_tools::DynamicTools;
 use workflow_tool::{
     RoleChecker,
-    dynamic_tools::DynamicTools,
     list_agents::ListAgents,
     orchestrate::{AgentFactory, Orchestrate},
     send_message::SendMessage,
