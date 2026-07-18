@@ -105,15 +105,10 @@ impl rig::tool::Tool for CreateRole {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let role_id = RoleId::from(args.name.clone());
-        let guard = self.roles.read().unwrap();
-        if guard.get(&role_id).is_some() {
-            return Ok(format!("Role '{}' already exists", args.name));
-        }
-        drop(guard);
-        let role = Role::new(args.name.clone(), args.definition, vec![]);
+        let role = Role::new(args.name, args.definition, vec![]);
         self.roles.write().unwrap().add(role_id, role);
         let _ = self.events.send(WorkflowEvent::RolesChanged);
-        Ok(format!("Role '{}' created", args.name))
+        Ok("Role created successfully".to_string())
     }
 }
 

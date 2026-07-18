@@ -109,15 +109,14 @@
 							<span class="text-[10px] text-muted-foreground/50 tabular-nums">#{agent.id}</span>
 						</div>
 						{#if agent.current_task}
-							{@const task = agent.current_task.length > 80 ? agent.current_task.slice(0, 80) : agent.current_task}
 							<Tooltip>
 								<TooltipTrigger>
-									<p class="text-[11px] text-muted-foreground/70 truncate mt-0.5 leading-tight" title={agent.current_task}>
-										{task}
+									<p class="text-[11px] text-muted-foreground/70 truncate mt-0.5 leading-tight">
+										{agent.current_task}
 									</p>
 								</TooltipTrigger>
-								<TooltipContent side="right" class="max-w-64">
-									<p class="text-xs break-words">{agent.current_task}</p>
+								<TooltipContent side="right" class="max-w-48">
+									<p class="text-xs">{agent.current_task}</p>
 								</TooltipContent>
 							</Tooltip>
 						{:else if status !== "idle"}
