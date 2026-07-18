@@ -217,20 +217,25 @@
 
 		const ids = new Set(live.map(n => n.id));
 
-		const removed = svgNodes.filter(n => !ids.has(n.id));
-		for (const n of removed) {
-			nodeCache.delete(n.id);
+		// Remove dead nodes from cache; preserve positions for survivors
+		for (const n of svgNodes) {
+			if (!ids.has(n.id)) {
+				nodeCache.delete(n.id);
+			} else {
+				const ln = live.find(l => l.id === n.id);
+				if (ln) { ln.x = n.x; ln.y = n.y; }
+			}
 		}
 
+		// Position brand-new nodes
 		for (const n of live) {
 			if (!svgNodes.find(s => s.id === n.id)) {
 				n.x = containerEl!.clientWidth / 2 + (Math.random() - 0.5) * 60;
 				n.y = containerEl!.clientHeight / 2 + (Math.random() - 0.5) * 60;
-				svgNodes.push(n);
 			}
 		}
 
-		sim.nodes(svgNodes);
+		sim.nodes(live);
 
 		const edges = getEdges(live);
 		edgeLines = edgeLines
@@ -245,7 +250,7 @@
 			);
 
 		nodeGroup = nodeGroup
-			.data(svgNodes, (d: GraphNode) => String(d.id))
+			.data(live, (d: GraphNode) => String(d.id))
 			.join(
 				enter => {
 					const gEnter = enter.append("g")
