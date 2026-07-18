@@ -313,6 +313,7 @@ impl Runtime {
                 Arc::clone(&factory),
                 Arc::clone(&next_id),
                 Arc::clone(&role_checker),
+                Arc::clone(&dt_flag),
             ))
             .dynamic_tools(1, DynamicTools::with_flag(Arc::clone(&dt_flag)),
                 rig::tool::ToolSet::from_tools_boxed(vec![

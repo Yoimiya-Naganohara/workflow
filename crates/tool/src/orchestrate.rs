@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
@@ -47,16 +47,23 @@ pub struct Orchestrate {
     next_id: Arc<AtomicU32>,
     factory: AgentFactory,
     roles: Arc<dyn RoleChecker>,
+    create_role_flag: Arc<AtomicBool>,
     execution_lock: Mutex<()>,
 }
 
 impl Orchestrate {
-    pub fn new(pool: Arc<AgentPool>, factory: AgentFactory, roles: Arc<dyn RoleChecker>) -> Self {
+    pub fn new(
+        pool: Arc<AgentPool>,
+        factory: AgentFactory,
+        roles: Arc<dyn RoleChecker>,
+        create_role_flag: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             pool,
             next_id: Arc::new(AtomicU32::new(1)),
             factory,
             roles,
+            create_role_flag,
             execution_lock: Mutex::new(()),
         }
     }
@@ -66,12 +73,14 @@ impl Orchestrate {
         factory: AgentFactory,
         next_id: Arc<AtomicU32>,
         roles: Arc<dyn RoleChecker>,
+        create_role_flag: Arc<AtomicBool>,
     ) -> Self {
         Self {
             pool,
             next_id,
             factory,
             roles,
+            create_role_flag,
             execution_lock: Mutex::new(()),
         }
     }
@@ -167,11 +176,12 @@ impl Tool for Orchestrate {
             return Err(ToolError::Orchestrate("task list is empty".into()));
         }
 
-        // Validate that all requested roles exist. If any are missing, return
-        // suggestions so the model can pick an existing role or create one.
+        // Validate that all requested roles exist. If any are missing, enable the
+        // create_role tool and return suggestions so the model can create one.
         let available = self.roles.list_roles();
         for task in &tasks {
             if !self.roles.exists(&task.role) {
+                self.create_role_flag.store(true, Ordering::Relaxed);
                 let suggestions = suggest_roles(&task.role, &available);
                 return Err(ToolError::RoleNotFound {
                     requested: task.role.clone(),
