@@ -80,18 +80,26 @@ impl rig::tool::Tool for CreateRole {
     type Args = CreateRoleArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
+    async fn definition(&self, prompt: String) -> rig::completion::ToolDefinition {
+        let existing: Vec<String> = self.roles.read().unwrap().list().iter().map(|r| r.name().to_owned()).collect();
+        let exists = existing.iter().any(|n| prompt.contains(n));
+        let (desc, name_desc) = if exists {
+            ("This role already exists. Use an existing role instead of creating a duplicate.".to_string(),
+             "Must be a new role name not already in the pool".to_string())
+        } else {
+            ("Create a new agent role with a name and definition. \
+             The definition should describe the role's responsibilities and behavior.".to_string(),
+             "Unique role identifier (e.g. 'coder', 'reviewer')".to_string())
+        };
         rig::completion::ToolDefinition {
             name: "create_role".to_string(),
-            description: "Create a new agent role with a name and definition. \
-                The definition should describe the role's responsibilities and behavior."
-                .to_string(),
+            description: desc,
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Unique role identifier (e.g. 'coder', 'reviewer')"
+                        "description": name_desc
                     },
                     "definition": {
                         "type": "string",
@@ -104,6 +112,12 @@ impl rig::tool::Tool for CreateRole {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let guard = self.roles.read().unwrap();
+        let existing = guard.list();
+        if existing.iter().any(|r| r.name() == args.name) {
+            return Ok(format!("Role '{}' already exists, not creating duplicate", args.name));
+        }
+        drop(guard);
         let role_id = RoleId::from(args.name.clone());
         let role = Role::new(args.name, args.definition, vec![]);
         self.roles.write().unwrap().add(role_id, role);
