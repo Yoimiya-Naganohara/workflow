@@ -68,6 +68,64 @@
 		return edges;
 	}
 
+	function buildNodeEnter(enter: d3.Selection<d3.EnterElement, GraphNode, SVGGElement, unknown>) {
+		const gEnter = enter.append("g")
+			.attr("class", "agent-node cursor-pointer")
+			.attr("data-id", (d: GraphNode) => d.id)
+			.on("click", (_event: any, d: GraphNode) => { onSelect(d.id); })
+			.on("mouseenter", (_event: any, d: GraphNode) => {
+				tooltipAgent = agents.find(a => a.id === d.id) ?? null;
+			})
+			.on("mouseleave", () => { tooltipAgent = null; })
+			.call(d3.drag<SVGGElement, GraphNode>()
+				.on("start", (event, d) => { d.fx = d.x; d.fy = d.y; })
+				.on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
+				.on("end", () => { sim?.alphaTarget(0); }) as any);
+
+		gEnter.append("circle").attr("class", "glow-ring").attr("r", 26)
+			.attr("fill", "none")
+			.attr("stroke", (d: GraphNode) => roleColor(d.role))
+			.attr("stroke-width", 2).attr("opacity", 0.08)
+			.attr("filter", "url(#g-glow)");
+
+		gEnter.append("circle").attr("class", "node-body").attr("r", 20)
+			.style("fill", (d: GraphNode) => roleColor(d.role))
+			.attr("fill-opacity", 0.85)
+			.attr("stroke", (d: GraphNode) => roleColor(d.role))
+			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
+			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
+
+		gEnter.append("circle").attr("class", "pulse-ring").attr("r", 25)
+			.attr("fill", "none")
+			.attr("stroke", (d: GraphNode) => roleColor(d.role))
+			.attr("stroke-width", 2).attr("opacity", 0);
+
+		gEnter.append("text").attr("class", "node-id")
+			.attr("text-anchor", "middle").attr("dy", "0.35em")
+			.attr("fill", "white").attr("font-size", "11")
+			.attr("font-family", "monospace").attr("font-weight", "700")
+			.text((d: GraphNode) => `#${d.id}`);
+
+		gEnter.append("text").attr("class", "node-role")
+			.attr("text-anchor", "middle")
+			.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31))
+			.attr("fill", "currentColor").attr("font-size", "9").attr("opacity", 0.5)
+			.text((d: GraphNode) => d.role);
+
+		return gEnter;
+	}
+
+	function buildNodeUpdate(update: d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>) {
+		update.select(".node-body")
+			.style("fill", (d: GraphNode) => roleColor(d.role))
+			.attr("stroke", (d: GraphNode) => roleColor(d.role))
+			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
+			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
+		update.select(".node-role")
+			.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31));
+		return update;
+	}
+
 	let g: d3.Selection<SVGGElement, unknown, null, undefined>;
 	let nodeGroup: d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>;
 	let edgeLines: d3.Selection<SVGLineElement, GraphEdge, SVGGElement, unknown>;
@@ -113,51 +171,7 @@
 		nodeGroup = g.selectAll<SVGGElement, GraphNode>("g")
 			.data(nodes, (d: GraphNode) => String(d.id))
 			.join("g")
-			.attr("data-id", (d: GraphNode) => d.id)
-			.attr("class", "agent-node cursor-pointer")
-			.on("click", (_event: any, d: GraphNode) => { onSelect(d.id); })
-			.on("mouseenter", (_event: any, d: GraphNode) => {
-				tooltipAgent = agents.find(a => a.id === d.id) ?? null;
-			})
-			.on("mouseleave", () => {
-				tooltipAgent = null;
-			})
-			.call(d3.drag<SVGGElement, GraphNode>()
-				.on("start", (event, d) => { d.fx = d.x; d.fy = d.y; })
-				.on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
-				.on("end", () => { sim?.alphaTarget(0); }) as any,
-			);
-
-		const r = 20;
-
-		nodeGroup.append("circle").attr("class", "glow-ring").attr("r", r + 6)
-			.attr("fill", "none")
-			.attr("stroke", (d: GraphNode) => roleColor(d.role))
-			.attr("stroke-width", 2)
-			.attr("opacity", 0.08)
-			.attr("filter", "url(#g-glow)");
-
-		nodeGroup.append("circle").attr("class", "node-body").attr("r", r)
-			.style("fill", (d: GraphNode) => roleColor(d.role))
-			.attr("fill-opacity", 0.85)
-			.attr("stroke", (d: GraphNode) => roleColor(d.role))
-			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
-			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
-
-		nodeGroup.append("circle").attr("class", "pulse-ring").attr("r", r + 5)
-			.attr("fill", "none")
-			.attr("stroke", (d: GraphNode) => roleColor(d.role))
-			.attr("stroke-width", 2)
-			.attr("opacity", 0);
-
-		nodeGroup.append("text").attr("class", "node-id").attr("text-anchor", "middle").attr("dy", "0.35em")
-			.attr("fill", "white").attr("font-size", "11").attr("font-family", "monospace").attr("font-weight", "700")
-			.text((d: GraphNode) => `#${d.id}`);
-
-		nodeGroup.append("text").attr("class", "node-role").attr("text-anchor", "middle")
-			.attr("dy", (d: GraphNode) => (d.id === selected ? r + 14 : r + 11))
-			.attr("fill", "currentColor").attr("font-size", "9").attr("opacity", 0.5)
-			.text((d: GraphNode) => d.role);
+			.call(gEnter => { buildNodeEnter(gEnter as any); });
 
 		sim = d3.forceSimulation(nodes)
 			.force("charge", d3.forceManyBody().strength(-180))
@@ -182,30 +196,25 @@
 		if (!svgEl) return;
 		const svg = d3.select(svgEl);
 		for (const [id, status] of statuses) {
-			const pulse = svg.selectAll<SVGCircleElement, GraphNode>(".agent-node")
-				.filter((d: GraphNode) => d.id === id)
-				.select(".pulse-ring");
+			const node = svg.select(`[data-id="${id}"]`);
+			if (node.empty()) continue;
+			const pulse = node.select(".pulse-ring");
+			const body = node.select(".node-body");
 			if (status === "thinking" || status === "running-tool") {
 				pulse.attr("opacity", 1);
 				if (pulse.select("animate").empty()) {
 					pulse.append("animate").attr("attributeName", "r")
-						.attr("values", `${20 + 5};${20 + 12};${20 + 5}`)
+						.attr("values", "25;32;25")
 						.attr("dur", "1.8s").attr("repeatCount", "indefinite");
 					pulse.append("animate").attr("attributeName", "opacity")
 						.attr("values", "0.5;0;0.5")
 						.attr("dur", "1.8s").attr("repeatCount", "indefinite");
 				}
-				svg.selectAll<SVGCircleElement, GraphNode>(".agent-node")
-					.filter((d: GraphNode) => d.id === id)
-					.select(".node-body")
-					.attr("fill-opacity", 0.95);
+				body.attr("fill-opacity", 0.95);
 			} else {
 				pulse.attr("opacity", 0);
 				pulse.selectAll("animate").remove();
-				svg.selectAll<SVGCircleElement, GraphNode>(".agent-node")
-					.filter((d: GraphNode) => d.id === id)
-					.select(".node-body")
-					.attr("fill-opacity", 0.85);
+				body.attr("fill-opacity", 0.85);
 			}
 		}
 	}
@@ -215,21 +224,22 @@
 		const svgNodes = sim.nodes() as GraphNode[];
 		const live = getNodes();
 
-		const ids = new Set(live.map(n => n.id));
+		const liveById = new Map(live.map(n => [n.id, n]));
+		const oldById = new Map(svgNodes.map(n => [n.id, n]));
 
 		// Remove dead nodes from cache; preserve positions for survivors
 		for (const n of svgNodes) {
-			if (!ids.has(n.id)) {
+			if (!liveById.has(n.id)) {
 				nodeCache.delete(n.id);
 			} else {
-				const ln = live.find(l => l.id === n.id);
-				if (ln) { ln.x = n.x; ln.y = n.y; }
+				const ln = liveById.get(n.id)!;
+				ln.x = n.x; ln.y = n.y;
 			}
 		}
 
 		// Position brand-new nodes
 		for (const n of live) {
-			if (!svgNodes.find(s => s.id === n.id)) {
+			if (!oldById.has(n.id)) {
 				n.x = containerEl!.clientWidth / 2 + (Math.random() - 0.5) * 60;
 				n.y = containerEl!.clientHeight / 2 + (Math.random() - 0.5) * 60;
 			}
@@ -252,64 +262,8 @@
 		nodeGroup = nodeGroup
 			.data(live, (d: GraphNode) => String(d.id))
 			.join(
-				enter => {
-					const gEnter = enter.append("g")
-						.attr("class", "agent-node cursor-pointer")
-						.attr("data-id", (d: GraphNode) => d.id)
-						.on("click", (_event: any, d: GraphNode) => { onSelect(d.id); })
-						.on("mouseenter", (_event: any, d: GraphNode) => {
-							tooltipAgent = agents.find(a => a.id === d.id) ?? null;
-						})
-						.on("mouseleave", () => { tooltipAgent = null; })
-						.call(d3.drag<SVGGElement, GraphNode>()
-							.on("start", (event, d) => { d.fx = d.x; d.fy = d.y; })
-							.on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
-							.on("end", () => { sim?.alphaTarget(0); }) as any);
-
-					gEnter.append("circle").attr("class", "glow-ring").attr("r", 26)
-						.attr("fill", "none")
-						.attr("stroke", (d: GraphNode) => roleColor(d.role))
-						.attr("stroke-width", 2)
-						.attr("opacity", 0.08)
-						.attr("filter", "url(#g-glow)");
-
-					gEnter.append("circle").attr("class", "node-body").attr("r", 20)
-						.style("fill", (d: GraphNode) => roleColor(d.role))
-						.attr("fill-opacity", 0.85)
-						.attr("stroke", (d: GraphNode) => roleColor(d.role))
-						.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
-						.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
-
-					gEnter.append("circle").attr("class", "pulse-ring").attr("r", 25)
-						.attr("fill", "none")
-						.attr("stroke", (d: GraphNode) => roleColor(d.role))
-						.attr("stroke-width", 2)
-						.attr("opacity", 0);
-
-					gEnter.append("text").attr("class", "node-id")
-						.attr("text-anchor", "middle").attr("dy", "0.35em")
-						.attr("fill", "white").attr("font-size", "11")
-						.attr("font-family", "monospace").attr("font-weight", "700")
-						.text((d: GraphNode) => `#${d.id}`);
-
-					gEnter.append("text").attr("class", "node-role")
-						.attr("text-anchor", "middle")
-						.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31))
-						.attr("fill", "currentColor").attr("font-size", "9").attr("opacity", 0.5)
-						.text((d: GraphNode) => d.role);
-
-					return gEnter;
-				},
-				update => {
-					update.select(".node-body")
-						.style("fill", (d: GraphNode) => roleColor(d.role))
-						.attr("stroke", (d: GraphNode) => roleColor(d.role))
-						.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
-						.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
-					update.select(".node-role")
-						.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31));
-					return update;
-				},
+				enter => buildNodeEnter(enter),
+				update => buildNodeUpdate(update),
 				exit => exit.remove(),
 			);
 
@@ -342,11 +296,12 @@
 
 	function applySelection() {
 		if (!svgEl) return;
-		const svg = d3.select(svgEl);
-		svg.selectAll<SVGCircleElement, GraphNode>(".node-body")
+		d3.select(svgEl).selectAll<SVGGElement, GraphNode>(".agent-node")
+			.select(".node-body")
 			.attr("stroke-width", (d: GraphNode) => (d.id === selected ? 2.5 : 1))
 			.attr("stroke-opacity", (d: GraphNode) => (d.id === selected ? 1 : 0.35));
-		svg.selectAll<SVGTextElement, GraphNode>(".node-role")
+		d3.select(svgEl).selectAll<SVGGElement, GraphNode>(".agent-node")
+			.select(".node-role")
 			.attr("dy", (d: GraphNode) => (d.id === selected ? 34 : 31));
 	}
 
