@@ -3,13 +3,14 @@ use std::{
     num::NonZeroUsize,
     sync::{
         Arc, Mutex, RwLock,
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
 };
 
 use rig::{
     client::CompletionClient, memory::InMemoryConversationMemory,
     providers::openai::CompletionsClient, tool::server::ToolServer,
+    vector_store::VectorStoreIndexDyn,
 };
 use serde::Serialize;
 use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
@@ -58,8 +59,8 @@ struct CreateRoleArgs {
 
 #[derive(Debug, thiserror::Error)]
 enum CreateRoleError {
-    #[error("{0}")]
-    AlreadyExists(String),
+    #[error("failed to create role: {0}")]
+    Failed(String),
 }
 
 struct CreateRole {
@@ -105,19 +106,10 @@ impl rig::tool::Tool for CreateRole {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let role_id = RoleId::from(args.name.clone());
-        {
-            let roles = self.roles.read().unwrap();
-            if roles.get(&role_id).is_some() {
-                return Err(CreateRoleError::AlreadyExists(
-                    format!("Role '{}' already exists in the pool. Use the existing role instead of creating a duplicate.", args.name)
-                ));
-            }
-        }
-        let role_name = args.name.clone();
         let role = Role::new(args.name, args.definition, vec![]);
         self.roles.write().unwrap().add(role_id, role);
         let _ = self.events.send(WorkflowEvent::RolesChanged);
-        Ok(format!("Role '{}' created successfully", role_name))
+        Ok("Role created successfully".to_string())
     }
 }
 
@@ -144,7 +136,11 @@ impl RuntimeConfig {
         let default = Self::default();
         match provider {
             Some(p) => {
-                let model = p.models.first().cloned().unwrap_or_else(|| default.model.clone());
+                let model = p
+                    .models
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| default.model.clone());
                 let mut provider = p.clone();
                 if provider.models.is_empty() {
                     provider.models.push(model.clone());
@@ -287,8 +283,8 @@ impl Runtime {
         let next_id = Arc::new(AtomicU32::new(AgentId::default()));
         let observer: Arc<RwLock<Option<AgentObserver>>> = Arc::new(RwLock::new(None));
 
-        let mut client_builder = CompletionsClient::builder()
-            .api_key(&config.provider.api_key as &str);
+        let mut client_builder =
+            CompletionsClient::builder().api_key(&config.provider.api_key as &str);
         if !config.provider.base_url.is_empty() {
             client_builder = client_builder.base_url(&config.provider.base_url);
         }
@@ -296,30 +292,23 @@ impl Runtime {
             .build()
             .map_err(|error| RuntimeError::Provider(error.to_string()))?;
 
-        let handle_cell: Arc<Mutex<Option<rig::tool::server::ToolServerHandle>>> =
-            Arc::new(Mutex::new(None));
+        let dynamic_tools = DynamicTools::new();
+        let dt_flag = dynamic_tools.flag();
+        let (events, _) = broadcast::channel(EVENT_CAPACITY);
+        let role_checker: Arc<dyn RoleChecker> = Arc::new(RolePoolChecker(Arc::clone(&roles)));
+        let factory_cell: Arc<Mutex<Option<AgentFactory>>> = Arc::new(Mutex::new(None));
         let factory = make_agent_factory(
             &client,
             &config.model,
+            Arc::clone(&agent_pool),
             Arc::clone(&roles),
-            Arc::clone(&handle_cell),
+            Arc::clone(&factory_cell),
+            Arc::clone(&next_id),
+            Arc::clone(&role_checker),
             Arc::clone(&observer),
+            events.clone(),
         );
-        let (events, _) = broadcast::channel(EVENT_CAPACITY);
-
-        let role_checker: Arc<dyn RoleChecker> = Arc::new(RolePoolChecker(Arc::clone(&roles)));
-        let tool_handle = ToolServer::new()
-            .tool(SendMessage::new(Arc::clone(&agent_pool)))
-            .tool(ListAgents::new(Arc::clone(&agent_pool)))
-            .tool(Orchestrate::with_id_allocator(
-                Arc::clone(&agent_pool),
-                Arc::clone(&factory),
-                Arc::clone(&next_id),
-                Arc::clone(&role_checker),
-            ))
-            .tool(CreateRole::new(Arc::clone(&roles), events.clone()))
-            .run();
-        *handle_cell.lock().unwrap() = Some(tool_handle);
+        *factory_cell.lock().unwrap() = Some(factory.clone());
         Ok(Self {
             agent_pool,
             roles,
@@ -572,22 +561,96 @@ fn role_info(role: &Role) -> RoleInfo {
         definition: role.definition().to_owned(),
     }
 }
+struct DynamicTools {
+    create_role: Arc<AtomicBool>,
+}
 
+impl DynamicTools {
+    pub fn new() -> Self {
+        Self { create_role: Arc::new(AtomicBool::new(false)) }
+    }
+    pub fn with_flag(flag: Arc<AtomicBool>) -> Self {
+        Self { create_role: flag }
+    }
+    pub fn set_create_role(&mut self, create_role: bool) {
+        self.create_role.store(create_role, std::sync::atomic::Ordering::Relaxed)
+    }
+    pub fn flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.create_role)
+    }
+}
+impl VectorStoreIndexDyn for DynamicTools {
+    fn top_n<'a>(
+        &'a self,
+        _req: rig::vector_store::VectorSearchRequest<
+            rig::vector_store::request::Filter<serde_json::Value>,
+        >,
+    ) -> rig::wasm_compat::WasmBoxedFuture<'a, rig::vector_store::TopNResults> {
+        let enabled = self.create_role.load(std::sync::atomic::Ordering::Relaxed);
+        Box::pin(async move {
+            if !enabled {
+                return Ok(Vec::new());
+            }
+            Ok(vec![(
+                1.0,
+                "create_role".to_string(),
+                serde_json::json!({
+                    "name": "create_role",
+                    "description": "Create a new agent role with a name and definition. \
+                        The definition should describe the role's responsibilities and behavior.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Unique role identifier (e.g. 'coder', 'reviewer')"
+                            },
+                            "definition": {
+                                "type": "string",
+                                "description": "Description of the role's responsibilities and behavior"
+                            }
+                        },
+                        "required": ["name", "definition"]
+                    }
+                }),
+            )])
+        })
+    }
+
+    fn top_n_ids<'a>(
+        &'a self,
+        _req: rig::vector_store::VectorSearchRequest<
+            rig::vector_store::request::Filter<serde_json::Value>,
+        >,
+    ) -> rig::wasm_compat::WasmBoxedFuture<
+        'a,
+        Result<Vec<(f64, String)>, rig::vector_store::VectorStoreError>,
+    > {
+        let enabled = self.create_role.load(Ordering::Relaxed);
+        Box::pin(async move {
+            if !enabled {
+                return Ok(Vec::new());
+            }
+            Ok(vec![(1.0, "create_role".to_string())])
+        })
+    }
+}
 fn make_agent_factory(
     client: &CompletionsClient,
     model: &str,
+    agent_pool: Arc<AgentPool>,
     roles: Arc<RwLock<RolePool>>,
-    handle_cell: Arc<Mutex<Option<rig::tool::server::ToolServerHandle>>>,
+    factory_cell: Arc<Mutex<Option<AgentFactory>>>,
+    next_id: Arc<AtomicU32>,
+    role_checker: Arc<dyn RoleChecker>,
     observer: Arc<RwLock<Option<AgentObserver>>>,
+    events: broadcast::Sender<WorkflowEvent>,
 ) -> AgentFactory {
     let client = client.clone();
     let model = model.to_owned();
+    let dt = DynamicTools::new();
+    let dt_flag = dt.flag();
     Arc::new(move |id, requested_role| {
-        let handle = handle_cell
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("tool server is initialized before agents are created");
         let role = {
             let roles = roles.read().unwrap();
             roles
@@ -601,9 +664,21 @@ fn make_agent_factory(
         } else {
             requested_role
         };
+        let factory = factory_cell.lock().unwrap().clone()
+            .expect("factory cell must be initialized");
         let rig_agent = client
             .agent(&model)
-            .tool_server_handle(handle)
+            .tool(SendMessage::new(Arc::clone(&agent_pool)))
+            .tool(ListAgents::new(Arc::clone(&agent_pool)))
+            .tool(Orchestrate::with_id_allocator(
+                Arc::clone(&agent_pool),
+                factory,
+                Arc::clone(&next_id),
+                Arc::clone(&role_checker),
+            ))
+            .dynamic_tools(1, DynamicTools::with_flag(Arc::clone(&dt_flag)), rig::tool::ToolSet::from_tools_boxed(vec![
+                Box::new(CreateRole::new(Arc::clone(&roles), events.clone())) as Box<dyn rig::tool::ToolDyn>,
+            ]))
             .memory(InMemoryConversationMemory::new())
             .conversation(id.to_string())
             .preamble(&format!(
