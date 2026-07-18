@@ -64,11 +64,12 @@ enum CreateRoleError {
 
 struct CreateRole {
     roles: Arc<RwLock<RolePool>>,
+    events: broadcast::Sender<WorkflowEvent>,
 }
 
 impl CreateRole {
-    fn new(roles: Arc<RwLock<RolePool>>) -> Self {
-        Self { roles }
+    fn new(roles: Arc<RwLock<RolePool>>, events: broadcast::Sender<WorkflowEvent>) -> Self {
+        Self { roles, events }
     }
 }
 
@@ -80,17 +81,26 @@ impl rig::tool::Tool for CreateRole {
     type Output = String;
 
     async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
+        let existing: Vec<String> = self.roles.read().unwrap().list().iter()
+            .map(|r| format!("{}: {}", r.name(), r.definition()))
+            .collect();
+        let roles_list = if existing.is_empty() {
+            "No roles exist yet.".to_string()
+        } else {
+            existing.join("\n")
+        };
         rig::completion::ToolDefinition {
             name: "create_role".to_string(),
-            description: "Create a new agent role with a name and definition. \
-                The definition should describe the role's responsibilities and behavior."
-                .to_string(),
+            description: format!(
+                "Create a new agent role with a name and definition. \
+                The definition describes the role's responsibilities and behavior.\n\n\
+                Existing roles:\n{}", roles_list),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Unique role identifier (e.g. 'coder', 'reviewer')"
+                        "description": "Unique role identifier (e.g. 'coder', 'reviewer'). Use a name not already taken."
                     },
                     "definition": {
                         "type": "string",
@@ -104,9 +114,24 @@ impl rig::tool::Tool for CreateRole {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let role_id = RoleId::from(args.name.clone());
-        let role = Role::new(args.name, args.definition, vec![]);
+        let exists = self.roles.read().unwrap().list().iter()
+            .any(|r| r.name() == &args.name);
+        if exists {
+            return Err(CreateRoleError::Failed(format!(
+                "Role '{}' already exists. Choose a different name.", args.name
+            )));
+        }
+        let role = Role::new(args.name.clone(), args.definition.clone(), vec![]);
         self.roles.write().unwrap().add(role_id, role);
-        Ok("Role created successfully".to_string())
+        let _ = self.events.send(WorkflowEvent::RolesChanged);
+        Ok(format!(
+            "Role '{}' created successfully. Existing roles: {}",
+            args.name,
+            self.roles.read().unwrap().list().iter()
+                .map(|r| r.name().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
     }
 }
 
@@ -220,6 +245,7 @@ pub enum WorkflowEvent {
         event: AgentEvent,
     },
     TranscriptChanged(AgentId),
+    RolesChanged,
     ResyncRequired,
 }
 
@@ -293,6 +319,8 @@ impl Runtime {
             Arc::clone(&handle_cell),
             Arc::clone(&observer),
         );
+        let (events, _) = broadcast::channel(EVENT_CAPACITY);
+
         let role_checker: Arc<dyn RoleChecker> = Arc::new(RolePoolChecker(Arc::clone(&roles)));
         let tool_handle = ToolServer::new()
             .tool(SendMessage::new(Arc::clone(&agent_pool)))
@@ -303,11 +331,9 @@ impl Runtime {
                 Arc::clone(&next_id),
                 Arc::clone(&role_checker),
             ))
-            .tool(CreateRole::new(Arc::clone(&roles)))
+            .tool(CreateRole::new(Arc::clone(&roles), events.clone()))
             .run();
         *handle_cell.lock().unwrap() = Some(tool_handle);
-
-        let (events, _) = broadcast::channel(EVENT_CAPACITY);
         Ok(Self {
             agent_pool,
             roles,
