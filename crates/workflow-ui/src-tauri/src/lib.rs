@@ -34,6 +34,7 @@ pub struct ProviderEntry {
 enum UiEvent {
     AgentAdded { agent_id: u32 },
     AgentRemoved { agent_id: u32 },
+    AgentStopped { agent_id: u32 },
     AgentOutput { agent_id: u32 },
     TranscriptChanged { agent_id: u32 },
     RolesChanged,
@@ -46,6 +47,7 @@ impl From<WorkflowEvent> for UiEvent {
         match event {
             WorkflowEvent::AgentAdded(agent) => Self::AgentAdded { agent_id: agent.id },
             WorkflowEvent::AgentRemoved(agent_id) => Self::AgentRemoved { agent_id },
+            WorkflowEvent::AgentStopped(agent_id) => Self::AgentStopped { agent_id },
             WorkflowEvent::AgentOutput { agent_id, .. } => Self::AgentOutput { agent_id },
             WorkflowEvent::TranscriptChanged(agent_id) => Self::TranscriptChanged { agent_id },
             WorkflowEvent::RolesChanged => Self::RolesChanged,

@@ -39,6 +39,7 @@ class AppState {
     settingsApiKey = $state("");
 
     input = $state("");
+    running = $state(false);
 
     eventLog = $state<LogEntry[]>([]);
 
@@ -104,17 +105,11 @@ class AppState {
         return map;
     });
 
-    running = $derived(
-        this.selected != null &&
-            (this.agentStatuses.get(this.selected) === "thinking" ||
-                this.agentStatuses.get(this.selected) === "responding" ||
-                this.agentStatuses.get(this.selected) === "running-tool"),
-    );
-
     stop = async () => {
         if (this.selected == null) return;
         try {
             await invoke("stop_agent", { target: this.selected });
+            this.running = false;
         } catch (e) {
             this.error = `stop: ${e}`;
         }
@@ -149,6 +144,14 @@ class AppState {
             }
             this.messages = s.messages;
             this.error = "";
+            if (
+                this.running &&
+                this.selected != null &&
+                this.pendingAction?.type !== "send" &&
+                !this.agents.find(a => a.id === this.selected)?.current_task
+            ) {
+                this.running = false;
+            }
         } catch (e) {
             this.error = `snapshot: ${e}`;
         }
@@ -158,6 +161,7 @@ class AppState {
         if (!this.input.trim() || this.selected == null) return;
         const text = this.input.trim();
         this.input = "";
+        this.running = true;
         this.pendingAction = { type: "send", agentId: this.selected };
         try {
             const s = (await invoke("send", {
@@ -339,6 +343,9 @@ class AppState {
             if (event.payload.type === "roles_changed") {
                 this.loadRoles();
                 return;
+            }
+            if (event.payload.type === "agent_stopped") {
+                this.running = false;
             }
             this.pull();
         }).then((unlisten) => {

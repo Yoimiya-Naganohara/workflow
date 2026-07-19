@@ -220,6 +220,7 @@ pub struct RuntimeSnapshot {
 pub enum WorkflowEvent {
     AgentAdded(AgentInfo),
     AgentRemoved(AgentId),
+    AgentStopped(AgentId),
     AgentOutput {
         agent_id: AgentId,
         event: AgentEvent,
@@ -421,7 +422,9 @@ impl Runtime {
             .map_err(|_| RuntimeError::SendMessage {
                 agent_id: id,
                 message: "failed to send stop signal".to_string(),
-            })
+            })?;
+        let _ = self.events.send(WorkflowEvent::AgentStopped(id));
+        Ok(())
     }
 
     pub async fn snapshot(&self, selected: Option<AgentId>) -> RuntimeSnapshot {

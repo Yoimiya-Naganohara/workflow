@@ -30,6 +30,7 @@ export interface RoleInfo {
 export type UiEvent =
 	| { type: "agent_added"; agent_id: AgentId }
 	| { type: "agent_removed"; agent_id: AgentId }
+	| { type: "agent_stopped"; agent_id: AgentId }
 	| { type: "agent_output"; agent_id: AgentId }
 	| { type: "transcript_changed"; agent_id: AgentId }
 	| { type: "roles_changed" }
