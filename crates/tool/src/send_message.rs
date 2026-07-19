@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rig::{completion::ToolDefinition, tool::Tool};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use workflow_agent::{
     Message,
     agent_pool::AgentPool,
@@ -20,6 +20,18 @@ static NEXT_MSG_ID: AtomicU64 = AtomicU64::new(1);
 pub struct SendMessageArgs {
     pub target_id: workflow_agent::AgentId,
     pub message: String,
+    #[serde(default)]
+    pub reply_to: Option<workflow_agent::protocol::MessageId>,
+    #[serde(default)]
+    pub thread_id: Option<workflow_agent::protocol::ThreadId>,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SendMessageOutput {
+    message_id: u64,
+    status: String,
 }
 
 pub struct SendMessage {
@@ -42,7 +54,10 @@ impl Tool for SendMessage {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "send_message".to_string(),
-            description: "Send a message to another agent in the pool by its numeric agent ID"
+            description: "Send a message to another agent in the pool by its numeric agent ID. \
+                Supports thread-based conversations via `thread_id` and `reply_to`. \
+                Use `intent` to specify the message purpose: 'request' (expect response), \
+                'inform' (no reply needed), 'response' (reply to a prior request)."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -54,6 +69,19 @@ impl Tool for SendMessage {
                     "message": {
                         "type": "string",
                         "description": "The message content to send"
+                    },
+                    "reply_to": {
+                        "type": ["integer", "null"],
+                        "description": "Optional message ID this is a reply to (for threading)"
+                    },
+                    "thread_id": {
+                        "type": ["integer", "null"],
+                        "description": "Optional thread ID for grouping related messages"
+                    },
+                    "intent": {
+                        "type": "string",
+                        "description": "Message intent",
+                        "enum": ["request", "inform", "response"]
                     }
                 },
                 "required": ["target_id", "message"]
@@ -72,13 +100,20 @@ impl Tool for SendMessage {
             return Err(ToolError::BudgetExhausted(from_id));
         }
 
+        let intent = match args.intent.as_deref() {
+            Some("inform") => PeerIntent::Inform,
+            Some("response") => PeerIntent::Response,
+            _ => PeerIntent::Request,
+        };
+
+        let msg_id = NEXT_MSG_ID.fetch_add(1, Ordering::Relaxed);
         let msg = PeerMessage {
-            id: NEXT_MSG_ID.fetch_add(1, Ordering::Relaxed),
-            thread_id: 0,
+            id: msg_id,
+            thread_id: args.thread_id.unwrap_or(0),
             from: from_id,
             to: args.target_id,
-            intent: PeerIntent::Request,
-            reply_to: None,
+            intent,
+            reply_to: args.reply_to,
             content: args.message,
         };
 
@@ -96,6 +131,12 @@ impl Tool for SendMessage {
                 source,
             })?;
 
-        Ok(format!("Message sent to agent {}", args.target_id))
+        let output = SendMessageOutput {
+            message_id: msg_id,
+            status: format!("Message sent to agent {}", args.target_id),
+        };
+        serde_json::to_string(&output).map_err(|e| {
+            ToolError::Orchestrate(format!("failed to serialize output: {e}"))
+        })
     }
 }

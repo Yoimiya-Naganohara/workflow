@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { marked } from "marked";
+import { createHighlighter } from "shiki";
+import type { Highlighter } from "shiki";
 import type {
     AgentId,
     AgentInfo,
@@ -45,11 +47,32 @@ class AppState {
 
     #unlisten: (() => void) | null = null;
 
+    #highlighter: Highlighter | null = null;
+    #shikiTheme = $state<"github-dark-default" | "github-light-default">("github-dark-default");
+    #renderSeed = $state(0);
     #htmlCache = new Map<string, string>();
 
     chatItems: ChatItem[] = $derived.by(() => {
+        const _theme = this.#shikiTheme;
+        const _seed = this.#renderSeed;
+        void _theme;
+        void _seed;
+
+        let lastTextIdx = -1;
+        for (let i = this.messages.length - 1; i >= 0; i--) {
+            if (this.messages[i].type === "text") {
+                lastTextIdx = i;
+                break;
+            }
+        }
+        const isStreaming = lastTextIdx >= 0 && this.running;
+
         return this.messages.map((m, i) => {
             if (m.type === "text") {
+                const streaming = isStreaming && i === lastTextIdx;
+                if (streaming) {
+                    return { id: i, type: "assistant", text: m.text, streaming };
+                }
                 let html = this.#htmlCache.get(m.text);
                 if (html === undefined) {
                     try {
@@ -314,23 +337,78 @@ class AppState {
     };
 
     init = () => {
-		this.loadUserConfig().then(async () => {
-			if (
-				this.selectedProvider &&
-				this.selectedModel &&
-				this.settingsApiKey &&
-				!this.configured
-			) {
-				this.configureRuntime(
-					this.selectedProvider,
-					this.settingsApiKey,
-					this.selectedModel,
-				);
-			}
-		});
-		this.loadRoles();
-		this.pull(null);
-		this.loadProviders();
+        createHighlighter({
+            themes: ["github-dark-default", "github-light-default"],
+            langs: [
+                "javascript", "typescript", "python", "rust", "json", "html",
+                "css", "bash", "sql", "markdown", "yaml", "xml", "toml",
+                "go", "ruby", "java", "c", "cpp", "php", "diff", "graphql",
+                "ini", "kotlin", "lua", "makefile", "perl", "r", "scala",
+                "shell", "swift", "svelte", "dockerfile", "solidity", "zig",
+            ],
+        }).then((hl) => {
+            this.#highlighter = hl;
+            const renderer = new marked.Renderer();
+            renderer.code = ({ text, lang }) => {
+                if (this.#highlighter) {
+                    try {
+                        return this.#highlighter.codeToHtml(text, {
+                            lang: lang || "text",
+                            theme: this.#shikiTheme,
+                        });
+                    } catch {
+                        /* fall through */
+                    }
+                }
+                const escaped = text
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;");
+                return `<pre><code>${escaped}</code></pre>`;
+            };
+            marked.setOptions({ renderer });
+            this.#htmlCache.clear();
+            this.#renderSeed++;
+        }).catch(() => {
+            /* shiki unavailable — markdown renders without highlighting */
+        });
+
+        this.loadUserConfig().then(async () => {
+            if (
+                this.selectedProvider &&
+                this.selectedModel &&
+                this.settingsApiKey &&
+                !this.configured
+            ) {
+                this.configureRuntime(
+                    this.selectedProvider,
+                    this.settingsApiKey,
+                    this.selectedModel,
+                );
+            }
+        });
+        this.loadRoles();
+        this.pull(null);
+        this.loadProviders();
+
+        const updateTheme = () => {
+            const isDark = document.documentElement.classList.contains("dark");
+            const newTheme = isDark
+                ? "github-dark-default"
+                : "github-light-default";
+            if (this.#shikiTheme !== newTheme) {
+                this.#shikiTheme = newTheme;
+                this.#htmlCache.clear();
+                this.#renderSeed++;
+            }
+        };
+        updateTheme();
+        const observer = new MutationObserver(updateTheme);
+        observer.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ["class"],
+        });
+
         listen<UiEvent>("workflow:event", (event) => {
             const entry: LogEntry = { ts: Date.now(), event: event.payload };
             this.eventLog.push(entry);

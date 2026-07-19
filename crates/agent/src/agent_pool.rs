@@ -15,6 +15,7 @@ pub struct AgentInfo {
     pub id: AgentId,
     pub role: String,
     pub current_task: Option<String>,
+    pub state: String,
 }
 
 #[derive(Clone)]
@@ -103,6 +104,7 @@ impl AgentPool {
                 id: agent.id(),
                 role: agent.role().to_owned(),
                 current_task: agent.current_task().read().await.clone(),
+                state: agent.state().read().await.to_string(),
             });
         }
         out

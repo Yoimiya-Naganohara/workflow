@@ -103,9 +103,6 @@ struct Budget {
 }
 impl Budget {
     pub fn new(send_message_budget: u8) -> Self {
-        if send_message_budget == u8::MAX {
-            panic!("NOT ALLOWED VALUE {}", send_message_budget)
-        }
         Self {
             send_message_budget,
             used_send_message_budget: 0,

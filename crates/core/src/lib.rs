@@ -12,6 +12,7 @@ use rig::{
     providers::openai::CompletionsClient, tool::server::ToolServer,
     vector_store::VectorStoreIndexDyn,
 };
+use workflow_tool::ToolError;
 use serde::Serialize;
 use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
 pub use workflow_agent::agent_pool::AgentInfo;
@@ -37,17 +38,25 @@ struct RolePoolChecker(Arc<RwLock<RolePool>>);
 
 impl RoleChecker for RolePoolChecker {
     fn exists(&self, role: &str) -> bool {
-        self.0.read().unwrap().get(&role.to_string()).is_some()
+        self.0
+            .read()
+            .ok()
+            .map(|guard| guard.get(&role.to_string()).is_some())
+            .unwrap_or(false)
     }
 
     fn list_roles(&self) -> Vec<String> {
         self.0
             .read()
-            .unwrap()
-            .list()
-            .into_iter()
-            .map(|r| r.name().to_owned())
-            .collect()
+            .ok()
+            .map(|guard| {
+                guard
+                    .list()
+                    .into_iter()
+                    .map(|r| r.name().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -60,18 +69,23 @@ struct CreateRoleArgs {
 struct CreateRole {
     roles: Arc<RwLock<RolePool>>,
     events: broadcast::Sender<WorkflowEvent>,
+    flag: Arc<AtomicBool>,
 }
 
 impl CreateRole {
-    fn new(roles: Arc<RwLock<RolePool>>, events: broadcast::Sender<WorkflowEvent>) -> Self {
-        Self { roles, events }
+    fn new(
+        roles: Arc<RwLock<RolePool>>,
+        events: broadcast::Sender<WorkflowEvent>,
+        flag: Arc<AtomicBool>,
+    ) -> Self {
+        Self { roles, events, flag }
     }
 }
 
 impl rig::tool::Tool for CreateRole {
     const NAME: &'static str = "create_role";
 
-    type Error = std::convert::Infallible;
+    type Error = ToolError;
     type Args = CreateRoleArgs;
     type Output = String;
 
@@ -101,13 +115,17 @@ impl rig::tool::Tool for CreateRole {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let role_id = RoleId::from(args.name.clone());
         let role = Role::new(
-            args.name,
+            args.name.clone(),
             format!("I'm the {role_id}.\r\n{}", args.definition),
             vec![],
         );
-        self.roles.write().unwrap().add(role_id, role);
+        self.roles
+            .write()
+            .map_err(|e| ToolError::Orchestrate(format!("lock poisoned: {e}")))?
+            .add(role_id, role);
+        self.flag.store(false, Ordering::Relaxed);
         let _ = self.events.send(WorkflowEvent::RolesChanged);
-        Ok("Role created successfully".to_string())
+        Ok(format!("Role '{}' created successfully", args.name))
     }
 }
 
@@ -320,6 +338,7 @@ impl Runtime {
                 rig::tool::ToolSet::from_tools_boxed(vec![Box::new(CreateRole::new(
                     Arc::clone(&roles),
                     events.clone(),
+                    Arc::clone(&dt_flag),
                 ))
                     as Box<dyn rig::tool::ToolDyn>]),
             )
@@ -374,6 +393,7 @@ impl Runtime {
             id,
             role: agent.role().to_owned(),
             current_task: None,
+            state: agent.state().read().await.to_string(),
         };
         self.agent_pool
             .add_agent(agent)
@@ -526,6 +546,7 @@ impl Runtime {
                             id: agent.id(),
                             role: agent.role().to_owned(),
                             current_task: agent.current_task().read().await.clone(),
+                            state: agent.state().read().await.to_string(),
                         };
                         let _ = runtime.events.send(WorkflowEvent::AgentAdded(info));
                     }
