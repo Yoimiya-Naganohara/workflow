@@ -142,7 +142,7 @@
 					</Card>
 				{/if}
 
-				<div class="shrink-0 bg-card border-t border-border p-3">
+				<div class="shrink-0 px-3 pb-3">
 					<ChatInput
 						bind:value={app.input}
 						disabled={app.selected == null}
