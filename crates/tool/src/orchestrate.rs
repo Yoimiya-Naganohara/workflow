@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,6 @@ pub struct TaskAssignment {
     pub task: String,
     pub wave: usize,
     pub agent_id: AgentId,
-    pub result: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -42,13 +41,53 @@ pub struct ExecutionPlan {
 
 pub type AgentFactory = Arc<dyn Fn(AgentId, String) -> Arc<Agent> + Send + Sync>;
 
-struct WaveRunner {
-    pool: Arc<AgentPool>,
-    next_id: Arc<AtomicU32>,
-    factory: AgentFactory,
+struct PreAllocated {
+    agent: Arc<Agent>,
+    task_id: String,
+    task: String,
+    depend_on: Vec<String>,
 }
 
-impl WaveRunner {
+pub struct Orchestrate {
+    pool: Arc<AgentPool>,
+    next_id: Arc<std::sync::atomic::AtomicU32>,
+    factory: AgentFactory,
+    roles: Arc<dyn RoleChecker>,
+    create_role_flag: Arc<AtomicBool>,
+}
+
+impl Orchestrate {
+    pub fn new(
+        pool: Arc<AgentPool>,
+        factory: AgentFactory,
+        roles: Arc<dyn RoleChecker>,
+        create_role_flag: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            pool,
+            next_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
+            factory,
+            roles,
+            create_role_flag,
+        }
+    }
+
+    pub fn with_id_allocator(
+        pool: Arc<AgentPool>,
+        factory: AgentFactory,
+        next_id: Arc<std::sync::atomic::AtomicU32>,
+        roles: Arc<dyn RoleChecker>,
+        create_role_flag: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            pool,
+            next_id,
+            factory,
+            roles,
+            create_role_flag,
+        }
+    }
+
     async fn get_or_create_agent(
         &self,
         role: &str,
@@ -75,47 +114,6 @@ impl WaveRunner {
     }
 }
 
-pub struct Orchestrate {
-    pool: Arc<AgentPool>,
-    next_id: Arc<AtomicU32>,
-    factory: AgentFactory,
-    roles: Arc<dyn RoleChecker>,
-    create_role_flag: Arc<AtomicBool>,
-}
-
-impl Orchestrate {
-    pub fn new(
-        pool: Arc<AgentPool>,
-        factory: AgentFactory,
-        roles: Arc<dyn RoleChecker>,
-        create_role_flag: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
-            pool,
-            next_id: Arc::new(AtomicU32::new(1)),
-            factory,
-            roles,
-            create_role_flag,
-        }
-    }
-
-    pub fn with_id_allocator(
-        pool: Arc<AgentPool>,
-        factory: AgentFactory,
-        next_id: Arc<AtomicU32>,
-        roles: Arc<dyn RoleChecker>,
-        create_role_flag: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
-            pool,
-            next_id,
-            factory,
-            roles,
-            create_role_flag,
-        }
-    }
-}
-
 impl Tool for Orchestrate {
     const NAME: &'static str = "orchestrate";
 
@@ -128,9 +126,10 @@ impl Tool for Orchestrate {
             name: "orchestrate".to_string(),
             description: "Plan and dispatch multi-agent tasks. Accepts a DAG of \
                 tasks with ids, roles, task descriptions, and dependencies. \
-                Creates agents for each role, assigns tasks in wave order \
-                (parallel waves where possible), and begins execution. \
-                Returns the execution plan with agent assignments."
+                Assigns agents by role (reuses idle agents or creates new ones), \
+                executes tasks in wave order (parallel waves where possible), \
+                and returns the execution plan with assigned agent IDs. \
+                Execution continues in the background; results arrive via events."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -175,8 +174,6 @@ impl Tool for Orchestrate {
             return Err(ToolError::Orchestrate("task list is empty".into()));
         }
 
-        // Validate that all requested roles exist. If any are missing, enable the
-        // create_role tool and return suggestions so the model can create one.
         let available = self.roles.list_roles();
         for task in &tasks {
             if !self.roles.exists(&task.role) {
@@ -291,61 +288,57 @@ impl Tool for Orchestrate {
         }
         critical_path.reverse();
 
-        // ── Build plan (empty results) ────────────────────────
+        // ── Allocate agents synchronously ─────────────────────
+        let mut preallocated: Vec<Vec<PreAllocated>> = Vec::new();
         let mut plan_waves: Vec<Vec<TaskAssignment>> = Vec::new();
+        let mut all_reserved = HashSet::new();
+
         for wave in &waves {
-            let mut assigned = Vec::new();
+            let mut wave_pre = Vec::new();
+            let mut assignments = Vec::new();
+
             for &idx in wave {
                 let task = &tasks[idx];
-                assigned.push(TaskAssignment {
+                let agent = self
+                    .get_or_create_agent(&task.role, &all_reserved)
+                    .await?;
+                let agent_id = agent.id();
+                all_reserved.insert(agent_id);
+
+                wave_pre.push(PreAllocated {
+                    agent,
+                    task_id: task.id.clone(),
+                    task: task.task.clone(),
+                    depend_on: task.depend_on.clone(),
+                });
+
+                assignments.push(TaskAssignment {
                     id: task.id.clone(),
                     role: task.role.clone(),
                     task: task.task.clone(),
                     wave: id_to_wave[idx],
-                    agent_id: 0,
-                    result: String::new(),
+                    agent_id,
                 });
             }
-            plan_waves.push(assigned);
+
+            preallocated.push(wave_pre);
+            plan_waves.push(assignments);
         }
 
         let task_count = tasks.len();
 
         // ── Spawn background execution ────────────────────────
-        let runner = WaveRunner {
-            pool: self.pool.clone(),
-            next_id: self.next_id.clone(),
-            factory: self.factory.clone(),
-        };
-        let waves_owned = waves.clone();
-        let tasks_owned = tasks.clone();
-
         tokio::spawn(async move {
             let mut task_results: HashMap<String, String> = HashMap::new();
 
-            for wave in &waves_owned {
-                let mut reserved = HashSet::new();
+            for wave in preallocated {
                 let mut completions = JoinSet::new();
 
-                for &idx in wave {
-                    let task = &tasks_owned[idx];
-                    let agent = match runner
-                        .get_or_create_agent(&task.role, &reserved)
-                        .await
-                    {
-                        Ok(a) => a,
-                        Err(e) => {
-                            eprintln!("orchestrate: failed to get/create agent for task '{}': {e}", task.id);
-                            continue;
-                        }
-                    };
-                    let agent_id = agent.id();
-                    reserved.insert(agent_id);
-
-                    let prompt = if task.depend_on.is_empty() {
-                        task.task.clone()
+                for t in &wave {
+                    let prompt = if t.depend_on.is_empty() {
+                        t.task.clone()
                     } else {
-                        let dependency_context = task
+                        let dependency_context = t
                             .depend_on
                             .iter()
                             .filter_map(|dependency| {
@@ -357,17 +350,20 @@ impl Tool for Orchestrate {
                             .join("\n\n");
                         format!(
                             "{}\n\nDependency results:\n{}",
-                            task.task, dependency_context
+                            t.task, dependency_context
                         )
                     };
 
-                    let mut receiver = agent.receiver();
-                    if let Err(e) = agent.send(Message::User(prompt)).await {
-                        eprintln!("orchestrate: failed to dispatch task '{}': {e}", task.id);
+                    let mut receiver = t.agent.receiver();
+                    if let Err(e) = t.agent.send(Message::User(prompt)).await {
+                        eprintln!(
+                            "orchestrate: failed to dispatch task '{}': {e}",
+                            t.task_id
+                        );
                         continue;
                     }
 
-                    let task_id = task.id.clone();
+                    let task_id = t.task_id.clone();
                     completions.spawn(async move {
                         let mut output = String::new();
                         loop {
@@ -421,8 +417,6 @@ impl Tool for Orchestrate {
     }
 }
 
-/// Score available roles by word overlap with the requested name.
-/// Returns up to 3 suggestions sorted by relevance.
 fn suggest_roles(requested: &str, available: &[String]) -> Vec<String> {
     let requested_lower = requested.to_lowercase();
     let requested_words: Vec<&str> = requested_lower
