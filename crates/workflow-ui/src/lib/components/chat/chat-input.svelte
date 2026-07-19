@@ -91,9 +91,9 @@
 					type="button"
 					size="icon-xs"
 					onclick={onStop}
-					class="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-xs"
+					class="rounded-full bg-foreground text-background hover:bg-foreground/90 shadow-xs"
 				>
-					<Square class="size-4" />
+					<Square class="size-3 fill-accent" />
 				</Button>
 			{:else if value.trim() && !disabled && pendingAction?.type !== "send"}
 				<Button
