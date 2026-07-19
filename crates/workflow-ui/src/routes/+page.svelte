@@ -149,7 +149,9 @@
 						bind:value={app.input}
 						disabled={app.selected == null}
 						pendingAction={app.pendingAction}
+						showStop={app.running}
 						onSubmit={() => app.submit()}
+						onStop={() => app.stop()}
 					/>
 				</div>
 			</div>

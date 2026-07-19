@@ -16,7 +16,7 @@ use serde::Serialize;
 use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
 pub use workflow_agent::agent_pool::AgentInfo;
 use workflow_agent::{
-    Agent, AgentEvent, AgentId, Message,
+    Agent, AgentEvent, AgentId, ControlMessage, Message,
     agent_pool::{AgentPool, AgentPoolEvent},
 };
 use workflow_config::*;
@@ -406,6 +406,21 @@ impl Runtime {
             .map_err(|error| RuntimeError::SendMessage {
                 agent_id: id,
                 message: error.to_string(),
+            })
+    }
+
+    pub async fn stop_agent(&self, id: AgentId) -> Result<(), RuntimeError> {
+        let agent = self
+            .agent_pool
+            .get_agent(&id)
+            .await
+            .ok_or(RuntimeError::AgentNotFound(id))?;
+        agent
+            .control(ControlMessage::Hibernate)
+            .and_then(|_| agent.control(ControlMessage::Resume))
+            .map_err(|_| RuntimeError::SendMessage {
+                agent_id: id,
+                message: "failed to send stop signal".to_string(),
             })
     }
 

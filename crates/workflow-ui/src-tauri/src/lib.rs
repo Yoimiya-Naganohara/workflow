@@ -210,6 +210,23 @@ async fn send(
 }
 
 #[tauri::command]
+async fn stop_agent(
+    state: State<'_, AppState>,
+    target: u32,
+) -> Result<(), String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    runtime
+        .stop_agent(target)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn create_agent(
     state: State<'_, AppState>,
     role_name: String,
@@ -447,6 +464,7 @@ pub fn run() {
             configure_runtime,
             snapshot,
             send,
+            stop_agent,
             create_agent,
             remove_agent,
             get_roles,

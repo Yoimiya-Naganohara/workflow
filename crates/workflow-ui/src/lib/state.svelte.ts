@@ -104,6 +104,22 @@ class AppState {
         return map;
     });
 
+    running = $derived(
+        this.selected != null &&
+            (this.agentStatuses.get(this.selected) === "thinking" ||
+                this.agentStatuses.get(this.selected) === "responding" ||
+                this.agentStatuses.get(this.selected) === "running-tool"),
+    );
+
+    stop = async () => {
+        if (this.selected == null) return;
+        try {
+            await invoke("stop_agent", { target: this.selected });
+        } catch (e) {
+            this.error = `stop: ${e}`;
+        }
+    };
+
     openDialog = (id: DialogId) => {
         this.dialog = id;
     };

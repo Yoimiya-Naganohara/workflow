@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { cn } from "$lib/utils.js";
 	import { Button } from "$lib/components/ui/button";
-	import { Plus, Mic, ArrowUp } from "@lucide/svelte";
+	import { Plus, Mic, ArrowUp, Square } from "@lucide/svelte";
 	import type { PendingAction } from "$lib/types";
 
 	let {
@@ -9,11 +9,15 @@
 		disabled,
 		pendingAction,
 		onSubmit,
+		showStop = false,
+		onStop,
 	}: {
 		value?: string;
 		disabled: boolean;
 		pendingAction: PendingAction;
 		onSubmit: () => void;
+		showStop?: boolean;
+		onStop?: () => void;
 	} = $props();
 
 	let focused = $state(false);
@@ -82,7 +86,16 @@
 			>
 				<Mic class="size-4" />
 			</Button>
-			{#if value.trim() && !disabled && pendingAction?.type !== "send"}
+			{#if showStop}
+				<Button
+					type="button"
+					size="icon-xs"
+					onclick={onStop}
+					class="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-xs"
+				>
+					<Square class="size-4" />
+				</Button>
+			{:else if value.trim() && !disabled && pendingAction?.type !== "send"}
 				<Button
 					type="submit"
 					size="icon-xs"
