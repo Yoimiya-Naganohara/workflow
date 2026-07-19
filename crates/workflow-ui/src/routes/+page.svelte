@@ -128,13 +128,15 @@
 		</div>
 
 		<div class="flex flex-1 min-h-0">
-			<div class="flex flex-col flex-1 min-w-0 min-h-0">
-				<ExecutionTimeline
-					items={app.chatItems}
-					empty={app.messages.length === 0}
-					agentId={app.selected}
-					agentRole={app.agents.find(a => a.id === app.selected)?.role}
-				/>
+			<div class="flex flex-col flex-1 min-w-0 min-h-0" class:justify-center={app.messages.length === 0}>
+				{#if app.messages.length > 0}
+					<ExecutionTimeline
+						items={app.chatItems}
+						empty={false}
+						agentId={app.selected}
+						agentRole={app.agents.find(a => a.id === app.selected)?.role}
+					/>
+				{/if}
 
 				{#if app.error}
 					<Card class="shrink-0 mx-3 mb-2 px-3 py-2 bg-destructive/5 border-destructive/20 border-dashed">
