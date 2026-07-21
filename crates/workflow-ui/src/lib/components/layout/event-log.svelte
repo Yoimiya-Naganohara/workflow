@@ -13,6 +13,7 @@
 		switch (e.type) {
 			case "agent_added": return `agent ${e.agent_id} added`;
 			case "agent_removed": return `agent ${e.agent_id} removed`;
+			case "agent_stopped": return `agent ${e.agent_id} stopped`;
 			case "agent_output": return `agent ${e.agent_id} output`;
 			case "transcript_changed": return `agent ${e.agent_id} transcript changed`;
 			case "roles_changed": return "roles changed";
@@ -25,6 +26,7 @@
 		switch (entry.event.type) {
 			case "agent_added": return "text-emerald-500";
 			case "agent_removed": return "text-destructive";
+			case "agent_stopped": return "text-muted-foreground";
 			case "agent_output": return "text-amber-500";
 			case "transcript_changed": return "text-sky-500";
 			case "roles_changed": return "text-violet-500";

@@ -44,8 +44,8 @@ describe("state", () => {
 
 	it("agentStatuses returns idle for agents without current_task", () => {
 		state.agents.push(
-			{ id: 1, role: "planner", current_task: null },
-			{ id: 2, role: "executor", current_task: "build" },
+			{ id: 1, role: "planner", current_task: null, state: "idle" },
+			{ id: 2, role: "executor", current_task: "build", state: "thinking" },
 		);
 		const statuses = state.agentStatuses;
 		expect(statuses.get(1)).toBe("idle");
@@ -54,7 +54,7 @@ describe("state", () => {
 
 	it("agentStatuses reflects last message state", () => {
 		state.selected = 1;
-		state.agents.push({ id: 1, role: "planner", current_task: null });
+		state.agents.push({ id: 1, role: "planner", current_task: null, state: "idle" });
 		state.messages.push({ type: "tool", text: "search", result: null });
 
 		expect(state.agentStatuses.get(1)).toBe("running-tool");
