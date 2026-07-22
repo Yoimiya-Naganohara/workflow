@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     num::NonZeroUsize,
     sync::{
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
         atomic::{AtomicBool, AtomicU32, Ordering},
     },
 };
@@ -14,7 +14,7 @@ use rig::{
 };
 use workflow_tool::ToolError;
 use serde::Serialize;
-use tokio::sync::{Mutex, OnceCell, RwLock as AsyncRwLock, broadcast};
+use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
 pub use workflow_agent::agent_pool::AgentInfo;
 use workflow_agent::{
     Agent, AgentEvent, AgentId, ControlMessage, Message,
@@ -344,7 +344,9 @@ impl Runtime {
                     as Box<dyn rig::tool::ToolDyn>]),
             )
             .run();
-        *handle_cell.blocking_lock() = Some(tool_handle);
+        *handle_cell
+            .lock()
+            .expect("handle_cell lock poisoned") = Some(tool_handle);
         Ok(Self {
             agent_pool,
             roles,
@@ -494,7 +496,11 @@ impl Runtime {
 
     fn attach_agent(self: &Arc<Self>, agent: Arc<Agent>) {
         let id = agent.id();
-        if !self.observed_agents.blocking_lock().insert(id)
+        if !self
+            .observed_agents
+            .lock()
+            .expect("observed_agents lock poisoned")
+            .insert(id)
         {
             return;
         }
@@ -559,7 +565,11 @@ impl Runtime {
                         let _ = runtime.events.send(WorkflowEvent::AgentAdded(info));
                     }
                     AgentPoolEvent::Removed(id) => {
-                        runtime.observed_agents.lock().await.remove(&id);
+                        runtime
+                            .observed_agents
+                            .lock()
+                            .expect("observed_agents lock poisoned")
+                            .remove(&id);
                         runtime.messages.write().await.remove(&id);
                         let _ = runtime.events.send(WorkflowEvent::AgentRemoved(id));
                     }
@@ -707,7 +717,8 @@ fn make_agent_factory(
     let model = model.to_owned();
     Arc::new(move |id, requested_role| {
         let handle = handle_cell
-            .blocking_lock()
+            .lock()
+            .expect("handle_cell lock poisoned")
             .clone()
             .expect("tool server is initialized before agents are created");
         let role = {
