@@ -95,7 +95,7 @@ impl Tool for SendMessage {
         // Charge the sender's per-turn budget before doing any routing work.
         // A sender outside the pool cannot be charged, so it is allowed through.
         if let Some(sender) = self.pool.get_agent(&from_id).await
-            && !sender.request_message_budget()
+            && !sender.request_message_budget().await
         {
             return Err(ToolError::BudgetExhausted(from_id));
         }

@@ -545,14 +545,15 @@ mod tests {
 
     #[test]
     fn test_merge_configs_empty() {
-        let result = merge_configs(&[]).unwrap();
+        let result = merge_configs(&[]).expect("merge of empty sources should succeed");
         assert!(result.is_empty());
     }
 
     #[test]
     fn test_merge_configs_defaults_only() {
         let defaults = DefaultConfigSource;
-        let result = merge_configs(&[&defaults]).unwrap();
+        let result = merge_configs(&[&defaults])
+            .expect("merge of defaults should succeed");
         assert_eq!(result.len(), 3);
     }
 
@@ -562,7 +563,8 @@ mod tests {
         let higher = FileConfigSource {
             path: PathBuf::from("/nonexistent"),
         };
-        let result = merge_configs(&[&defaults, &higher]).unwrap();
+        let result = merge_configs(&[&defaults, &higher])
+            .expect("merge with nonexistent file should succeed");
         assert_eq!(result.len(), 3);
     }
 
@@ -577,10 +579,18 @@ mod tests {
     #[test]
     fn test_default_source_providers() {
         let source = DefaultConfigSource;
-        let configs = source.load().unwrap();
-        let openai = configs.iter().find(|c| c.id == "openai").unwrap();
+        let configs = source
+            .load()
+            .expect("default config source should load");
+        let openai = configs
+            .iter()
+            .find(|c| c.id == "openai")
+            .expect("defaults should include openai");
         assert!(openai.base_url.contains("openai.com"));
-        let ollama = configs.iter().find(|c| c.id == "ollama").unwrap();
+        let ollama = configs
+            .iter()
+            .find(|c| c.id == "ollama")
+            .expect("defaults should include ollama");
         assert_eq!(ollama.protocol, ProviderProtocol::Ollama);
     }
 }

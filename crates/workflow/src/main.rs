@@ -3,12 +3,16 @@ use std::{
     sync::Arc,
 };
 
+use anyhow::Context;
 use workflow_core::Runtime;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let runtime = Arc::new(Runtime::new());
-    runtime.initialize().await.unwrap();
+    runtime
+        .initialize()
+        .await
+        .context("failed to initialize runtime")?;
 
     let root_id = runtime
         .snapshot(None)
@@ -29,11 +33,13 @@ async fn main() {
 
     loop {
         let mut input = String::new();
-        if stdin().read_line(&mut input).unwrap() == 0 {
+        if stdin().read_line(&mut input)? == 0 {
             break;
         }
         if runtime.send_message(root_id, input).await.is_err() {
             break;
         }
     }
+
+    Ok(())
 }

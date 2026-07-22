@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     num::NonZeroUsize,
     sync::{
-        Arc, Mutex, RwLock,
+        Arc, RwLock,
         atomic::{AtomicBool, AtomicU32, Ordering},
     },
 };
@@ -14,7 +14,7 @@ use rig::{
 };
 use workflow_tool::ToolError;
 use serde::Serialize;
-use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
+use tokio::sync::{Mutex, OnceCell, RwLock as AsyncRwLock, broadcast};
 pub use workflow_agent::agent_pool::AgentInfo;
 use workflow_agent::{
     Agent, AgentEvent, AgentId, ControlMessage, Message,
@@ -185,7 +185,8 @@ impl Default for RuntimeConfig {
                 ..Default::default()
             },
             model: "big-pickle".to_owned(),
-            agent_capacity: NonZeroUsize::new(DEFAULT_AGENT_CAPACITY).unwrap(),
+            agent_capacity: NonZeroUsize::new(DEFAULT_AGENT_CAPACITY)
+                .expect("DEFAULT_AGENT_CAPACITY must be non-zero"),
         }
     }
 }
@@ -343,7 +344,7 @@ impl Runtime {
                     as Box<dyn rig::tool::ToolDyn>]),
             )
             .run();
-        *handle_cell.lock().unwrap() = Some(tool_handle);
+        *handle_cell.blocking_lock() = Some(tool_handle);
         Ok(Self {
             agent_pool,
             roles,
@@ -361,7 +362,10 @@ impl Runtime {
         self.initialized
             .get_or_try_init(|| async {
                 let weak = Arc::downgrade(self);
-                *self.observer.write().unwrap() = Some(Arc::new(move |agent| {
+                *self
+                    .observer
+                    .write()
+                    .expect("observer write lock poisoned") = Some(Arc::new(move |agent| {
                     if let Some(runtime) = weak.upgrade() {
                         runtime.attach_agent(agent);
                     }
@@ -470,7 +474,7 @@ impl Runtime {
     pub fn list_roles(&self) -> Vec<RoleInfo> {
         self.roles
             .read()
-            .unwrap()
+            .expect("roles read lock poisoned")
             .list()
             .into_iter()
             .map(role_info)
@@ -478,7 +482,10 @@ impl Runtime {
     }
 
     pub fn add_role(&self, name: String, definition: String) -> Vec<RoleInfo> {
-        self.roles.write().unwrap().add(
+        self.roles
+            .write()
+            .expect("roles write lock poisoned")
+            .add(
             RoleId::from(name.clone()),
             Role::new(name, definition, Vec::new()),
         );
@@ -487,7 +494,8 @@ impl Runtime {
 
     fn attach_agent(self: &Arc<Self>, agent: Arc<Agent>) {
         let id = agent.id();
-        if !self.observed_agents.lock().unwrap().insert(id) {
+        if !self.observed_agents.blocking_lock().insert(id)
+        {
             return;
         }
 
@@ -551,7 +559,7 @@ impl Runtime {
                         let _ = runtime.events.send(WorkflowEvent::AgentAdded(info));
                     }
                     AgentPoolEvent::Removed(id) => {
-                        runtime.observed_agents.lock().unwrap().remove(&id);
+                        runtime.observed_agents.lock().await.remove(&id);
                         runtime.messages.write().await.remove(&id);
                         let _ = runtime.events.send(WorkflowEvent::AgentRemoved(id));
                     }
@@ -699,12 +707,11 @@ fn make_agent_factory(
     let model = model.to_owned();
     Arc::new(move |id, requested_role| {
         let handle = handle_cell
-            .lock()
-            .unwrap()
+            .blocking_lock()
             .clone()
             .expect("tool server is initialized before agents are created");
         let role = {
-            let roles = roles.read().unwrap();
+            let roles = roles.read().expect("roles read lock poisoned");
             roles
                 .get(&RoleId::from(requested_role.clone()))
                 .or_else(|| roles.get(&RoleId::default()))
@@ -728,7 +735,11 @@ fn make_agent_factory(
             ))
             .build();
         let agent = Arc::new(Agent::new(id, agent_role, rig_agent));
-        if let Some(observer) = observer.read().unwrap().clone() {
+        if let Some(observer) = observer
+            .read()
+            .expect("observer read lock poisoned")
+            .clone()
+        {
             observer(Arc::clone(&agent));
         }
         agent
@@ -743,8 +754,14 @@ mod tests {
     async fn initialization_is_idempotent() {
         let runtime = Arc::new(Runtime::new());
 
-        runtime.initialize().await.unwrap();
-        runtime.initialize().await.unwrap();
+        runtime
+            .initialize()
+            .await
+            .expect("first initialization should succeed");
+        runtime
+            .initialize()
+            .await
+            .expect("second initialization should be idempotent");
 
         let agents = runtime.list_agents().await;
         assert_eq!(agents.len(), 1);
@@ -755,10 +772,19 @@ mod tests {
     #[tokio::test]
     async fn manual_agents_share_the_runtime_id_allocator() {
         let runtime = Arc::new(Runtime::new());
-        runtime.initialize().await.unwrap();
+        runtime
+            .initialize()
+            .await
+            .expect("initialization should succeed");
 
-        let executor = runtime.create_agent("executor".to_owned()).await.unwrap();
-        let planner = runtime.create_agent("planner".to_owned()).await.unwrap();
+        let executor = runtime
+            .create_agent("executor".to_owned())
+            .await
+            .expect("should create executor agent");
+        let planner = runtime
+            .create_agent("planner".to_owned())
+            .await
+            .expect("should create planner agent");
 
         assert_eq!(executor.id, 1);
         assert_eq!(executor.role, "executor");

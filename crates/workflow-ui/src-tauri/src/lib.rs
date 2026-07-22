@@ -1,5 +1,6 @@
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
@@ -77,7 +78,7 @@ fn entry_from_provider(p: &workflow_providers::ProviderInfo) -> ProviderEntry {
 #[tauri::command]
 async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderEntry>, String> {
     {
-        let guard = state.service.lock().map_err(|e| e.to_string())?;
+        let guard = state.service.lock().await;
         let entries: Vec<ProviderEntry> = guard
             .store()
             .providers()
@@ -98,7 +99,7 @@ async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderEntry>
         .iter()
         .map(entry_from_provider)
         .collect();
-    let mut guard = state.service.lock().map_err(|e| e.to_string())?;
+    let mut guard = state.service.lock().await;
     *guard = service;
     Ok(entries)
 }
@@ -113,7 +114,7 @@ async fn fetch_providers(state: State<'_, AppState>) -> Result<Vec<ProviderEntry
         .iter()
         .map(entry_from_provider)
         .collect();
-    let mut guard = state.service.lock().map_err(|e| e.to_string())?;
+    let mut guard = state.service.lock().await;
     *guard = service;
     Ok(entries)
 }
@@ -126,20 +127,14 @@ async fn configure_runtime(
     api_key: String,
     model: String,
 ) -> Result<(), String> {
-    let needs_init = state
-        .service
-        .lock()
-        .map_err(|e| e.to_string())?
-        .store()
-        .providers()
-        .is_empty();
+    let needs_init = state.service.lock().await.store().providers().is_empty();
     if needs_init {
         let mut svc = ProviderService::new();
         svc.initialize().await.map_err(|e| e.to_string())?;
-        *state.service.lock().map_err(|e| e.to_string())? = svc;
+        *state.service.lock().await = svc;
     }
     let base_url = {
-        let guard = state.service.lock().map_err(|e| e.to_string())?;
+        let guard = state.service.lock().await;
         guard
             .store()
             .providers()
@@ -162,11 +157,12 @@ async fn configure_runtime(
     let runtime_config = RuntimeConfig {
         provider: provider_config,
         model,
-        agent_capacity: std::num::NonZeroUsize::new(100).unwrap(),
+        agent_capacity: std::num::NonZeroUsize::new(100)
+            .expect("100 must be non-zero"),
     };
     let runtime = Arc::new(Runtime::try_new(runtime_config).map_err(|e| e.to_string())?);
     spawn_event_bridge(app, Arc::clone(&runtime));
-    *state.runtime.lock().map_err(|e| e.to_string())? = Some(runtime);
+    *state.runtime.lock().await = Some(runtime);
     Ok(())
 }
 
@@ -175,11 +171,7 @@ async fn snapshot(
     state: State<'_, AppState>,
     selected: Option<u32>,
 ) -> Result<RuntimeSnapshot, String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone()
+    let runtime = state.runtime.lock().await.clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime
         .initialize()
@@ -194,11 +186,7 @@ async fn send(
     target: u32,
     text: String,
 ) -> Result<RuntimeSnapshot, String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone()
+    let runtime = state.runtime.lock().await.clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime
         .initialize()
@@ -216,11 +204,7 @@ async fn stop_agent(
     state: State<'_, AppState>,
     target: u32,
 ) -> Result<(), String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone()
+    let runtime = state.runtime.lock().await.clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime
         .stop_agent(target)
@@ -233,11 +217,7 @@ async fn create_agent(
     state: State<'_, AppState>,
     role_name: String,
 ) -> Result<Vec<workflow_core::AgentInfo>, String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone()
+    let runtime = state.runtime.lock().await.clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime
         .initialize()
@@ -255,11 +235,7 @@ async fn remove_agent(
     state: State<'_, AppState>,
     id: u32,
 ) -> Result<Vec<workflow_core::AgentInfo>, String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone()
+    let runtime = state.runtime.lock().await.clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime
         .initialize()
@@ -271,7 +247,7 @@ async fn remove_agent(
 
 #[tauri::command]
 fn get_roles(state: State<'_, AppState>) -> Vec<workflow_core::RoleInfo> {
-    let runtime = match state.runtime.lock().unwrap().clone() {
+    let runtime = match state.runtime.blocking_lock().clone() {
         Some(r) => r,
         None => return Vec::new(),
     };
@@ -350,7 +326,7 @@ fn add_role(
     name: String,
     definition: String,
 ) -> Vec<workflow_core::RoleInfo> {
-    if let Some(runtime) = state.runtime.lock().unwrap().clone() {
+    if let Some(runtime) = state.runtime.blocking_lock().clone() {
         let roles = runtime.add_role(name.clone(), definition.clone());
         let saved: Vec<SavedRole> = roles.iter().map(|r| SavedRole {
             name: r.name.clone(),
@@ -370,7 +346,7 @@ fn add_role(
 
 #[tauri::command]
 fn load_roles(state: State<'_, AppState>) -> Vec<workflow_core::RoleInfo> {
-    if let Some(runtime) = state.runtime.lock().unwrap().clone() {
+    if let Some(runtime) = state.runtime.blocking_lock().clone() {
         let saved = read_saved_roles();
         for role in &saved {
             let existing = runtime.list_roles();
@@ -454,7 +430,7 @@ pub fn run() {
             {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.create_overlay_titlebar();
-                    window.show().unwrap();
+                    let _ = window.show();
                 }
             }
 

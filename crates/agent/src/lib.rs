@@ -10,10 +10,10 @@ use rig::{
 use std::{
     collections::HashMap,
     pin::Pin,
-    sync::{Arc, Mutex as StdMutex},
+    sync::Arc,
 };
 use tokio::sync::{
-    RwLock,
+    Mutex, RwLock,
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel},
 };
 
@@ -58,8 +58,7 @@ pub enum ControlMessage {
 pub enum AgentRunError {
     #[error("agent runtime has already been started")]
     AlreadyStarted,
-    #[error("agent lifecycle state is poisoned")]
-    LifecyclePoisoned,
+
 }
 
 /// Streamed output emitted by an [`Agent`] for an external consumer to handle.
@@ -142,12 +141,12 @@ struct AgentRuntime {
 pub struct Agent {
     id: AgentId,
     role: String,
-    budget: StdMutex<Budget>,
+    budget: Mutex<Budget>,
 
     current_task: Arc<RwLock<Option<String>>>,
     state: Arc<RwLock<AgentState>>,
 
-    runtime: StdMutex<Option<AgentRuntime>>,
+    runtime: Mutex<Option<AgentRuntime>>,
     sender: Sender<Message>,
     controls: UnboundedSender<ControlMessage>,
 
@@ -240,10 +239,10 @@ impl Agent {
             id,
             role,
             // TODO: GET BUDGET FROM THE ROLE
-            budget: StdMutex::new(Budget::new(10)),
+            budget: Mutex::new(Budget::new(10)),
             current_task: Arc::new(RwLock::new(None)),
             state: Arc::new(RwLock::new(AgentState::Idle)),
-            runtime: StdMutex::new(Some(AgentRuntime {
+            runtime: Mutex::new(Some(AgentRuntime {
                 run_fn,
                 inbox,
                 controls: control_inbox,
@@ -273,17 +272,12 @@ impl Agent {
 
     /// Attempt to consume one `send_message` allowance from this turn's
     /// budget. Returns `false` when the budget is exhausted.
-    pub fn request_message_budget(&self) -> bool {
-        self.budget
-            .lock()
-            .map(|mut budget| budget.request_message())
-            .unwrap_or(false)
+    pub async fn request_message_budget(&self) -> bool {
+        self.budget.lock().await.request_message()
     }
 
-    fn reset_budget(&self) {
-        if let Ok(mut budget) = self.budget.lock() {
-            budget.reset();
-        }
+    async fn reset_budget(&self) {
+        self.budget.lock().await.reset();
     }
 
     /// Run the main event loop. This method may only be called once.
@@ -293,11 +287,7 @@ impl Agent {
     /// responsive even when the data inbox is full. Hibernating cancels the
     /// active turn; queued messages remain in the bounded inbox until resume.
     pub async fn run(&self) -> Result<(), AgentRunError> {
-        let mut runtime = self
-            .runtime
-            .lock()
-            .map_err(|_| AgentRunError::LifecyclePoisoned)?
-            .take()
+        let mut runtime = self.runtime.lock().await.take()
             .ok_or(AgentRunError::AlreadyStarted)?;
         let mut hibernating = false;
 
@@ -338,7 +328,7 @@ impl Agent {
             };
 
             // Each incoming message opens a fresh turn with a full budget.
-            self.reset_budget();
+            self.reset_budget().await;
 
             *self.current_task.write().await = Some(prompt.clone());
             *self.state.write().await = AgentState::Running;
@@ -473,7 +463,7 @@ async fn test_agent_creation_and_prompt() {
         .base_url("https://opencode.ai/zen/go/v1")
         .api_key(api_key)
         .build()
-        .unwrap();
+        .expect("should build OpenAI-compatible client");
 
     let tool_server = ToolServer::new();
     let tool_server_handle = tool_server.run();
@@ -491,7 +481,10 @@ async fn test_agent_creation_and_prompt() {
         .await;
     match response {
         Ok(text) => assert!(
-            !text.messages.unwrap().is_empty(),
+            !text
+                .messages
+                .expect("response should have messages")
+                .is_empty(),
             "response should not be empty"
         ),
         Err(e) => eprintln!("LLM call failed (this is ok in CI): {e}"),
