@@ -62,17 +62,19 @@
 							{/if}
 						</div>
 						<div class="flex-1 min-w-0 pb-1">
-							{#if item.type === "assistant"}
-								<TextBlock text={item.text} html={item.html ?? ""} role="assistant" streaming={item.streaming ?? false} />
-							{:else if item.type === "user"}
-								<TextBlock text={item.text} html={item.html ?? ""} role="user" />
-							{:else if item.type === "thinking"}
-								<ThinkingBlock text={item.text} />
-							{:else if item.type === "tool"}
-								<ToolCard name={item.text} result={item.result == null ? undefined : item.result} status={item.status ?? "done"} />
-							{:else if item.type === "error"}
-								<ErrorBlock text={item.text} />
-							{/if}
+							{#key item.id}
+								{#if item.type === "assistant"}
+									<TextBlock text={item.text} role="assistant" streaming={item.streaming ?? false} />
+								{:else if item.type === "user"}
+									<TextBlock text={item.text} role="user" />
+								{:else if item.type === "thinking"}
+									<ThinkingBlock text={item.text} />
+								{:else if item.type === "tool"}
+									<ToolCard name={item.text} result={item.result == null ? undefined : item.result} status={item.status ?? "done"} />
+								{:else if item.type === "error"}
+									<ErrorBlock text={item.text} />
+								{/if}
+							{/key}
 						</div>
 					</div>
 				</div>

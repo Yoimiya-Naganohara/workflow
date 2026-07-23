@@ -65,7 +65,6 @@ export interface ChatItem {
 	id: number;
 	type: "user" | "assistant" | "thinking" | "tool" | "error";
 	text: string;
-	html?: string;
 	result?: string | null;
 	status?: "running" | "done";
 	streaming?: boolean;

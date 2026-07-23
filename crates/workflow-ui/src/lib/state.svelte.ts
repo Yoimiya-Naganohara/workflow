@@ -1,8 +1,45 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { marked } from "marked";
-import { createHighlighter } from "shiki";
-import type { Highlighter } from "shiki";
+import { initHighlighter, setTheme } from "./markdown/highlighter";
+
+// shiki language and theme imports
+import js from "shiki/langs/javascript.mjs";
+import ts from "shiki/langs/typescript.mjs";
+import py from "shiki/langs/python.mjs";
+import rs from "shiki/langs/rust.mjs";
+import json from "shiki/langs/json.mjs";
+import html from "shiki/langs/html.mjs";
+import css from "shiki/langs/css.mjs";
+import shellscript from "shiki/langs/shellscript.mjs";
+import sql from "shiki/langs/sql.mjs";
+import md from "shiki/langs/markdown.mjs";
+import yaml from "shiki/langs/yaml.mjs";
+import xml from "shiki/langs/xml.mjs";
+import toml from "shiki/langs/toml.mjs";
+import go from "shiki/langs/go.mjs";
+import rb from "shiki/langs/ruby.mjs";
+import java from "shiki/langs/java.mjs";
+import c from "shiki/langs/c.mjs";
+import cpp from "shiki/langs/cpp.mjs";
+import php from "shiki/langs/php.mjs";
+import diff from "shiki/langs/diff.mjs";
+import graphql from "shiki/langs/graphql.mjs";
+import ini from "shiki/langs/ini.mjs";
+import kt from "shiki/langs/kotlin.mjs";
+import lua from "shiki/langs/lua.mjs";
+import make from "shiki/langs/make.mjs";
+import perl from "shiki/langs/perl.mjs";
+import r from "shiki/langs/r.mjs";
+import scala from "shiki/langs/scala.mjs";
+import swift from "shiki/langs/swift.mjs";
+import svelte from "shiki/langs/svelte.mjs";
+import docker from "shiki/langs/docker.mjs";
+import solidity from "shiki/langs/solidity.mjs";
+import zig from "shiki/langs/zig.mjs";
+
+import githubDark from "shiki/themes/github-dark-default.mjs";
+import githubLight from "shiki/themes/github-light-default.mjs";
+
 import type {
     AgentId,
     AgentInfo,
@@ -46,18 +83,9 @@ class AppState {
     eventLog = $state<LogEntry[]>([]);
 
     #unlisten: (() => void) | null = null;
-
-    #highlighter: Highlighter | null = null;
-    #shikiTheme = $state<"github-dark-default" | "github-light-default">("github-dark-default");
-    #renderSeed = $state(0);
-    #htmlCache = new Map<string, string>();
+    #chatItemCache: ChatItem[] = [];
 
     chatItems: ChatItem[] = $derived.by(() => {
-        const _theme = this.#shikiTheme;
-        const _seed = this.#renderSeed;
-        void _theme;
-        void _seed;
-
         let lastTextIdx = -1;
         for (let i = this.messages.length - 1; i >= 0; i--) {
             if (this.messages[i].type === "text") {
@@ -66,39 +94,60 @@ class AppState {
             }
         }
         const isStreaming = lastTextIdx >= 0 && this.running;
+        const prev = this.#chatItemCache;
+        const next: ChatItem[] = [];
+        let changed = prev.length !== this.messages.length;
 
-        return this.messages.map((m, i) => {
+        for (let i = 0; i < this.messages.length; i++) {
+            const m = this.messages[i];
             if (m.type === "text") {
                 const streaming = isStreaming && i === lastTextIdx;
-                if (streaming) {
-                    return { id: i, type: "assistant", text: m.text, streaming };
+                const cached = prev[i];
+                if (
+                    !changed &&
+                    cached?.type === "assistant" &&
+                    cached.text === m.text &&
+                    cached.streaming === streaming
+                ) {
+                    next.push(cached);
+                } else {
+                    changed = true;
+                    next.push({ id: i, type: "assistant", text: m.text, streaming });
                 }
-                let html = this.#htmlCache.get(m.text);
-                if (html === undefined) {
-                    try {
-                        html = String(marked.parse(m.text, { async: false }));
-                    } catch {
-                        /* ignore */
-                    }
-                    this.#htmlCache.set(m.text, html ?? "");
-                    if (this.#htmlCache.size > 200) {
-                        const key = this.#htmlCache.keys().next().value;
-                        if (key !== undefined) this.#htmlCache.delete(key);
-                    }
-                }
-                return { id: i, type: "assistant", text: m.text, html };
-            }
-            if (m.type === "tool") {
-                return {
+            } else if (m.type === "tool") {
+                const item = {
                     id: i,
-                    type: "tool",
+                    type: "tool" as const,
                     text: m.text,
                     result: m.result,
-                    status: m.result ? "done" : "running",
+                    status: (m.result ? "done" : "running") as "done" | "running",
                 };
+                const cached = prev[i];
+                if (
+                    !changed &&
+                    cached?.type === "tool" &&
+                    cached.text === m.text &&
+                    cached.result === m.result &&
+                    cached.status === item.status
+                ) {
+                    next.push(cached);
+                } else {
+                    changed = true;
+                    next.push(item);
+                }
+            } else {
+                const cached = prev[i];
+                if (!changed && cached?.type === m.type && cached.text === m.text) {
+                    next.push(cached);
+                } else {
+                    changed = true;
+                    next.push({ id: i, type: m.type, text: m.text });
+                }
             }
-            return { id: i, type: m.type, text: m.text };
-        });
+        }
+
+        this.#chatItemCache = next;
+        return next;
     });
 
     agentStatuses: Map<AgentId, AgentStatus> = $derived.by(() => {
@@ -337,41 +386,20 @@ class AppState {
     };
 
     init = () => {
-        createHighlighter({
-            themes: ["github-dark-default", "github-light-default"],
-            langs: [
-                "javascript", "typescript", "python", "rust", "json", "html",
-                "css", "bash", "sql", "markdown", "yaml", "xml", "toml",
-                "go", "ruby", "java", "c", "cpp", "php", "diff", "graphql",
-                "ini", "kotlin", "lua", "makefile", "perl", "r", "scala",
-                "shell", "swift", "svelte", "dockerfile", "solidity", "zig",
-            ],
-        }).then((hl) => {
-            this.#highlighter = hl;
-            const renderer = new marked.Renderer();
-            renderer.code = ({ text, lang }) => {
-                if (this.#highlighter) {
-                    try {
-                        return this.#highlighter.codeToHtml(text, {
-                            lang: lang || "text",
-                            theme: this.#shikiTheme,
-                        });
-                    } catch {
-                        /* fall through */
-                    }
-                }
-                const escaped = text
-                    .replace(/&/g, "&amp;")
-                    .replace(/</g, "&lt;")
-                    .replace(/>/g, "&gt;");
-                return `<pre><code>${escaped}</code></pre>`;
-            };
-            marked.setOptions({ renderer });
-            this.#htmlCache.clear();
-            this.#renderSeed++;
-        }).catch(() => {
-            /* shiki unavailable — markdown renders without highlighting */
-        });
+        // Initialize shiki highlighter with dual-theme support
+        try {
+            const langs = [
+                js, ts, py, rs, json, html, css, shellscript, sql, md,
+                yaml, xml, toml, go, rb, java, c, cpp, php, diff, graphql,
+                ini, kt, lua, make, perl, r, scala, swift, svelte, docker,
+                solidity, zig,
+            ].flat();
+            const themes = [githubDark, githubLight];
+            const isDark = document.documentElement.classList.contains("dark");
+            initHighlighter(langs, themes, isDark ? "github-dark-default" : "github-light-default");
+        } catch (e) {
+            console.error("shiki init:", e);
+        }
 
         this.loadUserConfig().then(async () => {
             if (
@@ -393,13 +421,11 @@ class AppState {
 
         const updateTheme = () => {
             const isDark = document.documentElement.classList.contains("dark");
-            const newTheme = isDark
-                ? "github-dark-default"
-                : "github-light-default";
-            if (this.#shikiTheme !== newTheme) {
-                this.#shikiTheme = newTheme;
-                this.#htmlCache.clear();
-                this.#renderSeed++;
+            const theme = isDark ? "github-dark-default" : "github-light-default";
+            try {
+                setTheme(theme);
+            } catch {
+                // highlighter may not be ready yet
             }
         };
         updateTheme();
