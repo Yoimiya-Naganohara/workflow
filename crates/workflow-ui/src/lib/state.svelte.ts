@@ -82,6 +82,9 @@ class AppState {
 
     eventLog = $state<LogEntry[]>([]);
 
+    // ── MCP server status ──────────────────────────────────────
+    mcpServers = $state<{ name: string; tool_count: number }[]>([]);
+
     #unlisten: (() => void) | null = null;
     #chatItemCache: ChatItem[] = [];
 
@@ -450,6 +453,21 @@ class AppState {
             }
             if (event.payload.type === "agent_stopped") {
                 this.running = false;
+            }
+            if (event.payload.type === "mcp_connected") {
+                const { server, tool_count } = event.payload;
+                const idx = this.mcpServers.findIndex((s) => s.name === server);
+                if (idx >= 0) {
+                    this.mcpServers[idx] = { name: server, tool_count };
+                } else {
+                    this.mcpServers.push({ name: server, tool_count });
+                }
+            }
+            if (event.payload.type === "mcp_disconnected") {
+                const msg: { type: "mcp_disconnected"; server: string } = event.payload as any;
+                this.mcpServers = this.mcpServers.filter(
+                    (s) => s.name !== msg.server,
+                );
             }
             this.pull();
         }).then((unlisten) => {

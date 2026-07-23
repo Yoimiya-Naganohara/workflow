@@ -36,7 +36,9 @@ export type UiEvent =
 	| { type: "transcript_changed"; agent_id: AgentId }
 	| { type: "roles_changed" }
 	| { type: "resync_required" }
-	| { type: "error"; message: string };
+	| { type: "error"; message: string }
+	| { type: "mcp_connected"; server: string; tool_count: number }
+	| { type: "mcp_disconnected"; server: string };
 
 export type DialogId = "new-agent" | "settings" | "roles";
 

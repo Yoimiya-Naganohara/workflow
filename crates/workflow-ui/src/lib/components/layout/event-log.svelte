@@ -19,6 +19,8 @@
 			case "roles_changed": return "roles changed";
 			case "resync_required": return "resync required";
 			case "error": return `error: ${e.message}`;
+			case "mcp_connected": return `mcp +${e.server} (${e.tool_count} tools)`;
+			case "mcp_disconnected": return `mcp -${e.server}`;
 		}
 	}
 
@@ -32,6 +34,8 @@
 			case "roles_changed": return "text-violet-500";
 			case "resync_required": return "text-orange-500";
 			case "error": return "text-destructive font-bold";
+			case "mcp_connected": return "text-cyan-500";
+			case "mcp_disconnected": return "text-rose-500";
 		}
 	}
 

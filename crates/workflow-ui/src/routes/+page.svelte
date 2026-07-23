@@ -108,6 +108,14 @@
 				<GitBranch class="size-3.5 text-muted-foreground shrink-0" />
 				<span class="text-xs font-medium text-muted-foreground">Graph</span>
 			</div>
+			{#if app.mcpServers.length > 0}
+				<div class="flex items-center gap-1 ml-4 pl-4 border-l border-border">
+					<span class="size-2 rounded-full bg-cyan-500"></span>
+					<span class="text-xs text-muted-foreground/70 tabular-nums">
+						{app.mcpServers.length} MCP
+					</span>
+				</div>
+			{/if}
 			<div class="flex-1"></div>
 			<Button
 				variant="ghost"

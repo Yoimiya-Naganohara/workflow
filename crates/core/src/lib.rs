@@ -247,6 +247,15 @@ pub enum WorkflowEvent {
     TranscriptChanged(AgentId),
     RolesChanged,
     ResyncRequired,
+    /// One or more MCP servers have connected and registered their tools.
+    McpConnected {
+        server: String,
+        tool_count: usize,
+    },
+    /// An MCP server has been disconnected and its tools removed.
+    McpDisconnected {
+        server: String,
+    },
 }
 
 impl WorkflowEvent {
@@ -365,7 +374,24 @@ impl Runtime {
             .expect("handle_cell lock poisoned") = Some(tool_handle.clone());
 
         // Initialize MCP client manager with the tool server handle.
-        let mcp_manager = Arc::new(workflow_mcp::McpClientManager::new(tool_handle));
+        let events_for_mcp = events.clone();
+        let mcp_cb: workflow_mcp::McpEventCallback = Arc::new(move |evt| {
+            let wf_evt = match evt {
+                workflow_mcp::McpManagerEvent::Connected {
+                    server,
+                    tool_count,
+                } => WorkflowEvent::McpConnected {
+                    server,
+                    tool_count,
+                },
+                workflow_mcp::McpManagerEvent::Disconnected { server } => {
+                    WorkflowEvent::McpDisconnected { server }
+                }
+            };
+            let _ = events_for_mcp.send(wf_evt);
+        });
+        let mcp_manager =
+            Arc::new(workflow_mcp::McpClientManager::with_callback(tool_handle, mcp_cb));
 
         // Populate the shared cell so the install_mcp_server tool can find us.
         *mcp_manager_cell

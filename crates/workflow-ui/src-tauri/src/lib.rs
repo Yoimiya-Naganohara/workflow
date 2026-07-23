@@ -41,6 +41,8 @@ enum UiEvent {
     RolesChanged,
     ResyncRequired,
     Error { message: String },
+    McpConnected { server: String, tool_count: usize },
+    McpDisconnected { server: String },
 }
 
 impl From<WorkflowEvent> for UiEvent {
@@ -53,6 +55,14 @@ impl From<WorkflowEvent> for UiEvent {
             WorkflowEvent::TranscriptChanged(agent_id) => Self::TranscriptChanged { agent_id },
             WorkflowEvent::RolesChanged => Self::RolesChanged,
             WorkflowEvent::ResyncRequired => Self::ResyncRequired,
+            WorkflowEvent::McpConnected {
+                server,
+                tool_count,
+            } => Self::McpConnected {
+                server,
+                tool_count,
+            },
+            WorkflowEvent::McpDisconnected { server } => Self::McpDisconnected { server },
         }
     }
 }

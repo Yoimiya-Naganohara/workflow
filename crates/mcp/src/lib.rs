@@ -24,6 +24,6 @@ pub mod tool;
 #[cfg(feature = "server")]
 pub mod server;
 
-pub use client::{McpClientManager, McpConnectionInfo};
+pub use client::{McpClientManager, McpConnectionInfo, McpEventCallback, McpManagerEvent};
 pub use config::{McpConfigFile, McpConfigSource, McpServerConfig, McpTransport};
 pub use error::McpError;

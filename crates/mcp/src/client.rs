@@ -20,6 +20,23 @@ use tracing::{info, warn};
 use crate::config::McpServerConfig;
 use crate::error::McpError;
 
+// ── Event callback ───────────────────────────────────────────
+
+/// Events emitted by the MCP client manager.
+#[derive(Debug, Clone)]
+pub enum McpManagerEvent {
+    Connected {
+        server: String,
+        tool_count: usize,
+    },
+    Disconnected {
+        server: String,
+    },
+}
+
+/// Callback invoked when MCP connections change.
+pub type McpEventCallback = Arc<dyn Fn(McpManagerEvent) + Send + Sync>;
+
 /// Resolve a command name to a `tokio::process::Command`, using the system
 /// `PATH` resolver from `rmcp` (which handles Windows `.cmd`/`.exe` shims
 /// that `tokio::process::Command` alone cannot find).
@@ -60,12 +77,14 @@ pub struct McpClientManager {
     tool_server_handle: ToolServerHandle,
     /// Active connections indexed by server name.
     connections: Arc<Mutex<HashMap<String, ActiveConnection>>>,
+    /// Optional callback for connection lifecycle events.
+    event_callback: Option<McpEventCallback>,
 }
 
 struct ActiveConnection {
-    /// Keeps the MCP session alive. Dropping this gracefully shuts down the transport.
+    /// Keeps the MCP session alive.
     _running_service: RunningService<RoleClient, McpClientHandler>,
-    /// Tool names registered by this server, so we can remove them on disconnect.
+    /// Tool names registered by this server.
     tool_names: Vec<String>,
     _server_config: McpServerConfig,
 }
@@ -76,6 +95,25 @@ impl McpClientManager {
         Self {
             tool_server_handle,
             connections: Arc::new(Mutex::new(HashMap::new())),
+            event_callback: None,
+        }
+    }
+
+    /// Create a new manager with an event callback for connection changes.
+    pub fn with_callback(
+        tool_server_handle: ToolServerHandle,
+        event_callback: McpEventCallback,
+    ) -> Self {
+        Self {
+            tool_server_handle,
+            connections: Arc::new(Mutex::new(HashMap::new())),
+            event_callback: Some(event_callback),
+        }
+    }
+
+    fn emit(&self, event: McpManagerEvent) {
+        if let Some(ref cb) = self.event_callback {
+            cb(event);
         }
     }
 
@@ -156,6 +194,7 @@ impl McpClientManager {
             .collect::<Vec<_>>();
 
         let mut conns = self.connections.lock().await;
+        let tool_count = tool_names.len();
         conns.insert(
             config.name.clone(),
             ActiveConnection {
@@ -169,6 +208,11 @@ impl McpClientManager {
             server = %config.name,
             "Connected to MCP server"
         );
+
+        self.emit(McpManagerEvent::Connected {
+            server: config.name.clone(),
+            tool_count,
+        });
 
         Ok(())
     }
@@ -193,6 +237,11 @@ impl McpClientManager {
                 tool_count = conn.tool_names.len(),
                 "Disconnected from MCP server"
             );
+
+            self.emit(McpManagerEvent::Disconnected {
+                server: name.to_string(),
+            });
+
             Ok(())
         } else {
             Err(McpError::ServerNotFound(name.to_string()))
