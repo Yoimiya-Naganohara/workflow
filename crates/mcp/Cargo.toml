@@ -1,20 +1,19 @@
 [package]
-name = "workflow-core"
+name = "workflow-mcp"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 
 [dependencies]
 rig.workspace = true
+rmcp.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
+futures.workspace = true
 
-workflow-agent = { path = "../agent" }
-workflow-tool = { path = "../tool" }
-workflow-role = { path = "../role" }
-workflow-config = { path = "../config" }
-workflow-mcp = { path = "../mcp" }
-tracing.workspace = true
+[features]
+server = []

@@ -281,6 +281,7 @@ pub struct Runtime {
     observed_agents: Mutex<HashSet<AgentId>>,
     next_id: Arc<AtomicU32>,
     initialized: OnceCell<()>,
+    mcp_manager: Arc<workflow_mcp::McpClientManager>,
 }
 
 impl Default for Runtime {
@@ -323,9 +324,24 @@ impl Runtime {
             Arc::clone(&handle_cell),
             Arc::clone(&observer),
         );
+
+        // Shared cell so the install_mcp_server tool can resolve the manager.
+        let mcp_manager_cell: Arc<std::sync::Mutex<
+            Option<Arc<workflow_mcp::McpClientManager>>,
+        >> = Arc::new(std::sync::Mutex::new(None));
+        let mcp_install_tool =
+            workflow_mcp::tool::InstallMcpServer::new(Arc::clone(&mcp_manager_cell));
+        let mcp_list_tool =
+            workflow_mcp::tool::ListMcpServers::new(Arc::clone(&mcp_manager_cell));
+        let mcp_remove_tool =
+            workflow_mcp::tool::RemoveMcpServer::new(Arc::clone(&mcp_manager_cell));
+
         let tool_handle = ToolServer::new()
             .tool(SendMessage::new(Arc::clone(&agent_pool)))
             .tool(ListAgents::new(Arc::clone(&agent_pool)))
+            .tool(mcp_install_tool)
+            .tool(mcp_list_tool)
+            .tool(mcp_remove_tool)
             .tool(Orchestrate::with_id_allocator(
                 Arc::clone(&agent_pool),
                 Arc::clone(&factory),
@@ -346,7 +362,16 @@ impl Runtime {
             .run();
         *handle_cell
             .lock()
-            .expect("handle_cell lock poisoned") = Some(tool_handle);
+            .expect("handle_cell lock poisoned") = Some(tool_handle.clone());
+
+        // Initialize MCP client manager with the tool server handle.
+        let mcp_manager = Arc::new(workflow_mcp::McpClientManager::new(tool_handle));
+
+        // Populate the shared cell so the install_mcp_server tool can find us.
+        *mcp_manager_cell
+            .lock()
+            .expect("mcp_manager_cell lock poisoned") = Some(Arc::clone(&mcp_manager));
+
         Ok(Self {
             agent_pool,
             roles,
@@ -357,6 +382,7 @@ impl Runtime {
             observed_agents: Mutex::new(HashSet::new()),
             next_id,
             initialized: OnceCell::new(),
+            mcp_manager,
         })
     }
 
@@ -378,6 +404,28 @@ impl Runtime {
                 if self.agent_pool.list_agents().await.is_empty() {
                     self.create_agent(RoleId::default()).await?;
                 }
+
+                // Connect to configured MCP servers in the background so
+                // initialization is not blocked by potentially slow or
+                // failing MCP connections.
+                let weak = Arc::downgrade(self);
+                tokio::spawn(async move {
+                    let mcp_source = workflow_mcp::McpConfigSource::new(
+                        workflow_mcp::McpConfigSource::default_path(),
+                    );
+                    match mcp_source.load() {
+                        Ok(configs) if !configs.is_empty() => {
+                            if let Some(runtime) = weak.upgrade() {
+                                runtime.mcp_manager.connect_all(&configs).await;
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Failed to load MCP server config");
+                        }
+                    }
+                });
+
                 Ok(())
             })
             .await
@@ -492,6 +540,29 @@ impl Runtime {
             Role::new(name, definition, Vec::new()),
         );
         self.list_roles()
+    }
+
+    /// Access the MCP client manager.
+    pub fn mcp(&self) -> &workflow_mcp::McpClientManager {
+        &self.mcp_manager
+    }
+
+    /// Reload MCP server config and reconnect all servers.
+    pub async fn reload_mcp_servers(&self) {
+        let source = workflow_mcp::McpConfigSource::new(
+            workflow_mcp::McpConfigSource::default_path(),
+        );
+        match source.load() {
+            Ok(configs) => {
+                self.mcp_manager.disconnect_all().await;
+                if !configs.is_empty() {
+                    self.mcp_manager.connect_all(&configs).await;
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to reload MCP server config");
+            }
+        }
     }
 
     fn attach_agent(self: &Arc<Self>, agent: Arc<Agent>) {

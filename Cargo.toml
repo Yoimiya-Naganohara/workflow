@@ -49,6 +49,7 @@ tokio-test = "0.4"
 tempfile = "3"
 aes-gcm = "0.10"
 base64 = "0.22"
+rmcp = { version = "1.8", default-features = false, features = ["client", "macros", "transport-child-process", "transport-streamable-http-client-reqwest", "client-side-sse", "which-command"] }
 
 [profile.release]
 lto = true
