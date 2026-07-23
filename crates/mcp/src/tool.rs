@@ -52,9 +52,7 @@ pub struct InstallMcpServer {
 
 impl InstallMcpServer {
     /// Create a new tool. The manager cell is populated later by the runtime.
-    pub fn new(
-        manager_cell: Arc<std::sync::Mutex<Option<Arc<McpClientManager>>>>,
-    ) -> Self {
+    pub fn new(manager_cell: Arc<std::sync::Mutex<Option<Arc<McpClientManager>>>>) -> Self {
         Self {
             manager_cell,
             config_source: McpConfigSource::new(McpConfigSource::default_path()),
@@ -113,12 +111,17 @@ impl Tool for InstallMcpServer {
         let transport = McpTransport::Stdio {
             command: args.command,
             args: args.args,
-            env: if args.env.is_empty() { None } else { Some(args.env) },
+            env: if args.env.is_empty() {
+                None
+            } else {
+                Some(args.env)
+            },
         };
 
         let config = McpServerConfig {
             name: args.name.clone(),
             transport,
+            dangerous_tools: None,
         };
 
         // 1. Persist to config file.
@@ -267,6 +270,9 @@ impl Tool for RemoveMcpServer {
 /// Instead of registering every MCP tool as a separate static tool (which
 /// wastes context tokens), all MCP servers share this ONE tool slot. The
 /// LLM specifies which server and which tool to invoke.
+///
+/// If the tool is marked as `dangerous` in the server config, the call
+/// is suspended until the user explicitly approves it via the UI.
 #[derive(Debug, Deserialize)]
 pub struct CallMcpToolArgs {
     /// Name of the MCP server (from list_mcp_servers).
@@ -327,6 +333,19 @@ impl Tool for CallMcpTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let manager = resolve_manager(&self.manager_cell)?;
+
+        // Check if this tool requires user approval.
+        if manager.is_tool_dangerous(&args.server, &args.tool).await {
+            let approved = manager
+                .request_approval(&args.server, &args.tool, args.arguments.clone())
+                .await?;
+            if !approved {
+                return Ok(format!(
+                    "Call to {}/{} was denied by the user",
+                    args.server, args.tool
+                ));
+            }
+        }
 
         let peer = manager
             .get_peer(&args.server)

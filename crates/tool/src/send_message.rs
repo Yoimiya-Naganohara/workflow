@@ -135,8 +135,7 @@ impl Tool for SendMessage {
             message_id: msg_id,
             status: format!("Message sent to agent {}", args.target_id),
         };
-        serde_json::to_string(&output).map_err(|e| {
-            ToolError::Orchestrate(format!("failed to serialize output: {e}"))
-        })
+        serde_json::to_string(&output)
+            .map_err(|e| ToolError::Orchestrate(format!("failed to serialize output: {e}")))
     }
 }

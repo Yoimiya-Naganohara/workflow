@@ -13,11 +13,15 @@ async fn main() {
     let agent = client.agent("big-pickle").preamble("preamble").build();
     let response = agent.runner("hi").run().await.expect("LLM call failed");
     dbg!(response.output);
-    let Some(messages) = response.messages else { return; };
+    let Some(messages) = response.messages else {
+        return;
+    };
     messages.iter().for_each(|msg| match msg {
-        rig::message::Message::Assistant { id, content } => {
+        rig::message::Message::Assistant { id: _id, content } => {
             content.iter().for_each(|c| match c {
-                rig::message::AssistantContent::Reasoning(Reasoning { id, content, .. }) => {
+                rig::message::AssistantContent::Reasoning(Reasoning {
+                    id: _rid, content, ..
+                }) => {
                     for content in content.iter() {
                         match content {
                             ReasoningContent::Text { text, .. } => {

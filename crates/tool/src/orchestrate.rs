@@ -299,9 +299,7 @@ impl Tool for Orchestrate {
 
             for &idx in wave {
                 let task = &tasks[idx];
-                let agent = self
-                    .get_or_create_agent(&task.role, &all_reserved)
-                    .await?;
+                let agent = self.get_or_create_agent(&task.role, &all_reserved).await?;
                 let agent_id = agent.id();
                 all_reserved.insert(agent_id);
 
@@ -348,18 +346,12 @@ impl Tool for Orchestrate {
                             })
                             .collect::<Vec<_>>()
                             .join("\n\n");
-                        format!(
-                            "{}\n\nDependency results:\n{}",
-                            t.task, dependency_context
-                        )
+                        format!("{}\n\nDependency results:\n{}", t.task, dependency_context)
                     };
 
                     let mut receiver = t.agent.receiver();
                     if let Err(e) = t.agent.send(Message::User(prompt)).await {
-                        eprintln!(
-                            "orchestrate: failed to dispatch task '{}': {e}",
-                            t.task_id
-                        );
+                        eprintln!("orchestrate: failed to dispatch task '{}': {e}", t.task_id);
                         continue;
                     }
 
@@ -376,9 +368,7 @@ impl Tool for Orchestrate {
                                     return Err(format!("task '{task_id}' failed: {error}"));
                                 }
                                 Ok(_) => {}
-                                Err(tokio::sync::broadcast::error::RecvError::Lagged(
-                                    skipped,
-                                )) => {
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                                     return Err(format!(
                                         "task '{task_id}' event stream lagged by {skipped} messages"
                                     ));

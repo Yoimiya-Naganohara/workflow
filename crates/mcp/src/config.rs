@@ -14,6 +14,11 @@ pub struct McpServerConfig {
     pub name: String,
     /// Transport details.
     pub transport: McpTransport,
+    /// Optional list of tool names that require user approval before execution.
+    /// When an agent calls one of these tools, the UI shows a confirmation
+    /// dialog and waits for user consent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dangerous_tools: Option<Vec<String>>,
 }
 
 /// Supported MCP transport protocols.
@@ -84,12 +89,11 @@ impl McpConfigSource {
             return Ok(Vec::new());
         }
 
-        let content = std::fs::read_to_string(&self.path).map_err(|source| {
-            McpError::ConfigRead {
+        let content =
+            std::fs::read_to_string(&self.path).map_err(|source| McpError::ConfigRead {
                 path: self.path.clone(),
                 source,
-            }
-        })?;
+            })?;
 
         // Accept either a top-level array or an object with a "servers" key.
         if content.trim().starts_with('[') {
@@ -148,9 +152,8 @@ impl McpConfigSource {
         let file = McpConfigFile {
             servers: servers.to_vec(),
         };
-        let content = serde_json::to_string_pretty(&file).map_err(|source| {
-            McpError::Other(format!("failed to serialize config: {source}"))
-        })?;
+        let content = serde_json::to_string_pretty(&file)
+            .map_err(|source| McpError::Other(format!("failed to serialize config: {source}")))?;
 
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|source| McpError::ConfigRead {

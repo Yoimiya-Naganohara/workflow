@@ -38,9 +38,10 @@ export type UiEvent =
 	| { type: "resync_required" }
 	| { type: "error"; message: string }
 	| { type: "mcp_connected"; server: string; tool_count: number }
-	| { type: "mcp_disconnected"; server: string };
+	| { type: "mcp_disconnected"; server: string }
+	| { type: "mcp_tool_needs_approval"; request_id: string; server: string; tool: string; arguments: Record<string, unknown> };
 
-export type DialogId = "new-agent" | "settings" | "roles";
+export type DialogId = "new-agent" | "settings" | "roles" | "mcp-approval";
 
 export type PendingAction =
 	| { type: "send"; agentId: AgentId }

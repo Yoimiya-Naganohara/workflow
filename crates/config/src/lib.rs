@@ -552,8 +552,7 @@ mod tests {
     #[test]
     fn test_merge_configs_defaults_only() {
         let defaults = DefaultConfigSource;
-        let result = merge_configs(&[&defaults])
-            .expect("merge of defaults should succeed");
+        let result = merge_configs(&[&defaults]).expect("merge of defaults should succeed");
         assert_eq!(result.len(), 3);
     }
 
@@ -579,9 +578,7 @@ mod tests {
     #[test]
     fn test_default_source_providers() {
         let source = DefaultConfigSource;
-        let configs = source
-            .load()
-            .expect("default config source should load");
+        let configs = source.load().expect("default config source should load");
         let openai = configs
             .iter()
             .find(|c| c.id == "openai")

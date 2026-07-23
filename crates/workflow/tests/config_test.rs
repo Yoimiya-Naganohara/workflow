@@ -52,8 +52,7 @@ fn test_merge_configs_deduplicates_by_id() {
             ..Default::default()
         }],
     };
-    let merged = merge_configs(&[&source_a, &source_b])
-        .expect("merge should succeed");
+    let merged = merge_configs(&[&source_a, &source_b]).expect("merge should succeed");
     // "custom" id should be deduplicated — source_b wins
     let custom = merged
         .iter()
@@ -69,8 +68,7 @@ fn test_merge_configs_deduplicates_by_id() {
 fn test_merge_defaults_with_empty_file() {
     let defaults = DefaultConfigSource;
     let empty = SingleSource { configs: vec![] };
-    let merged = merge_configs(&[&defaults, &empty])
-        .expect("merge with empty should succeed");
+    let merged = merge_configs(&[&defaults, &empty]).expect("merge with empty should succeed");
     assert_eq!(merged.len(), 3); // openai, anthropic, ollama
 }
 

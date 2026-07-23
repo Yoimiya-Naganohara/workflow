@@ -85,6 +85,12 @@ class AppState {
 
     // ── MCP server status ──────────────────────────────────────
     mcpServers = $state<{ name: string; tool_count: number }[]>([]);
+    pendingMcpApproval = $state<{
+        request_id: string;
+        server: string;
+        tool: string;
+        arguments: Record<string, unknown>;
+    } | null>(null);
 
     #unlisten: (() => void) | null = null;
     #observer: MutationObserver | null = null;
@@ -222,6 +228,32 @@ class AppState {
             this.roles = (await invoke("load_roles")) as RoleInfo[];
         } catch (e) {
             this.error = `load roles: ${e}`;
+        }
+    };
+
+    approveMcpTool = async () => {
+        const req = this.pendingMcpApproval;
+        if (!req) return;
+        try {
+            await invoke("approve_mcp_tool", { requestId: req.request_id, approved: true });
+        } catch (e) {
+            this.error = `mcp approve: ${e}`;
+        } finally {
+            this.pendingMcpApproval = null;
+            this.closeDialog();
+        }
+    };
+
+    denyMcpTool = async () => {
+        const req = this.pendingMcpApproval;
+        if (!req) return;
+        try {
+            await invoke("approve_mcp_tool", { requestId: req.request_id, approved: false });
+        } catch (e) {
+            this.error = `mcp deny: ${e}`;
+        } finally {
+            this.pendingMcpApproval = null;
+            this.closeDialog();
         }
     };
 
@@ -488,6 +520,10 @@ class AppState {
                     this.mcpServers = this.mcpServers.filter(
                         (s) => s.name !== msg.server,
                     );
+                }
+                if (event.payload.type === "mcp_tool_needs_approval") {
+                    this.pendingMcpApproval = event.payload;
+                    this.dialog = "mcp-approval";
                 }
                 this.pull();
             } catch (e) {

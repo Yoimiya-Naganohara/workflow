@@ -4,14 +4,12 @@ pub mod protocol;
 use async_stream::stream;
 use futures::{Stream, StreamExt};
 use rig::{
-    agent::MultiTurnStreamItem, completion::CompletionModel, message::Text,
+    agent::MultiTurnStreamItem,
+    completion::CompletionModel,
+    message::Text,
     streaming::{StreamedAssistantContent, StreamedUserContent},
 };
-use std::{
-    collections::HashMap,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{collections::HashMap, pin::Pin, sync::Arc};
 use tokio::sync::{
     Mutex, RwLock,
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel},
@@ -58,7 +56,6 @@ pub enum ControlMessage {
 pub enum AgentRunError {
     #[error("agent runtime has already been started")]
     AlreadyStarted,
-
 }
 
 /// Streamed output emitted by an [`Agent`] for an external consumer to handle.
@@ -287,7 +284,11 @@ impl Agent {
     /// responsive even when the data inbox is full. Hibernating cancels the
     /// active turn; queued messages remain in the bounded inbox until resume.
     pub async fn run(&self) -> Result<(), AgentRunError> {
-        let mut runtime = self.runtime.lock().await.take()
+        let mut runtime = self
+            .runtime
+            .lock()
+            .await
+            .take()
             .ok_or(AgentRunError::AlreadyStarted)?;
         let mut hibernating = false;
 

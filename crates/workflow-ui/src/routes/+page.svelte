@@ -12,6 +12,7 @@
 	import NewAgentDialog from "$lib/components/dialogs/new-agent-dialog.svelte";
 	import SettingsDialog from "$lib/components/dialogs/settings-dialog.svelte";
 	import RolesDialog from "$lib/components/dialogs/roles-dialog.svelte";
+	import McpApprovalDialog from "$lib/components/dialogs/mcp-approval-dialog.svelte";
 
 	import { state as app } from "$lib/state.svelte.js";
 
@@ -113,6 +114,16 @@
 	roles={app.roles}
 	onAddRole={(name, def) => app.addRole(name, def)}
 	onOpenChange={(o) => { if (!o) app.closeDialog(); }}
+/>
+
+<McpApprovalDialog
+	open={app.dialog === "mcp-approval"}
+	server={app.pendingMcpApproval?.server ?? ""}
+	tool={app.pendingMcpApproval?.tool ?? ""}
+	arguments={app.pendingMcpApproval?.arguments ?? {}}
+	onApprove={() => app.approveMcpTool()}
+	onDeny={() => app.denyMcpTool()}
+	onOpenChange={(o) => { if (!o) { app.pendingMcpApproval = null; app.closeDialog(); } }}
 />
 
 <div class="fixed inset-0 top-8 flex flex-row p-1 gap-1 overflow-hidden">

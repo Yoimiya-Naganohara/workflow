@@ -46,10 +46,7 @@ pub enum McpError {
 
     /// The transport type is not supported.
     #[error("unsupported transport type for MCP server '{server}': {transport}")]
-    UnsupportedTransport {
-        server: String,
-        transport: String,
-    },
+    UnsupportedTransport { server: String, transport: String },
 
     /// MCP server '{server}' not found.
     #[error("MCP server '{0}' not found in config")]

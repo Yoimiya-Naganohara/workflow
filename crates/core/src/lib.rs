@@ -12,7 +12,6 @@ use rig::{
     providers::openai::CompletionsClient, tool::server::ToolServer,
     vector_store::VectorStoreIndexDyn,
 };
-use workflow_tool::ToolError;
 use serde::Serialize;
 use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
 pub use workflow_agent::agent_pool::AgentInfo;
@@ -22,6 +21,7 @@ use workflow_agent::{
 };
 use workflow_config::*;
 use workflow_role::{Role, RoleId, RolePool};
+use workflow_tool::ToolError;
 use workflow_tool::{
     RoleChecker,
     list_agents::ListAgents,
@@ -78,7 +78,11 @@ impl CreateRole {
         events: broadcast::Sender<WorkflowEvent>,
         flag: Arc<AtomicBool>,
     ) -> Self {
-        Self { roles, events, flag }
+        Self {
+            roles,
+            events,
+            flag,
+        }
     }
 }
 
@@ -256,6 +260,13 @@ pub enum WorkflowEvent {
     McpDisconnected {
         server: String,
     },
+    /// A dangerous MCP tool needs user approval.
+    McpToolNeedsApproval {
+        request_id: String,
+        server: String,
+        tool: String,
+        arguments: serde_json::Value,
+    },
 }
 
 impl WorkflowEvent {
@@ -335,17 +346,14 @@ impl Runtime {
         );
 
         // Shared cell so the install_mcp_server tool can resolve the manager.
-        let mcp_manager_cell: Arc<std::sync::Mutex<
-            Option<Arc<workflow_mcp::McpClientManager>>,
-        >> = Arc::new(std::sync::Mutex::new(None));
+        let mcp_manager_cell: Arc<std::sync::Mutex<Option<Arc<workflow_mcp::McpClientManager>>>> =
+            Arc::new(std::sync::Mutex::new(None));
         let mcp_install_tool =
             workflow_mcp::tool::InstallMcpServer::new(Arc::clone(&mcp_manager_cell));
-        let mcp_list_tool =
-            workflow_mcp::tool::ListMcpServers::new(Arc::clone(&mcp_manager_cell));
+        let mcp_list_tool = workflow_mcp::tool::ListMcpServers::new(Arc::clone(&mcp_manager_cell));
         let mcp_remove_tool =
             workflow_mcp::tool::RemoveMcpServer::new(Arc::clone(&mcp_manager_cell));
-        let mcp_call_tool =
-            workflow_mcp::tool::CallMcpTool::new(Arc::clone(&mcp_manager_cell));
+        let mcp_call_tool = workflow_mcp::tool::CallMcpTool::new(Arc::clone(&mcp_manager_cell));
 
         let tool_handle = ToolServer::new()
             .tool(SendMessage::new(Arc::clone(&agent_pool)))
@@ -372,29 +380,36 @@ impl Runtime {
                     as Box<dyn rig::tool::ToolDyn>]),
             )
             .run();
-        *handle_cell
-            .lock()
-            .expect("handle_cell lock poisoned") = Some(tool_handle.clone());
+        *handle_cell.lock().expect("handle_cell lock poisoned") = Some(tool_handle.clone());
 
         // Initialize MCP client manager with the tool server handle.
         let events_for_mcp = events.clone();
         let mcp_cb: workflow_mcp::McpEventCallback = Arc::new(move |evt| {
             let wf_evt = match evt {
-                workflow_mcp::McpManagerEvent::Connected {
-                    server,
-                    tool_count,
-                } => WorkflowEvent::McpConnected {
-                    server,
-                    tool_count,
-                },
+                workflow_mcp::McpManagerEvent::Connected { server, tool_count } => {
+                    WorkflowEvent::McpConnected { server, tool_count }
+                }
                 workflow_mcp::McpManagerEvent::Disconnected { server } => {
                     WorkflowEvent::McpDisconnected { server }
                 }
+                workflow_mcp::McpManagerEvent::ToolNeedsApproval {
+                    request_id,
+                    server,
+                    tool,
+                    arguments,
+                } => WorkflowEvent::McpToolNeedsApproval {
+                    request_id,
+                    server,
+                    tool,
+                    arguments,
+                },
             };
             let _ = events_for_mcp.send(wf_evt);
         });
-        let mcp_manager =
-            Arc::new(workflow_mcp::McpClientManager::with_callback(tool_handle, mcp_cb));
+        let mcp_manager = Arc::new(workflow_mcp::McpClientManager::with_callback(
+            tool_handle,
+            mcp_cb,
+        ));
 
         // Populate the shared cell so the install_mcp_server tool can find us.
         *mcp_manager_cell
@@ -419,14 +434,12 @@ impl Runtime {
         self.initialized
             .get_or_try_init(|| async {
                 let weak = Arc::downgrade(self);
-                *self
-                    .observer
-                    .write()
-                    .expect("observer write lock poisoned") = Some(Arc::new(move |agent| {
-                    if let Some(runtime) = weak.upgrade() {
-                        runtime.attach_agent(agent);
-                    }
-                }));
+                *self.observer.write().expect("observer write lock poisoned") =
+                    Some(Arc::new(move |agent| {
+                        if let Some(runtime) = weak.upgrade() {
+                            runtime.attach_agent(agent);
+                        }
+                    }));
 
                 self.spawn_pool_event_bridge();
 
@@ -561,10 +574,7 @@ impl Runtime {
     }
 
     pub fn add_role(&self, name: String, definition: String) -> Vec<RoleInfo> {
-        self.roles
-            .write()
-            .expect("roles write lock poisoned")
-            .add(
+        self.roles.write().expect("roles write lock poisoned").add(
             RoleId::from(name.clone()),
             Role::new(name, definition, Vec::new()),
         );
@@ -578,9 +588,8 @@ impl Runtime {
 
     /// Reload MCP server config and reconnect all servers.
     pub async fn reload_mcp_servers(&self) {
-        let source = workflow_mcp::McpConfigSource::new(
-            workflow_mcp::McpConfigSource::default_path(),
-        );
+        let source =
+            workflow_mcp::McpConfigSource::new(workflow_mcp::McpConfigSource::default_path());
         match source.load() {
             Ok(configs) => {
                 self.mcp_manager.disconnect_all().await;

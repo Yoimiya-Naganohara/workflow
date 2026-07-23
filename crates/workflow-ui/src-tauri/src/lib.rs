@@ -43,6 +43,12 @@ enum UiEvent {
     Error { message: String },
     McpConnected { server: String, tool_count: usize },
     McpDisconnected { server: String },
+    McpToolNeedsApproval {
+        request_id: String,
+        server: String,
+        tool: String,
+        arguments: serde_json::Value,
+    },
 }
 
 impl From<WorkflowEvent> for UiEvent {
@@ -63,6 +69,17 @@ impl From<WorkflowEvent> for UiEvent {
                 tool_count,
             },
             WorkflowEvent::McpDisconnected { server } => Self::McpDisconnected { server },
+            WorkflowEvent::McpToolNeedsApproval {
+                request_id,
+                server,
+                tool,
+                arguments,
+            } => Self::McpToolNeedsApproval {
+                request_id,
+                server,
+                tool,
+                arguments,
+            },
         }
     }
 }
@@ -173,6 +190,18 @@ async fn configure_runtime(
     let runtime = Arc::new(Runtime::try_new(runtime_config).map_err(|e| e.to_string())?);
     spawn_event_bridge(app, Arc::clone(&runtime));
     *state.runtime.lock().await = Some(runtime);
+    Ok(())
+}
+
+#[tauri::command]
+async fn approve_mcp_tool(
+    state: State<'_, AppState>,
+    request_id: String,
+    approved: bool,
+) -> Result<(), String> {
+    let runtime = state.runtime.lock().await.clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    runtime.mcp().resolve_approval(&request_id, approved).await;
     Ok(())
 }
 
@@ -401,27 +430,42 @@ fn spawn_event_bridge(app: AppHandle, runtime: Arc<Runtime>) {
         }
 
         'events: loop {
-            let mut event = match events.recv().await {
-                Ok(event) => UiEvent::from(event),
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => UiEvent::ResyncRequired,
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let _ = app.emit("workflow:event", UiEvent::ResyncRequired);
+                    continue;
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
 
+            // Forward critical events immediately without coalescing.
+            let is_critical = matches!(
+                &event,
+                WorkflowEvent::McpToolNeedsApproval { .. }
+            );
+            if is_critical {
+                let _ = app.emit("workflow:event", UiEvent::from(event));
+                continue;
+            }
+
+            // Non-critical events: coalesce to avoid flooding the UI.
+            let mut ui_event = UiEvent::from(event);
             tokio::time::sleep(std::time::Duration::from_millis(32)).await;
             loop {
                 match events.try_recv() {
-                    Ok(next) => event = UiEvent::from(next),
+                    Ok(next) => ui_event = UiEvent::from(next),
                     Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
-                        event = UiEvent::ResyncRequired;
+                        ui_event = UiEvent::ResyncRequired;
                     }
                     Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
                     Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
-                        let _ = app.emit("workflow:event", event);
+                        let _ = app.emit("workflow:event", ui_event);
                         break 'events;
                     }
                 }
             }
-            let _ = app.emit("workflow:event", event);
+            let _ = app.emit("workflow:event", ui_event);
         }
     });
 }
@@ -460,6 +504,7 @@ pub fn run() {
             save_config,
             load_config,
             load_roles,
+            approve_mcp_tool,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

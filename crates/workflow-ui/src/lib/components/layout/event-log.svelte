@@ -21,6 +21,7 @@
 			case "error": return `error: ${e.message}`;
 			case "mcp_connected": return `mcp +${e.server} (${e.tool_count} tools)`;
 			case "mcp_disconnected": return `mcp -${e.server}`;
+			case "mcp_tool_needs_approval": return `mcp ?${e.server}/${e.tool} needs approval`;
 		}
 	}
 
@@ -36,6 +37,7 @@
 			case "error": return "text-destructive font-bold";
 			case "mcp_connected": return "text-cyan-500";
 			case "mcp_disconnected": return "text-rose-500";
+			case "mcp_tool_needs_approval": return "text-amber-500";
 		}
 	}
 
