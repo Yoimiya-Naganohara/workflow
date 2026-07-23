@@ -277,19 +277,20 @@
 			const node = svg.select(`[data-id="${id}"]`);
 			if (node.empty()) continue;
 			const ring = node.select(".status-ring");
+			// Remove old animations first
+			ring.selectAll("animate").remove();
 			if (st !== "idle") {
 				const color = statusColor(st);
 				const circumference = 2 * Math.PI * 24;
 				ring.attr("stroke", color)
 					.attr("stroke-opacity", st === "error" ? 0.7 : 0.4)
 					.style("stroke-dasharray", st === "error" ? `${circumference} ${circumference}` : `${circumference * 0.35} ${circumference}`);
-				if (ring.select("animate").empty()) {
-					ring.append("animate").attr("attributeName", "stroke-dashoffset")
-						.attr("from", "0").attr("to", st === "error" ? "0" : `-${circumference}`)
-						.attr("dur", "2s").attr("repeatCount", "indefinite");
-				}
+				ring.append("animate").attr("attributeName", "stroke-dashoffset")
+					.attr("from", "0").attr("to", st === "error" ? "0" : `-${circumference}`)
+					.attr("dur", "2s").attr("repeatCount", "indefinite");
 			} else {
-				ring.attr("stroke-opacity", 0).selectAll("animate").remove();
+				ring.attr("stroke-opacity", 0)
+					.style("stroke-dasharray", "0 151");
 			}
 		}
 	}
@@ -302,20 +303,19 @@
 			if (node.empty()) continue;
 			const pulse = node.select(".pulse-ring");
 			const body = node.select(".node-body");
+			// Remove old animations first
+			pulse.selectAll("animate").remove();
 			if (status === "thinking" || status === "running-tool") {
 				pulse.attr("opacity", 1);
-				if (pulse.select("animate").empty()) {
-					pulse.append("animate").attr("attributeName", "r")
-						.attr("values", "25;32;25")
-						.attr("dur", "1.8s").attr("repeatCount", "indefinite");
-					pulse.append("animate").attr("attributeName", "opacity")
-						.attr("values", "0.5;0;0.5")
-						.attr("dur", "1.8s").attr("repeatCount", "indefinite");
-				}
+				pulse.append("animate").attr("attributeName", "r")
+					.attr("values", "25;32;25")
+					.attr("dur", "1.8s").attr("repeatCount", "indefinite");
+				pulse.append("animate").attr("attributeName", "opacity")
+					.attr("values", "0.5;0;0.5")
+					.attr("dur", "1.8s").attr("repeatCount", "indefinite");
 				body.attr("fill-opacity", 0.95);
 			} else {
 				pulse.attr("opacity", 0);
-				pulse.selectAll("animate").remove();
 				body.attr("fill-opacity", 0.85);
 			}
 		}

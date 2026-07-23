@@ -4,7 +4,7 @@
 	import ThinkingBlock from "$lib/components/chat/thinking-block.svelte";
 	import ToolCard from "$lib/components/chat/tool-card.svelte";
 	import ErrorBlock from "$lib/components/chat/error-block.svelte";
-	import { MessageSquare } from "@lucide/svelte";
+	import { ChevronDown, MessageSquare } from "@lucide/svelte";
 	import { Card } from "$lib/components/ui/card";
 	import type { ChatItem } from "$lib/types";
 
@@ -33,6 +33,51 @@
 		agentId?: number | null;
 		agentRole?: string;
 	} = $props();
+
+	let scrollContainer = $state<HTMLDivElement | null>(null);
+	let userScrolledUp = $state(false);
+	const SCROLL_THRESHOLD = 60;
+
+	function isNearBottom(el: HTMLDivElement): boolean {
+		return el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+	}
+
+	function scrollToBottom() {
+		if (!scrollContainer) return;
+		scrollContainer.scrollTop = scrollContainer.scrollHeight;
+		userScrolledUp = false;
+	}
+
+	function onScroll() {
+		if (!scrollContainer) return;
+		userScrolledUp = !isNearBottom(scrollContainer);
+	}
+
+	let prevLen = $state(0);
+
+	$effect(() => {
+		const len = items.length;
+		if (len > prevLen && scrollContainer && !userScrolledUp) {
+			// Use microtask to let the DOM update first
+			queueMicrotask(() => scrollToBottom());
+		}
+		prevLen = len;
+	});
+
+	// Also scroll on streaming updates (last item text changes)
+	let prevLastId = $state<number | null>(null);
+	$effect(() => {
+		const last = items[items.length - 1];
+		if (!last || !scrollContainer) return;
+		if (last.id !== prevLastId) {
+			prevLastId = last.id;
+			return;
+		}
+		// Same last item — streaming update
+		if (!userScrolledUp) {
+			queueMicrotask(() => scrollToBottom());
+		}
+	});
 </script>
 
 {#if empty}
@@ -58,7 +103,12 @@
 			</div>
 		{/if}
 		<div role="log" aria-live="polite" aria-label="Chat messages" class="contents">
-<VirtualList {items} defaultEstimatedItemHeight={60} containerClass="virtual-list-container flex-1">
+<div
+	bind:this={scrollContainer}
+	class="relative flex-1 overflow-y-auto"
+	onscroll={onScroll}
+>
+<VirtualList {items} defaultEstimatedItemHeight={60} containerClass="size-full">
 			{#snippet renderItem(item: ChatItem, index: number)}
 				<div class="mx-auto max-w-3xl px-4 sm:px-6">
 					<div class="flex gap-3">
@@ -89,6 +139,16 @@
 				</div>
 			{/snippet}
 		</VirtualList>
+	{#if userScrolledUp}
+		<button
+			onclick={scrollToBottom}
+			class="absolute bottom-3 right-4 z-10 size-8 rounded-full bg-background border border-border shadow-md flex items-center justify-center hover:bg-accent transition-colors animate-in"
+			aria-label="Scroll to bottom"
+		>
+			<ChevronDown class="size-4 text-muted-foreground" />
+		</button>
+	{/if}
+</div>
 		</div>
 	</div>
 {/if}

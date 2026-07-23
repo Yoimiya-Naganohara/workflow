@@ -87,7 +87,9 @@ class AppState {
     mcpServers = $state<{ name: string; tool_count: number }[]>([]);
 
     #unlisten: (() => void) | null = null;
+    #observer: MutationObserver | null = null;
     #chatItemCache: ChatItem[] = [];
+    #eventLogTrimmed = 0;
 
     chatItems: ChatItem[] = $derived.by(() => {
         let lastTextIdx = -1;
@@ -447,51 +449,69 @@ class AppState {
             }
         };
         updateTheme();
-        const observer = new MutationObserver(updateTheme);
-        observer.observe(document.documentElement, {
+        this.#observer = new MutationObserver(updateTheme);
+        this.#observer.observe(document.documentElement, {
             attributes: true,
             attributeFilter: ["class"],
         });
 
         listen<UiEvent>("workflow:event", (event) => {
-            const entry: LogEntry = { ts: Date.now(), event: event.payload };
-            this.eventLog.push(entry);
-            if (this.eventLog.length > 500)
-                this.eventLog.splice(0, this.eventLog.length - 500);
-            if (event.payload.type === "error") {
-                this.error = event.payload.message ?? "runtime error";
-                return;
-            }
-            if (event.payload.type === "roles_changed") {
-                this.loadRoles();
-                return;
-            }
-            if (event.payload.type === "agent_stopped") {
-                this.running = false;
-            }
-            if (event.payload.type === "mcp_connected") {
-                const { server, tool_count } = event.payload;
-                const idx = this.mcpServers.findIndex((s) => s.name === server);
-                if (idx >= 0) {
-                    this.mcpServers[idx] = { name: server, tool_count };
-                } else {
-                    this.mcpServers.push({ name: server, tool_count });
+            try {
+                const entry: LogEntry = { ts: Date.now(), event: event.payload };
+                this.eventLog.push(entry);
+                if (this.eventLog.length > 500)
+                    this.eventLog.splice(0, this.eventLog.length - 500);
+                if (event.payload.type === "error") {
+                    this.error = event.payload.message ?? "runtime error";
+                    return;
                 }
+                if (event.payload.type === "roles_changed") {
+                    this.loadRoles();
+                    return;
+                }
+                if (event.payload.type === "agent_stopped") {
+                    this.running = false;
+                    this.pull();
+                    return;
+                }
+                if (event.payload.type === "mcp_connected") {
+                    const { server, tool_count } = event.payload;
+                    const idx = this.mcpServers.findIndex((s) => s.name === server);
+                    if (idx >= 0) {
+                        this.mcpServers[idx] = { name: server, tool_count };
+                    } else {
+                        this.mcpServers.push({ name: server, tool_count });
+                    }
+                }
+                if (event.payload.type === "mcp_disconnected") {
+                    const msg: { type: "mcp_disconnected"; server: string } = event.payload as any;
+                    this.mcpServers = this.mcpServers.filter(
+                        (s) => s.name !== msg.server,
+                    );
+                }
+                this.pull();
+            } catch (e) {
+                console.error("event handler:", e);
             }
-            if (event.payload.type === "mcp_disconnected") {
-                const msg: { type: "mcp_disconnected"; server: string } = event.payload as any;
-                this.mcpServers = this.mcpServers.filter(
-                    (s) => s.name !== msg.server,
-                );
-            }
-            this.pull();
         }).then((unlisten) => {
             this.#unlisten = unlisten;
+        }).catch((e) => {
+            console.error("failed to listen for events:", e);
         });
     };
 
     destroy = () => {
         this.#unlisten?.();
+        this.#observer?.disconnect();
+        this.#observer = null;
+        if (this.errorTimer) {
+            clearTimeout(this.errorTimer);
+            this.errorTimer = null;
+        }
+        this.#chatItemCache = [];
+        this.eventLog = [];
+        this.messages = [];
+        this.agents = [];
     };
 }
 

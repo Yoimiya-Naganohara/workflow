@@ -224,13 +224,12 @@
   border: 1px solid var(--acrylic-border);
 }
 
-/* Focus ring */
-:focus-visible {
+/* Focus ring — exclude textarea (chat input handles its own focus style) */
+:focus-visible:not(textarea) {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 
-/* Button-like focus for non-button elements */
 button:focus-visible,
 a:focus-visible,
 [role="button"]:focus-visible,
