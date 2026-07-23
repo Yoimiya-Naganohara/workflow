@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import * as d3 from "d3";
+	import { Button } from "$lib/components/ui/button";
 	import { formatRole } from "$lib/utils.js";
 	import type { AgentInfo, AgentId, AgentStatus } from "$lib/types";
 
@@ -207,7 +208,10 @@
 		const zoom = d3.zoom<SVGSVGElement, unknown>()
 			.extent([[0, 0], [width, height]])
 			.scaleExtent([0.1, 4])
-			.on("zoom", (event) => g.attr("transform", event.transform.toString()));
+			.on("zoom", (event) => {
+				g.attr("transform", event.transform.toString());
+				zoomLevel = event.transform.k;
+			});
 		svg.call(zoom);
 
 		const nodes = getNodes();
@@ -398,6 +402,34 @@
 	$effect(() => { selected; if (svgEl && sim) applySelection(); });
 	$effect(() => { statuses; if (svgEl && sim) { applyStatusPulses(); applyStatusRings(); } });
 
+	let zoomLevel = $state(1);
+
+	function fitToView() {
+		if (!svgEl || !sim) return;
+		const nodes = sim.nodes() as GraphNode[];
+		if (nodes.length === 0) return;
+		const width = containerEl!.clientWidth;
+		const height = containerEl!.clientHeight;
+		if (width === 0 || height === 0) return;
+		const xs = nodes.map(n => n.x ?? 0);
+		const ys = nodes.map(n => n.y ?? 0);
+		const minX = Math.min(...xs), maxX = Math.max(...xs);
+		const minY = Math.min(...ys), maxY = Math.max(...ys);
+		const padding = 60;
+		const bw = maxX - minX + padding * 2;
+		const bh = maxY - minY + padding * 2;
+		if (bw === 0 || bh === 0) return;
+		const scale = Math.min(width / bw, height / bh, 2);
+		const tx = width / 2 - (minX + maxX) / 2 * scale;
+		const ty = height / 2 - (minY + maxY) / 2 * scale;
+		const svg = d3.select(svgEl);
+		svg.select(".graph-root")
+			.transition()
+			.duration(400)
+			.attr("transform", `translate(${tx},${ty}) scale(${scale})`);
+		zoomLevel = scale;
+	}
+
 	function applySelection() {
 		if (!svgEl) return;
 		d3.select(svgEl).selectAll<SVGGElement, GraphNode>(".agent-node")
@@ -423,6 +455,7 @@
 				const w = entry.contentRect.width;
 				const h = entry.contentRect.height;
 				if (w === 0 || h === 0) return;
+				if (document.hidden) return; // Skip when tab is hidden
 				const center = sim.force("center") as d3.ForceCenter<GraphNode> | undefined;
 				if (center) center.x(w / 2).y(h / 2);
 				const fx = sim.force("x") as d3.ForceX<GraphNode> | undefined;
@@ -436,7 +469,24 @@
 			});
 		});
 		ro.observe(containerEl);
-		return () => { ro.disconnect(); if (rafId != null) cancelAnimationFrame(rafId); if (sim) sim.stop(); };
+
+		// Stop simulation when tab is hidden
+		const onVisibilityChange = () => {
+			if (!sim) return;
+			if (document.hidden) {
+				sim.stop();
+			} else {
+				sim.alpha(0.1).restart();
+			}
+		};
+		document.addEventListener("visibilitychange", onVisibilityChange);
+
+		return () => {
+			ro.disconnect();
+			if (rafId != null) cancelAnimationFrame(rafId);
+			if (sim) sim.stop();
+			document.removeEventListener("visibilitychange", onVisibilityChange);
+		};
 	});
 </script>
 
@@ -469,4 +519,12 @@
 			{/each}
 		</div>
 	{/if}
+
+	<div class="absolute top-2 right-2 flex items-center gap-1">
+		{#if agents.length > 1 && zoomLevel !== 1}
+			<Button variant="ghost" size="icon-xs" onclick={fitToView} title="Fit to view">
+				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+			</Button>
+		{/if}
+	</div>
 </div>

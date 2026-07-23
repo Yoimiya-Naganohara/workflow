@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use rig::{completion::ToolDefinition, tool::Tool};
+use rmcp::model::CallToolRequestParams;
 use serde::{Deserialize, Serialize};
 
 use crate::client::McpClientManager;
@@ -78,8 +79,8 @@ impl Tool for InstallMcpServer {
             description: "Install and connect a new MCP (Model Context Protocol) server. \
                 Provide a name, the command to run, any arguments, and optional \
                 environment variables. The server is persisted to \
-                ~/.workflow/mcp_servers.json and connected immediately — \
-                its tools become available to all agents."
+                ~/.workflow/mcp_servers.json and connected immediately. \
+                All its tools are accessible through the single `call_mcp_tool` dispatch."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -167,9 +168,10 @@ impl Tool for ListMcpServers {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "list_mcp_servers".to_string(),
-            description: "List all connected MCP servers and their registered tools. \
-                Use this to see which MCP servers are active before deciding \
-                which to remove to save context space."
+            description: "List all connected MCP servers and their available tools. \
+                Use this to find the server name and tool names needed for \
+                `call_mcp_tool`. Tools are NOT registered individually — \
+                use `call_mcp_tool` to invoke any tool on any server."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -221,10 +223,10 @@ impl Tool for RemoveMcpServer {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "remove_mcp_server".to_string(),
-            description: "Disconnect an MCP server and remove all its tools. \
-                This frees up context space by removing the server's tool \
-                definitions from the LLM's available tools. Use with the \
-                name from list_mcp_servers."
+            description: "Disconnect an MCP server. Since all MCP tools are \
+                accessed through the single `call_mcp_tool` dispatch, removing \
+                a server does NOT free individual tool slots — but it does \
+                free the server connection. Use list_mcp_servers to see what's connected."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -245,7 +247,7 @@ impl Tool for RemoveMcpServer {
             Ok(()) => Ok(serde_json::to_string(&RemoveMcpServerOutput {
                 server: args.name,
                 status: "removed".to_string(),
-                message: "MCP server disconnected and tools removed".to_string(),
+                message: "MCP server disconnected".to_string(),
             })
             .unwrap_or_else(|_| "removed".to_string())),
             Err(e) => Ok(serde_json::to_string(&RemoveMcpServerOutput {
@@ -256,4 +258,111 @@ impl Tool for RemoveMcpServer {
             .unwrap_or_else(|_| format!("failed: {e}"))),
         }
     }
+}
+
+// ── CallMcpTool ──────────────────────────────────────────────
+
+/// Single dispatch tool that calls any MCP server tool by name.
+///
+/// Instead of registering every MCP tool as a separate static tool (which
+/// wastes context tokens), all MCP servers share this ONE tool slot. The
+/// LLM specifies which server and which tool to invoke.
+#[derive(Debug, Deserialize)]
+pub struct CallMcpToolArgs {
+    /// Name of the MCP server (from list_mcp_servers).
+    pub server: String,
+    /// Name of the tool to call on that server.
+    pub tool: String,
+    /// Arguments to pass to the tool.
+    #[serde(default)]
+    pub arguments: serde_json::Value,
+}
+
+pub struct CallMcpTool {
+    manager_cell: ManagerCell,
+}
+
+impl CallMcpTool {
+    pub fn new(manager_cell: ManagerCell) -> Self {
+        Self { manager_cell }
+    }
+}
+
+impl Tool for CallMcpTool {
+    const NAME: &'static str = "call_mcp_tool";
+
+    type Error = McpError;
+    type Args = CallMcpToolArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "call_mcp_tool".to_string(),
+            description: "Call a tool on a connected MCP server. \
+                Specify the server name (from list_mcp_servers), \
+                the tool name, and the arguments as a JSON object. \
+                This is the only tool needed for ALL MCP servers — \
+                each server's individual tools are not registered separately."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "server": {
+                        "type": "string",
+                        "description": "MCP server name (use list_mcp_servers to see available servers)"
+                    },
+                    "tool": {
+                        "type": "string",
+                        "description": "Tool name to invoke on the server"
+                    },
+                    "arguments": {
+                        "type": "object",
+                        "description": "JSON object of arguments for the tool"
+                    }
+                },
+                "required": ["server", "tool"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let manager = resolve_manager(&self.manager_cell)?;
+
+        let peer = manager
+            .get_peer(&args.server)
+            .await
+            .ok_or_else(|| McpError::ServerNotFound(args.server.clone()))?;
+
+        let arguments: Option<rmcp::model::JsonObject> = if args.arguments.is_object() {
+            args.arguments.as_object().cloned()
+        } else {
+            None
+        };
+
+        let mut request = CallToolRequestParams::new(args.tool);
+        if let Some(arguments) = arguments {
+            request = request.with_arguments(arguments);
+        }
+
+        let result = peer
+            .call_tool(request)
+            .await
+            .map_err(|e| McpError::Other(format!("MCP tool call failed: {e}")))?;
+
+        if result.is_error.unwrap_or(false) {
+            let text = extract_text(&result.content);
+            return Err(McpError::Other(format!("MCP tool returned error: {text}")));
+        }
+
+        Ok(extract_text(&result.content))
+    }
+}
+
+fn extract_text(content: &[rmcp::model::Content]) -> String {
+    content
+        .iter()
+        .filter_map(|c| c.raw.as_text())
+        .map(|t| t.text.clone())
+        .collect::<Vec<_>>()
+        .join("\n")
 }

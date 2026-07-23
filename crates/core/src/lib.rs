@@ -344,6 +344,8 @@ impl Runtime {
             workflow_mcp::tool::ListMcpServers::new(Arc::clone(&mcp_manager_cell));
         let mcp_remove_tool =
             workflow_mcp::tool::RemoveMcpServer::new(Arc::clone(&mcp_manager_cell));
+        let mcp_call_tool =
+            workflow_mcp::tool::CallMcpTool::new(Arc::clone(&mcp_manager_cell));
 
         let tool_handle = ToolServer::new()
             .tool(SendMessage::new(Arc::clone(&agent_pool)))
@@ -351,6 +353,7 @@ impl Runtime {
             .tool(mcp_install_tool)
             .tool(mcp_list_tool)
             .tool(mcp_remove_tool)
+            .tool(mcp_call_tool)
             .tool(Orchestrate::with_id_allocator(
                 Arc::clone(&agent_pool),
                 Arc::clone(&factory),

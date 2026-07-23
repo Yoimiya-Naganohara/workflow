@@ -2,7 +2,7 @@
 	import { onMount } from "svelte";
 	import { Button } from "$lib/components/ui/button";
 	import { Card } from "$lib/components/ui/card";
-	import { MessageSquare, GitBranch, Settings, Eye, EyeOff } from "@lucide/svelte";
+	import { MessageSquare, GitBranch, Settings, Eye, EyeOff, PanelLeftClose, PanelLeftOpen } from "@lucide/svelte";
 	import { formatRole } from "$lib/utils.js";
 
 	import AgentSidebar from "$lib/components/agent/agent-sidebar.svelte";
@@ -16,6 +16,8 @@
 	import { state as app } from "$lib/state.svelte.js";
 
 	let showGraph = $state(true);
+	let showSidebar = $state(true);
+	const STORAGE_KEY = "workflow-ui:layout";
 
 	let rafId: number | null = null;
 	function startResize(e: MouseEvent) {
@@ -50,8 +52,37 @@
 		return Math.floor(available / 2);
 	}
 
+	function saveLayout() {
+		try {
+			localStorage.setItem(STORAGE_KEY, JSON.stringify({ graphWidth, showGraph, showSidebar }));
+		} catch { /* ignore */ }
+	}
+
+	$effect(() => {
+		if (typeof window === "undefined") return;
+		saveLayout();
+	});
+
 	onMount(() => {
-		graphWidth = calcDefaultWidth();
+		try {
+			const saved = localStorage.getItem(STORAGE_KEY);
+			if (saved) {
+				const { graphWidth: w, showGraph: s, showSidebar: sb } = JSON.parse(saved);
+				if (typeof w === "number" && w >= 180) graphWidth = w;
+				if (typeof s === "boolean") showGraph = s;
+				if (typeof sb === "boolean") showSidebar = sb;
+			} else {
+				graphWidth = calcDefaultWidth();
+			}
+		} catch {
+			graphWidth = calcDefaultWidth();
+		}
+		// Responsive auto-collapse
+		const mq = window.matchMedia("(max-width: 1024px)");
+		if (mq.matches) showSidebar = false;
+		mq.addEventListener("change", (e) => {
+			if (e.matches) showSidebar = false;
+		});
 		app.init();
 		return () => app.destroy();
 	});
@@ -85,22 +116,38 @@
 />
 
 <div class="fixed inset-0 top-8 flex flex-row p-1 gap-1 overflow-hidden">
-	<AgentSidebar
-		agents={app.agents}
-		selected={app.selected}
-		statuses={app.agentStatuses}
-		roles={app.roles}
-		rolesExpanded={app.rolesExpanded}
-		onSelect={(id) => app.selectAgent(id)}
-		onCreateClick={() => app.openDialog("new-agent")}
-		onRemoveAgent={(id) => app.removeAgent(id)}
-		onRolesClick={() => app.openDialog("roles")}
-		onToggleRoles={() => app.toggleRoles()}
-	/>
+	<div class="relative flex" class:hidden={!showSidebar}>
+		<AgentSidebar
+			agents={app.agents}
+			selected={app.selected}
+			statuses={app.agentStatuses}
+			roles={app.roles}
+			rolesExpanded={app.rolesExpanded}
+			onSelect={(id) => app.selectAgent(id)}
+			onCreateClick={() => app.openDialog("new-agent")}
+			onRemoveAgent={(id) => app.removeAgent(id)}
+			onRolesClick={() => app.openDialog("roles")}
+			onToggleRoles={() => app.toggleRoles()}
+		/>
+	</div>
 
 	<div class="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden rounded-lg bg-background">
 		<div class="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-card shrink-0">
-			<div class="flex items-center gap-1.5 min-w-0">
+			<Button
+				variant="ghost"
+				size="icon-xs"
+				class="text-muted-foreground/50 hover:text-muted-foreground shrink-0"
+				onclick={() => (showSidebar = !showSidebar)}
+				title={showSidebar ? "Hide sidebar" : "Show sidebar"}
+				aria-label={showSidebar ? "Hide sidebar" : "Show sidebar"}
+			>
+				{#if showSidebar}
+					<PanelLeftClose class="size-3.5" />
+				{:else}
+					<PanelLeftOpen class="size-3.5" />
+				{/if}
+			</Button>
+			<div class="flex items-center gap-1.5 ml-1 min-w-0">
 				<MessageSquare class="size-3.5 text-muted-foreground shrink-0" />
 				<span class="text-xs font-medium text-muted-foreground">Chat</span>
 			</div>
@@ -130,7 +177,7 @@
 					<Eye class="size-3.5" />
 				{/if}
 			</Button>
-			<Button variant="ghost" size="icon-xs" onclick={() => app.openDialog("settings")}>
+			<Button variant="ghost" size="icon-xs" onclick={() => app.openDialog("settings")} title="Settings" aria-label="Settings">
 				<Settings class="size-3.5" />
 			</Button>
 		</div>
@@ -147,9 +194,19 @@
 				{/if}
 
 				{#if app.error}
-					<Card class="shrink-0 mx-3 mb-2 px-3 py-2 bg-destructive/5 border-destructive/20 border-dashed">
-						<p class="text-xs text-destructive">{app.error}</p>
-					</Card>
+					<div class="animate-in shrink-0 mx-3 mb-2">
+						<div class="flex items-start gap-2.5 rounded-lg bg-destructive/8 border border-destructive/20 px-3 py-2">
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 shrink-0 mt-0.5 text-destructive"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+							<p class="flex-1 text-xs text-destructive leading-relaxed">{app.error}</p>
+							<button
+								onclick={() => app.dismissError()}
+								class="shrink-0 mt-0.5 text-destructive/50 hover:text-destructive transition-colors"
+								aria-label="Dismiss error"
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+							</button>
+						</div>
+					</div>
 				{/if}
 
 				<div class="shrink-0 px-3 pb-3">

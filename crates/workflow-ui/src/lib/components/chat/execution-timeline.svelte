@@ -16,6 +16,12 @@
 		error: "bg-destructive",
 	};
 
+	const typeLabels: Record<string, string> = {
+		thinking: "Thinking",
+		tool: "Tool call",
+		error: "Error",
+	};
+
 	let {
 		items,
 		empty,
@@ -51,34 +57,38 @@
 				</div>
 			</div>
 		{/if}
-		<VirtualList {items} defaultEstimatedItemHeight={60} containerClass="virtual-list-container flex-1">
+		<div role="log" aria-live="polite" aria-label="Chat messages" class="contents">
+<VirtualList {items} defaultEstimatedItemHeight={60} containerClass="virtual-list-container flex-1">
 			{#snippet renderItem(item: ChatItem, index: number)}
 				<div class="mx-auto max-w-3xl px-4 sm:px-6">
 					<div class="flex gap-3">
 						<div class="flex flex-col items-center shrink-0 pt-[18px]">
-							<div class="size-2 rounded-full {dotColors[item.type] ?? 'bg-muted-foreground/30'} ring-2 ring-background"></div>
+							<div class="size-2 rounded-full {dotColors[item.type] ?? 'bg-muted-foreground/30'} ring-2 ring-background {item.status === 'running' ? 'animate-pulse' : ''}"></div>
 							{#if index < items.length - 1}
-								<div class="w-px flex-1 min-h-4 bg-border/40 mt-1"></div>
+								<div class="w-px flex-1 min-h-4 bg-border/40 mt-1 {index === items.length - 2 ? 'bg-gradient-to-b from-border/40 to-transparent' : ''}"></div>
 							{/if}
 						</div>
 						<div class="flex-1 min-w-0 pb-1">
 							{#key item.id}
-								{#if item.type === "assistant"}
-									<TextBlock text={item.text} role="assistant" streaming={item.streaming ?? false} />
-								{:else if item.type === "user"}
-									<TextBlock text={item.text} role="user" />
-								{:else if item.type === "thinking"}
-									<ThinkingBlock text={item.text} />
-								{:else if item.type === "tool"}
-									<ToolCard name={item.text} result={item.result == null ? undefined : item.result} status={item.status ?? "done"} />
-								{:else if item.type === "error"}
-									<ErrorBlock text={item.text} />
-								{/if}
+								<div class="animate-in" style="animation-delay: 0ms">
+									{#if item.type === "assistant"}
+										<TextBlock text={item.text} role="assistant" streaming={item.streaming ?? false} />
+									{:else if item.type === "user"}
+										<TextBlock text={item.text} role="user" />
+									{:else if item.type === "thinking"}
+										<ThinkingBlock text={item.text} />
+									{:else if item.type === "tool"}
+										<ToolCard name={item.text} result={item.result == null ? undefined : item.result} status={item.status ?? "done"} />
+									{:else if item.type === "error"}
+										<ErrorBlock text={item.text} />
+									{/if}
+								</div>
 							{/key}
 						</div>
 					</div>
 				</div>
 			{/snippet}
 		</VirtualList>
+		</div>
 	</div>
 {/if}

@@ -14,18 +14,18 @@
     } = $props();
 </script>
 
-<div class="flex items-start gap-3">
+<div class="flex items-start gap-3 animate-in">
     {#if role === "user"}
         <div
-            class="size-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5"
+            class="size-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5 ring-1 ring-primary/20"
         >
             <User class="size-3.5 text-primary/70" />
         </div>
     {/if}
     <div class="min-w-0 flex-1">
-        <div class="text-xs font-medium text-muted-foreground/60 mb-0.5">
-            {role === "user" ? "You" : ""}
-        </div>
+        {#if role === "user"}
+            <div class="text-xs font-medium text-muted-foreground/50 mb-1">You</div>
+        {/if}
         <div
             class="text-sm leading-relaxed prose-sm dark:prose-invert max-w-none
 			[&_code]:rounded [&_code]:bg-muted-foreground/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_code]:font-mono
@@ -48,6 +48,9 @@
                     <MarkdownCode lang={lang || 'text'} text={codeText} />
                 {/snippet}
             </SvelteMarkdown>
+            {#if streaming}
+                <span class="inline-block size-2 rounded-full bg-emerald-500/60 ml-0.5 align-middle" style="animation: pulse-dot 1s ease-in-out infinite"></span>
+            {/if}
         </div>
     </div>
 </div>

@@ -136,7 +136,7 @@
 	</button>
 
 	{#if expanded && (toolArgs || result)}
-		<div class="px-3 pb-2.5 pt-0 space-y-2 animate-fade-in">
+		<div class="px-3 pb-2.5 pt-0 space-y-2" style="animation: fade-in 0.15s ease both">
 			{#if toolArgs}
 				<div>
 					<p class="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider mb-1">Arguments</p>

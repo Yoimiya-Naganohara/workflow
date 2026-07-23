@@ -40,10 +40,12 @@
 		onSubmit();
 	}}
 	class={cn(
-		"mx-auto max-w-3xl rounded-2xl border shadow-xs transition-all duration-200",
+		"mx-auto max-w-3xl rounded-2xl border transition-all duration-200",
 		"bg-card border-border/50",
+		"shadow-xs",
 		"focus-within:shadow-lg focus-within:border-border/80",
 		focused && "bg-[var(--acrylic-bg)]",
+		disabled && "opacity-50 pointer-events-none",
 	)}
 >
 	<textarea
@@ -91,7 +93,8 @@
 					type="button"
 					size="icon-xs"
 					onclick={onStop}
-					class="rounded-full bg-foreground text-background hover:bg-foreground/90 shadow-xs"
+					class="rounded-full bg-foreground text-background hover:bg-foreground/90 shadow-xs active:scale-95 transition-transform"
+					title="Stop"
 				>
 					<Square class="size-3 fill-accent" />
 				</Button>
@@ -99,9 +102,10 @@
 				<Button
 					type="submit"
 					size="icon-xs"
-					class="rounded-full bg-foreground text-background hover:bg-foreground/90 shadow-xs"
+					class="rounded-full bg-foreground text-background hover:bg-foreground/90 shadow-xs active:scale-95 transition-transform"
+					title="Send message"
 				>
-					<ArrowUp class="size-4" />
+					<ArrowUp class="size-4 group-hover:rotate-12 transition-transform" />
 				</Button>
 			{:else}
 				<Button
@@ -109,6 +113,7 @@
 					size="icon-xs"
 					disabled
 					class="rounded-full bg-muted text-muted-foreground/50"
+					title="Type a message to send"
 				>
 					<ArrowUp class="size-4" />
 				</Button>

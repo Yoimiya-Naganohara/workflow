@@ -8,11 +8,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rig::tool::rmcp::McpClientHandler;
 use rig::tool::server::ToolServerHandle;
-use rmcp::model::ClientInfo;
-use rmcp::service::{RoleClient, RunningService};
+use rmcp::service::{Peer, RoleClient, RunningService};
 use rmcp::transport::TokioChildProcess;
+use rmcp::ServiceExt;
 use serde::Serialize;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
@@ -83,8 +82,10 @@ pub struct McpClientManager {
 
 struct ActiveConnection {
     /// Keeps the MCP session alive.
-    _running_service: RunningService<RoleClient, McpClientHandler>,
-    /// Tool names registered by this server.
+    _running_service: RunningService<RoleClient, ()>,
+    /// Peer for dispatching tool calls.
+    peer: Peer<RoleClient>,
+    /// Tool names available on this server (informational).
     tool_names: Vec<String>,
     _server_config: McpServerConfig,
 }
@@ -138,12 +139,12 @@ impl McpClientManager {
         }
     }
 
-    /// Connect to a single MCP server and register its tools.
+    /// Connect to a single MCP server.
+    ///
+    /// Uses raw rmcp (`.serve()`) instead of rig's `McpClientHandler`,
+    /// so no individual tools are registered — all tools are accessed
+    /// through the single `call_mcp_tool` dispatch.
     pub async fn connect_one(&self, config: &McpServerConfig) -> Result<(), McpError> {
-        let client_info = ClientInfo::default();
-
-        let handler = McpClientHandler::new(client_info, self.tool_server_handle.clone());
-
         // Build the transport from the config.
         let running_service = match &config.transport {
             crate::config::McpTransport::Stdio {
@@ -166,8 +167,8 @@ impl McpClientManager {
                         source,
                     })?;
 
-                handler
-                    .connect(child)
+                // Use raw rmcp ().serve() — no auto-registration.
+                ().serve(child)
                     .await
                     .map_err(|e| McpError::connect(&config.name, e))?
             }
@@ -180,9 +181,10 @@ impl McpClientManager {
             }
         };
 
-        // Fetch tool names so we can clean them up on disconnect.
-        let tool_names = running_service
-            .peer()
+        let peer = running_service.peer().clone();
+
+        // Fetch tool names for informational display.
+        let tool_names = peer
             .list_all_tools()
             .await
             .map_err(|e| McpError::ListTools {
@@ -199,6 +201,7 @@ impl McpClientManager {
             config.name.clone(),
             ActiveConnection {
                 _running_service: running_service,
+                peer,
                 tool_names,
                 _server_config: config.clone(),
             },
@@ -217,26 +220,11 @@ impl McpClientManager {
         Ok(())
     }
 
-    /// Disconnect from an MCP server, removing its tools from the tool server.
+    /// Disconnect from an MCP server.
     pub async fn disconnect(&self, name: &str) -> Result<(), McpError> {
         let mut conns = self.connections.lock().await;
-        if let Some(conn) = conns.remove(name) {
-            // Remove all tools this server registered.
-            for tool_name in &conn.tool_names {
-                if let Err(e) = self.tool_server_handle.remove_tool(tool_name).await {
-                    warn!(
-                        server = %name,
-                        tool = %tool_name,
-                        error = %e,
-                        "Failed to remove MCP tool"
-                    );
-                }
-            }
-            info!(
-                server = %name,
-                tool_count = conn.tool_names.len(),
-                "Disconnected from MCP server"
-            );
+        if conns.remove(name).is_some() {
+            info!(server = %name, "Disconnected from MCP server");
 
             self.emit(McpManagerEvent::Disconnected {
                 server: name.to_string(),
@@ -248,15 +236,16 @@ impl McpClientManager {
         }
     }
 
-    /// Disconnect all MCP servers, removing their tools.
+    /// Disconnect all MCP servers.
     pub async fn disconnect_all(&self) {
         let mut conns = self.connections.lock().await;
-        for (_name, conn) in conns.drain() {
-            for tool_name in &conn.tool_names {
-                let _ = self.tool_server_handle.remove_tool(tool_name).await;
-            }
-        }
+        conns.clear();
         info!("Disconnected from all MCP servers");
+    }
+
+    /// Get the peer for a connected server, for dispatching tool calls.
+    pub async fn get_peer(&self, name: &str) -> Option<Peer<RoleClient>> {
+        self.connections.lock().await.get(name).map(|c| c.peer.clone())
     }
 
     /// List all active MCP connections with their tool names.

@@ -127,8 +127,26 @@ impl McpConfigSource {
             servers.push(config);
         }
 
+        self.write(&servers)?;
+        Ok(servers)
+    }
+
+    /// Remove a server by name and persist to disk.
+    /// Returns `Ok(true)` if removed, `Ok(false)` if not found.
+    pub fn remove_server(&self, name: &str) -> Result<bool, McpError> {
+        let mut servers = self.load()?;
+        let len_before = servers.len();
+        servers.retain(|s| s.name != name);
+        if servers.len() == len_before {
+            return Ok(false);
+        }
+        self.write(&servers)?;
+        Ok(true)
+    }
+
+    fn write(&self, servers: &[McpServerConfig]) -> Result<(), McpError> {
         let file = McpConfigFile {
-            servers: servers.clone(),
+            servers: servers.to_vec(),
         };
         let content = serde_json::to_string_pretty(&file).map_err(|source| {
             McpError::Other(format!("failed to serialize config: {source}"))
@@ -145,7 +163,6 @@ impl McpConfigSource {
             path: self.path.clone(),
             source,
         })?;
-
-        Ok(servers)
+        Ok(())
     }
 }

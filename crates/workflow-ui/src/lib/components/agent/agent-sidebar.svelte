@@ -80,14 +80,14 @@
 		</div>
 		<div class="flex items-center gap-1.5">
 			<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 min-w-0">{agents.length}</Badge>
-			<Button variant="ghost" size="icon-xs" onclick={onCreateClick} title="New agent">
+			<Button variant="ghost" size="icon-xs" onclick={onCreateClick} title="New agent" aria-label="New agent">
 				<Plus class="size-3" />
 			</Button>
 		</div>
 	</div>
 
 	<ScrollArea class="flex-1 min-h-0 no-scrollbar">
-		<div class="py-1.5 px-2 flex flex-col gap-0.5">
+		<div class="py-1.5 px-2 flex flex-col gap-0.5" role="listbox" aria-label="Agent list">
 			{#each agents as agent (agent.id)}
 				{@const status = statuses.get(agent.id) ?? "idle"}
 				{@const StatusIcon = statusIcon(status)}
@@ -97,10 +97,16 @@
 						"w-full flex items-start gap-2 px-2 py-1.5 text-xs rounded-md text-left group relative",
 						selected === agent.id
 							? "bg-accent text-accent-foreground"
-							: "hover:bg-muted/50",
+							: "hover:bg-muted/50 hover:text-foreground/90",
 					)}
 					onclick={() => onSelect(agent.id)}
+					role="option"
+					aria-selected={selected === agent.id}
+					aria-label={`Agent ${formatRole(agent.role)}`}
 				>
+					{#if selected === agent.id}
+						<div class="absolute left-0 inset-y-1 w-0.5 rounded-full bg-foreground/30"></div>
+					{/if}
 					<div class="relative shrink-0 mt-0.5">
 						<div class={cn("size-2 rounded-full", statusColor(status))}></div>
 						{#if isActive}
@@ -167,7 +173,7 @@
 				<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 min-w-0">{roles.length}</Badge>
 			</div>
 			<div class="flex items-center gap-1">
-				<Button variant="ghost" size="icon-xs" onclick={(e) => { e.stopPropagation(); onRolesClick(); }} title="Manage roles">
+				<Button variant="ghost" size="icon-xs" onclick={(e) => { e.stopPropagation(); onRolesClick(); }} title="Manage roles" aria-label="Manage roles">
 					<SettingsIcon class="size-3" />
 				</Button>
 				{#if rolesExpanded}
@@ -201,6 +207,7 @@
 		<button
 			onclick={toggleMode}
 			class="flex items-center gap-2 text-xs text-muted-foreground/60 hover:text-foreground/80 transition-colors"
+			aria-label="Toggle color theme"
 		>
 			<Sun class="size-3.5 dark:hidden" />
 			<Moon class="size-3.5 hidden dark:block" />
@@ -211,6 +218,7 @@
 			onclick={eventLog.toggle}
 			class="flex items-center gap-1.5 text-xs text-muted-foreground/60 hover:text-foreground/80 transition-colors"
 			title="Event log"
+			aria-label="Toggle event log"
 		>
 			<Bug class="size-3.5" />
 			<span>Debug</span>
