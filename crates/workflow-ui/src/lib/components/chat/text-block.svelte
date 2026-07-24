@@ -43,7 +43,7 @@
 			[&_table]:w-full [&_table]:text-xs [&_th]:text-left [&_th]:font-medium [&_th]:text-muted-foreground [&_th]:pb-1 [&_td]:py-0.5 [&_td]:border-t [&_td]:border-border/30
 		"
         >
-            <SvelteMarkdown source={text} streaming={true}>
+            <SvelteMarkdown source={text} streaming={streaming}>
                 {#snippet code({ lang, text: codeText })}
                     <MarkdownCode lang={lang || 'text'} text={codeText} />
                 {/snippet}

@@ -21,12 +21,20 @@
 		onOpenChange: (open: boolean) => void;
 	} = $props();
 
+	let denyBtn = $state<HTMLButtonElement>();
+
 	function handleKeydown(e: KeyboardEvent) {
 		if (!open) return;
 		if (e.key === "Escape") {
 			onOpenChange(false);
 		}
 	}
+
+	$effect(() => {
+		if (open && denyBtn) {
+			denyBtn.focus();
+		}
+	});
 
 	$effect(() => {
 		if (open) {
@@ -37,21 +45,20 @@
 </script>
 
 {#if open}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-		role="none"
+		class="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
+		role="presentation"
 		onclick={() => onOpenChange(false)}
-		onkeydown={(e) => { if (e.key === 'Escape') onOpenChange(false); }}
 	>
 		<!-- svelte-ignore a11y_interactive_supports_focus -->
 		<div
-			class="w-full max-w-md mx-4 rounded-xl border border-border bg-card shadow-2xl"
+			class="w-full max-w-md mx-4 rounded-xl border border-border bg-card shadow-2xl animate-in"
 			role="dialog"
 			aria-modal="true"
 			aria-label="MCP tool approval"
 			tabindex="-1"
 			onclick={(e) => e.stopPropagation()}
-			onkeydown={(e) => { if (e.key === 'Escape') onOpenChange(false); }}
 		>
 			<div class="flex items-center gap-2 px-5 py-3 border-b border-border">
 				<Shield class="size-4 text-amber-500" />
@@ -76,7 +83,7 @@
 			</div>
 
 			<div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
-				<Button variant="outline" size="sm" onclick={onDeny}>
+				<Button ref={denyBtn} variant="outline" size="sm" onclick={onDeny}>
 					<ShieldOff class="size-3.5 mr-1" />
 					Deny
 				</Button>

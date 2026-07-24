@@ -96,6 +96,8 @@ class AppState {
     #observer: MutationObserver | null = null;
     #chatItemCache: ChatItem[] = [];
     #eventLogTrimmed = 0;
+    #pullPromise: Promise<void> | null = null;
+    #pullQueued = false;
 
     chatItems: ChatItem[] = $derived.by(() => {
         let lastTextIdx = -1;
@@ -258,26 +260,43 @@ class AppState {
     };
 
     pull = async (sel?: AgentId | null) => {
+        // Serialize: if a pull is already in-flight, queue a retry.
+        if (this.#pullPromise) {
+            this.#pullQueued = true;
+            return;
+        }
+        const exec = async () => {
+            while (true) {
+                this.#pullQueued = false;
+                try {
+                    const s = (await invoke("snapshot", {
+                        selected: sel ?? this.selected,
+                    })) as RuntimeSnapshot;
+                    this.agents = s.agents;
+                    if (s.selected !== null && s.selected !== undefined) {
+                        this.selected = s.selected as AgentId;
+                    }
+                    this.messages = s.messages;
+                    this.error = "";
+                    if (
+                        this.running &&
+                        this.selected != null &&
+                        this.pendingAction?.type !== "send" &&
+                        !this.agents.find(a => a.id === this.selected)?.current_task
+                    ) {
+                        this.running = false;
+                    }
+                } catch (e) {
+                    this.error = `snapshot: ${e}`;
+                }
+                if (!this.#pullQueued) break;
+            }
+        };
+        this.#pullPromise = exec();
         try {
-            const s = (await invoke("snapshot", {
-                selected: sel ?? this.selected,
-            })) as RuntimeSnapshot;
-            this.agents = s.agents;
-            if (s.selected !== null && s.selected !== undefined) {
-                this.selected = s.selected as AgentId;
-            }
-            this.messages = s.messages;
-            this.error = "";
-            if (
-                this.running &&
-                this.selected != null &&
-                this.pendingAction?.type !== "send" &&
-                !this.agents.find(a => a.id === this.selected)?.current_task
-            ) {
-                this.running = false;
-            }
-        } catch (e) {
-            this.error = `snapshot: ${e}`;
+            await this.#pullPromise;
+        } finally {
+            this.#pullPromise = null;
         }
     };
 
