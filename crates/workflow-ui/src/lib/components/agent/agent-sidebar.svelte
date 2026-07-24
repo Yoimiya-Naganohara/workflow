@@ -79,7 +79,7 @@
 			<span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Agents</span>
 		</div>
 		<div class="flex items-center gap-1.5">
-			<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 min-w-0">{agents.length}</Badge>
+			<div  class="text-[10px] px-1.5 py-0 h-4 min-w-0">{agents.length}</div>
 			<Button variant="ghost" size="icon-xs" onclick={onCreateClick} title="New agent" aria-label="New agent">
 				<Plus class="size-3" />
 			</Button>
@@ -105,17 +105,17 @@
 					aria-label={`Agent ${formatRole(agent.role)}`}
 				>
 					{#if selected === agent.id}
-						<div class="absolute left-0 inset-y-1 w-0.5 rounded-full bg-foreground/30"></div>
+						<div class="absolute left-0  w-0.5 rounded-full bg-foreground/30"></div>
 					{/if}
 					<div class="relative shrink-0 mt-0.5">
-						<div class={cn("size-2 rounded-full", statusColor(status))}></div>
+						<div class={cn("w-0.5 h-2", statusColor(status))}></div>
 						{#if isActive}
-							<div class={cn("absolute inset-0 size-2 rounded-full animate-ping opacity-75", statusColor(status))}></div>
+							<div class={cn("absolute inset-0 size-2 w-0.5 h-2 animate-ping opacity-75", statusColor(status))}></div>
 						{/if}
 					</div>
 					<div class="flex-1 min-w-0">
 						<div class="flex items-center gap-1">
-							<span class="font-medium truncate">{formatRole(agent.role)}</span>
+							<span class={cn("font-medium truncate")}>{formatRole(agent.role)}</span>
 							<span class="text-[10px] text-muted-foreground/50 tabular-nums">#{agent.id}</span>
 						</div>
 						{#if agent.current_task}
@@ -162,7 +162,7 @@
 		</div>
 	</ScrollArea>
 
-	<div class="shrink-0 border-t border-border/50">
+	<div class="shrink-0 ">
 		<button
 			class="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:bg-muted/30 transition-colors"
 			onclick={onToggleRoles}
@@ -189,7 +189,6 @@
 					<Tooltip>
 						<TooltipTrigger>
 							<div class="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/30 transition-colors cursor-default">
-								<div class="size-1.5 rounded-full bg-primary/40 shrink-0"></div>
 								<span class="text-xs truncate">{r.name}</span>
 							</div>
 						</TooltipTrigger>
@@ -203,7 +202,7 @@
 		{/if}
 	</div>
 
-	<div class="shrink-0 border-t border-border/50 px-3 py-2 flex items-center justify-between">
+	<div class="shrink-0  px-3 py-2 flex items-center justify-between">
 		<button
 			onclick={toggleMode}
 			class="flex items-center gap-2 text-xs text-muted-foreground/60 hover:text-foreground/80 transition-colors"
