@@ -1,0 +1,105 @@
+<script lang="ts">
+	import TextBlock from "$lib/components/chat/text-block.svelte";
+	import ThinkingBlock from "$lib/components/chat/thinking-block.svelte";
+	import ToolCard from "$lib/components/chat/tool-card.svelte";
+	import ErrorBlock from "$lib/components/chat/error-block.svelte";
+	import { MessageSquare } from "@lucide/svelte";
+	import { Card } from "$lib/components/ui/card";
+	import type { ChatItem } from "$lib/types";
+
+	let {
+		items,
+		empty,
+		agentRole,
+	}: {
+		items: ChatItem[];
+		empty: boolean;
+		agentRole?: string;
+	} = $props();
+
+	let scrollContainer = $state<HTMLDivElement | null>(null);
+	let userScrolledUp = $state(false);
+	const SCROLL_THRESHOLD = 60;
+
+	function isNearBottom(el: HTMLDivElement): boolean {
+		return el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+	}
+
+	function scrollToBottom() {
+		if (!scrollContainer) return;
+		scrollContainer.scrollTop = scrollContainer.scrollHeight;
+		userScrolledUp = false;
+	}
+
+	function onScroll() {
+		if (!scrollContainer) return;
+		userScrolledUp = !isNearBottom(scrollContainer);
+	}
+
+	let prevLen = $state(0);
+
+	$effect(() => {
+		const len = items.length;
+		if (len > prevLen && scrollContainer && !userScrolledUp) {
+			queueMicrotask(() => scrollToBottom());
+		}
+		prevLen = len;
+	});
+
+	let prevLastId = $state<number | null>(null);
+	$effect(() => {
+		const last = items[items.length - 1];
+		if (!last || !scrollContainer) return;
+		if (last.id !== prevLastId) {
+			prevLastId = last.id;
+			return;
+		}
+		if (!userScrolledUp) {
+			queueMicrotask(() => scrollToBottom());
+		}
+	});
+</script>
+
+{#if empty}
+	<div class="flex-1 flex items-center justify-center">
+		<Card class="flex flex-col items-center gap-3 text-center py-12 px-8 max-w-xs border-dashed">
+			<div class="size-12 rounded-full bg-muted flex items-center justify-center">
+				<MessageSquare class="size-6 text-muted-foreground/30" />
+			</div>
+			<p class="text-sm font-medium text-muted-foreground/60">No messages yet</p>
+			<p class="text-xs text-muted-foreground/40">Select an agent and send a message to begin.</p>
+		</Card>
+	</div>
+{:else}
+	<div class="flex-1 min-h-0 flex flex-col">
+		{#if agentRole}
+			<div class="shrink-0 mx-auto w-full max-w-3xl px-4 sm:px-6 pt-3 pb-0">
+				<div class="text-[10px] text-muted-foreground/40 font-medium">{agentRole}</div>
+			</div>
+		{/if}
+		<div
+			role="log"
+			aria-live="polite"
+			aria-label="Chat messages"
+			bind:this={scrollContainer}
+			class="flex-1 overflow-y-auto"
+			onscroll={onScroll}
+		>
+			<div class="mx-auto max-w-3xl px-4 sm:px-6 py-4 space-y-3">
+				{#each items as item (item.id)}
+					{#if item.type === "assistant"}
+						<TextBlock text={item.text} role="assistant" streaming={item.streaming ?? false} />
+					{:else if item.type === "user"}
+						<TextBlock text={item.text} role="user" />
+					{:else if item.type === "thinking"}
+						<ThinkingBlock text={item.text} />
+					{:else if item.type === "tool"}
+						<ToolCard name={item.text} result={item.result == null ? undefined : item.result} status={item.status ?? "done"} />
+					{:else if item.type === "error"}
+						<ErrorBlock text={item.text} />
+					{/if}
+				{/each}
+			</div>
+		</div>
+	</div>
+{/if}

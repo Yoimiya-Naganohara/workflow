@@ -31,7 +31,7 @@ fn set_test_home(dir: &std::path::Path) {
 
 #[test]
 fn test_persistence_all() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir = tempfile::TempDir::new().expect("should create temp dir");
     set_test_home(dir.path());
 
     // ── 1. Fresh state is empty ──
@@ -45,10 +45,16 @@ fn test_persistence_all() {
         .api_keys
         .insert("anthropic".to_string(), "sk-test-123".to_string());
     state.configured_providers.push("anthropic".to_string());
-    persistence::save(&state).unwrap();
+    persistence::save(&state).expect("should save state");
 
     let loaded = persistence::load();
-    assert_eq!(loaded.api_keys.get("anthropic").unwrap(), "sk-test-123");
+    assert_eq!(
+        loaded
+            .api_keys
+            .get("anthropic")
+            .expect("anthropic key should exist"),
+        "sk-test-123"
+    );
     assert!(
         loaded
             .configured_providers
@@ -57,14 +63,16 @@ fn test_persistence_all() {
 
     // ── 3. Session roundtrip ──
     let msgs = vec![make_msg("user", "Hello"), make_msg("user", "Hi there!")];
-    persistence::save_session(&msgs).unwrap();
-    let loaded = persistence::load_session().unwrap();
+    persistence::save_session(&msgs).expect("should save session");
+    let loaded = persistence::load_session().expect("should load session");
     assert_eq!(loaded.len(), 2);
     assert_eq!(loaded[0].content, "Hello");
 
     // ── 4. Named sessions ──
-    persistence::save_session_as("project-x", &[make_msg("user", "Session A")]).unwrap();
-    persistence::save_session_as("project-y", &[make_msg("user", "Session B")]).unwrap();
+    persistence::save_session_as("project-x", &[make_msg("user", "Session A")])
+        .expect("should save project-x session");
+    persistence::save_session_as("project-y", &[make_msg("user", "Session B")])
+        .expect("should save project-y session");
 
     let sessions = persistence::list_sessions();
     assert!(
@@ -74,11 +82,14 @@ fn test_persistence_all() {
     );
     assert!(sessions.contains(&"project-y".to_string()));
 
-    let loaded = persistence::load_session_as("project-x").unwrap();
+    let loaded = persistence::load_session_as("project-x")
+        .expect("should load project-x session")
+        .expect("project-x session should exist");
     assert_eq!(loaded[0].content, "Session A");
 
     // ── 5. Delete session ──
-    persistence::delete_session("project-y").unwrap();
+    persistence::delete_session("project-y")
+        .expect("should delete project-y session");
     let sessions = persistence::list_sessions();
     assert!(!sessions.contains(&"project-y".to_string()));
 

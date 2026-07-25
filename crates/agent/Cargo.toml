@@ -1,0 +1,17 @@
+[package]
+name = "workflow-agent"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+rig.workspace = true
+tokio.workspace = true
+futures.workspace = true
+async-stream.workspace = true
+dashmap.workspace = true
+anyhow.workspace = true
+lru.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

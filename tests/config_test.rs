@@ -14,13 +14,19 @@ fn test_default_config_source() {
         "should have at least one default provider"
     );
 
-    let openai = configs.iter().find(|c| c.id == "openai").unwrap();
+    let openai = configs
+        .iter()
+        .find(|c| c.id == "openai")
+        .expect("defaults should include openai");
     assert_eq!(openai.name, "OpenAI");
     assert!(openai.base_url.contains("api.openai.com"));
     assert!(openai.requires_api_key());
     assert!(openai.supports_tools());
 
-    let ollama = configs.iter().find(|c| c.id == "ollama").unwrap();
+    let ollama = configs
+        .iter()
+        .find(|c| c.id == "ollama")
+        .expect("defaults should include ollama");
     assert_eq!(ollama.name, "Ollama");
     assert!(!ollama.requires_api_key());
 }
@@ -46,9 +52,13 @@ fn test_merge_configs_deduplicates_by_id() {
             ..Default::default()
         }],
     };
-    let merged = merge_configs(&[&source_a, &source_b]).unwrap();
+    let merged = merge_configs(&[&source_a, &source_b])
+        .expect("merge should succeed");
     // "custom" id should be deduplicated — source_b wins
-    let custom = merged.iter().find(|c| c.id == "custom").unwrap();
+    let custom = merged
+        .iter()
+        .find(|c| c.id == "custom")
+        .expect("merged configs should include custom");
     assert_eq!(custom.name, "Custom B");
     assert_eq!(custom.base_url, "https://b.example.com");
     assert_eq!(merged.len(), 1);
@@ -59,7 +69,8 @@ fn test_merge_configs_deduplicates_by_id() {
 fn test_merge_defaults_with_empty_file() {
     let defaults = DefaultConfigSource;
     let empty = SingleSource { configs: vec![] };
-    let merged = merge_configs(&[&defaults, &empty]).unwrap();
+    let merged = merge_configs(&[&defaults, &empty])
+        .expect("merge with empty should succeed");
     assert_eq!(merged.len(), 3); // openai, anthropic, ollama
 }
 

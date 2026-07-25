@@ -1,0 +1,20 @@
+[package]
+name = "workflow-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+rig.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+
+workflow-agent = { path = "../agent" }
+workflow-tool = { path = "../tool" }
+workflow-role = { path = "../role" }
+workflow-config = { path = "../config" }
+workflow-mcp = { path = "../mcp" }
+tracing.workspace = true

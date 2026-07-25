@@ -1,25 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/wf-core",
-    "crates/wf-llm",
-    "crates/wf-l1",
-    "crates/wf-l2",
-    "crates/wf-experience",
-    "crates/wf-models",
-    "crates/wf-agent",
-    "crates/wf-tools",
-    "crates/wf-persistence",
-    "crates/wf-reflection",
-    "crates/wf-runtime",
-    "crates/wf-tui",
-    "crates/wf-workflow",
+    "crates/*",
 ]
-
+default-members = ["crates/workflow"]
+exclude = ["crates/workflow-ui"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.96"
 authors = ["Workflow Team"]
 license = "MIT"
 
@@ -28,6 +17,7 @@ tokio = { version = "1", features = ["full"] }
 rayon = "1"
 smallvec = "1"
 memmap2 = "0.9"
+lru = "0.18.1"
 rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -46,8 +36,8 @@ chrono = "0.4"
 reqwest = { version = "0.13", features = ["json", "rustls"] }
 async-stream = "0.3"
 futures = "0.3"
-fastembed = "4"
-ort = "=2.0.0-rc.9"
+# fastembed = "4"
+# ort = "=2.0.0-rc.9"
 pulldown-cmark = "0.13"
 moka = { version = "0.12", features = ["sync"] }
 regex = "1"
@@ -57,6 +47,9 @@ tiktoken-rs = "0.12"
 bincode = "1"
 tokio-test = "0.4"
 tempfile = "3"
+aes-gcm = "0.10"
+base64 = "0.22"
+rmcp = { version = "1.8", default-features = false, features = ["client", "macros", "transport-child-process", "transport-streamable-http-client-reqwest", "client-side-sse", "which-command"] }
 
 [profile.release]
 lto = true

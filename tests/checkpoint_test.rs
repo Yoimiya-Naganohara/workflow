@@ -32,7 +32,7 @@ fn make_agent(name: &str, role: &str, goal: &str) -> workflow::agent::Agent {
 
 #[test]
 fn test_checkpoint_save_load_roundtrip() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir = tempfile::TempDir::new().expect("should create temp dir");
     let cp = Checkpoint::with_dir(dir.path().to_path_buf());
 
     let mut pool = workflow::agent::AgentPool::new();
@@ -42,45 +42,63 @@ fn test_checkpoint_save_load_roundtrip() {
 
     let mut graph = TaskGraph::new();
     let root_id = graph.spawn_root("integration goal");
-    graph.mark_decomposed(root_id).unwrap();
-    let child_id = graph.spawn_child(root_id, "child task").unwrap();
-    graph.mark_ready(child_id).unwrap();
+    graph
+        .mark_decomposed(root_id)
+        .expect("should mark root decomposed");
+    let child_id = graph
+        .spawn_child(root_id, "child task")
+        .expect("should spawn child");
+    graph
+        .mark_ready(child_id)
+        .expect("should mark child ready");
 
     // Save
-    cp.save_snapshot(&pool, &graph).unwrap();
+    cp.save_snapshot(&pool, &graph)
+        .expect("should save snapshot");
 
     // Load
-    let snapshot = cp.restore_snapshot().unwrap().unwrap();
+    let snapshot = cp
+        .restore_snapshot()
+        .expect("should restore snapshot")
+        .expect("snapshot should be present");
     let loaded_pool = Checkpoint::rehydrate_pool(&snapshot);
     let loaded_graph = snapshot.task_graph;
 
     // Verify pool
-    let loaded_agent = loaded_pool.get_agent(&agent_id).unwrap();
+    let loaded_agent = loaded_pool
+        .get_agent(&agent_id)
+        .expect("loaded agent should exist");
     assert_eq!(loaded_agent.goal, "integration test goal");
     assert_eq!(loaded_agent.role, "tester");
     assert_eq!(loaded_agent.status, workflow::agent::AgentStatus::Idle);
 
     // Verify graph
     assert!(loaded_graph.contains(&root_id));
-    let root = loaded_graph.get(&root_id).unwrap();
+    let root = loaded_graph
+        .get(&root_id)
+        .expect("root should be in loaded graph");
     assert_eq!(root.goal, "integration goal");
 
-    let child = loaded_graph.get(&child_id).unwrap();
+    let child = loaded_graph
+        .get(&child_id)
+        .expect("child should be in loaded graph");
     assert_eq!(child.parent, Some(root_id));
 }
 
 #[test]
 fn test_checkpoint_nonexistent_returns_none() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir = tempfile::TempDir::new().expect("should create temp dir");
     let cp = Checkpoint::with_dir(dir.path().join("nonexistent_subdir"));
 
-    let result = cp.restore_snapshot().unwrap();
+    let result = cp
+        .restore_snapshot()
+        .expect("restore on nonexistent dir should not error");
     assert!(result.is_none(), "no checkpoint dir → None");
 }
 
 #[test]
 fn test_checkpoint_multiple_agents_roundtrip() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir = tempfile::TempDir::new().expect("should create temp dir");
     let cp = Checkpoint::with_dir(dir.path().to_path_buf());
 
     let mut pool = workflow::agent::AgentPool::new();
@@ -96,14 +114,20 @@ fn test_checkpoint_multiple_agents_roundtrip() {
         .collect();
 
     let graph = TaskGraph::new();
-    cp.save_snapshot(&pool, &graph).unwrap();
+    cp.save_snapshot(&pool, &graph)
+        .expect("should save snapshot");
 
-    let snapshot = cp.restore_snapshot().unwrap().unwrap();
+    let snapshot = cp
+        .restore_snapshot()
+        .expect("should restore snapshot")
+        .expect("snapshot should be present");
     let loaded = Checkpoint::rehydrate_pool(&snapshot);
 
     assert_eq!(loaded.agents().len(), 5);
     for (i, id) in ids.iter().enumerate() {
-        let agent = loaded.get_agent(id).unwrap();
+        let agent = loaded
+            .get_agent(id)
+            .expect("loaded agent should exist");
         assert_eq!(agent.name, format!("agent-{}", i));
         assert_eq!(agent.depth, i as u32);
     }
@@ -111,17 +135,21 @@ fn test_checkpoint_multiple_agents_roundtrip() {
 
 #[test]
 fn test_checkpoint_clear() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir = tempfile::TempDir::new().expect("should create temp dir");
     let cp = Checkpoint::with_dir(dir.path().to_path_buf());
 
     let pool = workflow::agent::AgentPool::new();
     let graph = TaskGraph::new();
 
     // Save then clear
-    cp.save_snapshot(&pool, &graph).unwrap();
+    cp.save_snapshot(&pool, &graph)
+        .expect("should save snapshot");
     assert!(cp.exists());
 
-    cp.clear().unwrap();
+    cp.clear().expect("should clear checkpoint");
     assert!(!cp.exists());
-    assert!(cp.restore_snapshot().unwrap().is_none());
+    assert!(cp
+        .restore_snapshot()
+        .expect("restore after clear should not error")
+        .is_none());
 }

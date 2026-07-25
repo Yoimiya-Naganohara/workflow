@@ -1,0 +1,12 @@
+[package]
+name = "workflow-role"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+workflow-tool = { path = "../tool" }
+workflow-agent = { path = "../agent" }
+tokio.workspace = true
+rig.workspace = true
+async-stream.workspace = true

@@ -1,0 +1,511 @@
+use std::collections::HashSet;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_decoration::WebviewWindowExt;
+use workflow_config::UserConfig;
+use workflow_core::{Runtime, RuntimeConfig, RuntimeSnapshot, WorkflowEvent};
+use workflow_providers::service::ProviderService;
+
+struct AppState {
+    runtime: Mutex<Option<Arc<Runtime>>>,
+    service: Mutex<ProviderService>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderModel {
+    pub id: String,
+    pub name: String,
+    pub supports_tools: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderEntry {
+    pub id: String,
+    pub name: String,
+    pub api_url: Option<String>,
+    pub models: Vec<ProviderModel>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum UiEvent {
+    AgentAdded { agent_id: u32 },
+    AgentRemoved { agent_id: u32 },
+    AgentStopped { agent_id: u32 },
+    AgentOutput { agent_id: u32 },
+    TranscriptChanged { agent_id: u32 },
+    RolesChanged,
+    ResyncRequired,
+    Error { message: String },
+    McpConnected { server: String, tool_count: usize },
+    McpDisconnected { server: String },
+    McpToolNeedsApproval {
+        request_id: String,
+        server: String,
+        tool: String,
+        arguments: serde_json::Value,
+    },
+}
+
+impl From<WorkflowEvent> for UiEvent {
+    fn from(event: WorkflowEvent) -> Self {
+        match event {
+            WorkflowEvent::AgentAdded(agent) => Self::AgentAdded { agent_id: agent.id },
+            WorkflowEvent::AgentRemoved(agent_id) => Self::AgentRemoved { agent_id },
+            WorkflowEvent::AgentStopped(agent_id) => Self::AgentStopped { agent_id },
+            WorkflowEvent::AgentOutput { agent_id, .. } => Self::AgentOutput { agent_id },
+            WorkflowEvent::TranscriptChanged(agent_id) => Self::TranscriptChanged { agent_id },
+            WorkflowEvent::RolesChanged => Self::RolesChanged,
+            WorkflowEvent::ResyncRequired => Self::ResyncRequired,
+            WorkflowEvent::McpConnected {
+                server,
+                tool_count,
+            } => Self::McpConnected {
+                server,
+                tool_count,
+            },
+            WorkflowEvent::McpDisconnected { server } => Self::McpDisconnected { server },
+            WorkflowEvent::McpToolNeedsApproval {
+                request_id,
+                server,
+                tool,
+                arguments,
+            } => Self::McpToolNeedsApproval {
+                request_id,
+                server,
+                tool,
+                arguments,
+            },
+        }
+    }
+}
+
+fn entry_from_provider(p: &workflow_providers::ProviderInfo) -> ProviderEntry {
+    let models = p
+        .models
+        .values()
+        .map(|m| ProviderModel {
+            id: m.id.clone(),
+            name: m.name.clone(),
+            supports_tools: m.tool_call.unwrap_or(false),
+        })
+        .collect();
+    ProviderEntry {
+        id: p.id.clone(),
+        name: p.name.clone(),
+        api_url: p.api.clone(),
+        models,
+    }
+}
+
+#[tauri::command]
+async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderEntry>, String> {
+    {
+        let guard = state.service.lock().await;
+        let entries: Vec<ProviderEntry> = guard
+            .store()
+            .providers()
+            .iter()
+            .map(entry_from_provider)
+            .collect();
+        if !entries.is_empty() {
+            return Ok(entries);
+        }
+    }
+
+    // Load from cache (lock released before async call)
+    let mut service = ProviderService::new();
+    service.initialize().await.map_err(|e| e.to_string())?;
+    let entries: Vec<ProviderEntry> = service
+        .store()
+        .providers()
+        .iter()
+        .map(entry_from_provider)
+        .collect();
+    let mut guard = state.service.lock().await;
+    *guard = service;
+    Ok(entries)
+}
+
+#[tauri::command]
+async fn fetch_providers(state: State<'_, AppState>) -> Result<Vec<ProviderEntry>, String> {
+    let mut service = ProviderService::new();
+    service.refresh().await.map_err(|e| e.to_string())?;
+    let entries: Vec<ProviderEntry> = service
+        .store()
+        .providers()
+        .iter()
+        .map(entry_from_provider)
+        .collect();
+    let mut guard = state.service.lock().await;
+    *guard = service;
+    Ok(entries)
+}
+
+#[tauri::command]
+async fn configure_runtime(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    provider_id: String,
+    api_key: String,
+    model: String,
+) -> Result<(), String> {
+    let needs_init = state.service.lock().await.store().providers().is_empty();
+    if needs_init {
+        let mut svc = ProviderService::new();
+        svc.initialize().await.map_err(|e| e.to_string())?;
+        *state.service.lock().await = svc;
+    }
+    let base_url = {
+        let guard = state.service.lock().await;
+        guard
+            .store()
+            .providers()
+            .iter()
+            .find(|p| p.id == provider_id)
+            .and_then(|p| p.api.clone())
+            .unwrap_or_default()
+    };
+
+    let protocol = workflow_config::ProviderProtocol::from_id(&provider_id);
+    let provider_config = workflow_config::ProviderConfig {
+        id: provider_id,
+        name: String::new(),
+        protocol,
+        base_url,
+        api_key,
+        models: vec![model.clone()],
+        ..Default::default()
+    };
+    let runtime_config = RuntimeConfig {
+        provider: provider_config,
+        model,
+        agent_capacity: std::num::NonZeroUsize::new(100)
+            .expect("100 must be non-zero"),
+    };
+    let runtime = Arc::new(Runtime::try_new(runtime_config).map_err(|e| e.to_string())?);
+    spawn_event_bridge(app, Arc::clone(&runtime));
+    *state.runtime.lock().await = Some(runtime);
+    Ok(())
+}
+
+#[tauri::command]
+async fn approve_mcp_tool(
+    state: State<'_, AppState>,
+    request_id: String,
+    approved: bool,
+) -> Result<(), String> {
+    let runtime = state.runtime.lock().await.clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    runtime.mcp().resolve_approval(&request_id, approved).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn snapshot(
+    state: State<'_, AppState>,
+    selected: Option<u32>,
+) -> Result<RuntimeSnapshot, String> {
+    let runtime = state.runtime.lock().await.clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    runtime
+        .initialize()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(runtime.snapshot(selected).await)
+}
+
+#[tauri::command]
+async fn send(
+    state: State<'_, AppState>,
+    target: u32,
+    text: String,
+) -> Result<RuntimeSnapshot, String> {
+    let runtime = state.runtime.lock().await.clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    runtime
+        .initialize()
+        .await
+        .map_err(|error| error.to_string())?;
+    runtime
+        .send_message(target, text)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(runtime.snapshot(Some(target)).await)
+}
+
+#[tauri::command]
+async fn stop_agent(
+    state: State<'_, AppState>,
+    target: u32,
+) -> Result<(), String> {
+    let runtime = state.runtime.lock().await.clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    runtime
+        .stop_agent(target)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn create_agent(
+    state: State<'_, AppState>,
+    role_name: String,
+) -> Result<Vec<workflow_core::AgentInfo>, String> {
+    let runtime = state.runtime.lock().await.clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    runtime
+        .initialize()
+        .await
+        .map_err(|error| error.to_string())?;
+    runtime
+        .create_agent(role_name)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(runtime.list_agents().await)
+}
+
+#[tauri::command]
+async fn remove_agent(
+    state: State<'_, AppState>,
+    id: u32,
+) -> Result<Vec<workflow_core::AgentInfo>, String> {
+    let runtime = state.runtime.lock().await.clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    runtime
+        .initialize()
+        .await
+        .map_err(|error| error.to_string())?;
+    runtime.remove_agent(id).await;
+    Ok(runtime.list_agents().await)
+}
+
+#[tauri::command]
+fn get_roles(state: State<'_, AppState>) -> Vec<workflow_core::RoleInfo> {
+    let runtime = match state.runtime.blocking_lock().clone() {
+        Some(r) => r,
+        None => return Vec::new(),
+    };
+    runtime.list_roles()
+}
+
+fn roles_path() -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".workflow").join("roles.json")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedRole {
+    name: String,
+    definition: String,
+}
+
+fn default_roles() -> Vec<workflow_core::RoleInfo> {
+    vec![
+        workflow_core::RoleInfo {
+            id: "planner".into(),
+            name: "planner".into(),
+            definition: "I should help user to plan".into(),
+        },
+        workflow_core::RoleInfo {
+            id: "executor".into(),
+            name: "executor".into(),
+            definition: "I should execute the plan".into(),
+        },
+    ]
+}
+
+fn read_saved_roles() -> Vec<SavedRole> {
+    let path = roles_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    let data = match std::fs::read_to_string(&path) {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str(&data).unwrap_or_default()
+}
+
+fn write_saved_roles(roles: &[SavedRole]) {
+    if let Ok(data) = serde_json::to_string_pretty(roles) {
+        let path = roles_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, data);
+    }
+}
+
+fn merge_roles(defaults: Vec<workflow_core::RoleInfo>, saved: Vec<SavedRole>) -> Vec<workflow_core::RoleInfo> {
+    let mut names: HashSet<String> = defaults.iter().map(|r| r.name.clone()).collect();
+    let mut merged = defaults;
+    for s in saved {
+        if names.insert(s.name.clone()) {
+            merged.push(workflow_core::RoleInfo {
+                id: s.name.clone(),
+                name: s.name,
+                definition: s.definition,
+            });
+        }
+    }
+    merged
+}
+
+#[tauri::command]
+fn add_role(
+    state: State<'_, AppState>,
+    name: String,
+    definition: String,
+) -> Vec<workflow_core::RoleInfo> {
+    if let Some(runtime) = state.runtime.blocking_lock().clone() {
+        let roles = runtime.add_role(name.clone(), definition.clone());
+        let saved: Vec<SavedRole> = roles.iter().map(|r| SavedRole {
+            name: r.name.clone(),
+            definition: r.definition.clone(),
+        }).collect();
+        write_saved_roles(&saved);
+        return roles;
+    }
+
+    let mut saved = read_saved_roles();
+    if !saved.iter().any(|r| r.name == name) {
+        saved.push(SavedRole { name, definition });
+    }
+    write_saved_roles(&saved);
+    merge_roles(default_roles(), saved)
+}
+
+#[tauri::command]
+fn load_roles(state: State<'_, AppState>) -> Vec<workflow_core::RoleInfo> {
+    if let Some(runtime) = state.runtime.blocking_lock().clone() {
+        let saved = read_saved_roles();
+        for role in &saved {
+            let existing = runtime.list_roles();
+            if !existing.iter().any(|r| r.name == role.name) {
+                runtime.add_role(role.name.clone(), role.definition.clone());
+            }
+        }
+        let all = runtime.list_roles();
+        let saved: Vec<SavedRole> = all.iter().map(|r| SavedRole {
+            name: r.name.clone(),
+            definition: r.definition.clone(),
+        }).collect();
+        write_saved_roles(&saved);
+        return all;
+    }
+
+    let saved = read_saved_roles();
+    merge_roles(default_roles(), saved)
+}
+
+#[tauri::command]
+fn save_config(config: UserConfig) -> Result<(), String> {
+    config.save().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_config() -> Result<Option<UserConfig>, String> {
+    UserConfig::load().map_err(|e| e.to_string())
+}
+
+fn spawn_event_bridge(app: AppHandle, runtime: Arc<Runtime>) {
+    tauri::async_runtime::spawn(async move {
+        let mut events = runtime.subscribe();
+        if let Err(error) = runtime.initialize().await {
+            let _ = app.emit(
+                "workflow:event",
+                UiEvent::Error {
+                    message: error.to_string(),
+                },
+            );
+            return;
+        }
+
+        'events: loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let _ = app.emit("workflow:event", UiEvent::ResyncRequired);
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+
+            // Forward critical events immediately without coalescing.
+            let is_critical = matches!(
+                &event,
+                WorkflowEvent::McpToolNeedsApproval { .. }
+            );
+            if is_critical {
+                let _ = app.emit("workflow:event", UiEvent::from(event));
+                continue;
+            }
+
+            // Non-critical events: coalesce to avoid flooding the UI.
+            let mut ui_event = UiEvent::from(event);
+            tokio::time::sleep(std::time::Duration::from_millis(32)).await;
+            loop {
+                match events.try_recv() {
+                    Ok(next) => ui_event = UiEvent::from(next),
+                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
+                        ui_event = UiEvent::ResyncRequired;
+                    }
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                    Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
+                        let _ = app.emit("workflow:event", ui_event);
+                        break 'events;
+                    }
+                }
+            }
+            let _ = app.emit("workflow:event", ui_event);
+        }
+    });
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_decoration::init())
+        .setup(|app| {
+            let service = Mutex::new(ProviderService::new());
+            let runtime = Mutex::new(None);
+            app.manage(AppState { runtime, service });
+
+            #[cfg(desktop)]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.create_overlay_titlebar();
+                    let _ = window.show();
+                }
+            }
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            list_providers,
+            fetch_providers,
+            configure_runtime,
+            snapshot,
+            send,
+            stop_agent,
+            create_agent,
+            remove_agent,
+            get_roles,
+            add_role,
+            save_config,
+            load_config,
+            load_roles,
+            approve_mcp_tool,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running Tauri application");
+}
