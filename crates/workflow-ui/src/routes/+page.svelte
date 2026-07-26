@@ -170,6 +170,12 @@
 			onRemoveAgent={(id) => app.removeAgent(id)}
 			onRolesClick={() => app.openDialog("roles")}
 			onToggleRoles={() => app.toggleRoles()}
+			mcpConfigs={app.mcpConfigs}
+			mcpConnections={app.mcpConnections}
+			mcpExpanded={app.mcpExpanded}
+			onToggleMcp={() => app.toggleMcp()}
+			onAddMcpServer={(config) => app.addMcpServer(config)}
+			onRemoveMcpServer={(name) => app.removeMcpServer(name)}
 		/>
 	</div>
 
@@ -194,13 +200,8 @@
 				{/if}
 			</Button>
 			{#if app.mcpServers.length > 0}
-				<div
-					class="flex items-center gap-1 ml-4 pl-4 "
-				>
-					<span class="size-2 rounded-full bg-cyan-500"></span>
-					<span class="text-xs text-muted-foreground/70 tabular-nums">
-						{app.mcpServers.length} MCP
-					</span>
+				<div class="ml-4 pl-4" title="{app.mcpServers.length} MCP server{app.mcpServers.length !== 1 ? 's' : ''} connected">
+					<span class="size-2 rounded-full bg-cyan-500 block"></span>
 				</div>
 			{/if}
 			<div class="flex-1"></div>

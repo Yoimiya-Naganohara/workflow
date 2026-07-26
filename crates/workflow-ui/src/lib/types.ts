@@ -72,3 +72,21 @@ export interface ChatItem {
 	status?: "running" | "done";
 	streaming?: boolean;
 }
+
+// ── MCP types ─────────────────────────────────────────────────
+
+export interface McpConnectionInfo {
+	name: string;
+	tool_names: string[];
+}
+
+export interface McpServerConfig {
+	name: string;
+	transport: McpTransport;
+	dangerous_tools?: string[];
+}
+
+export type McpTransport =
+	| { type: "stdio"; command: string; args: string[]; env?: Record<string, string> }
+	| { type: "sse"; url: string }
+	| { type: "streamable_http"; url: string };

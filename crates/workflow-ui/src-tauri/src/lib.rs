@@ -8,6 +8,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_decoration::WebviewWindowExt;
 use workflow_config::UserConfig;
 use workflow_core::{Runtime, RuntimeConfig, RuntimeSnapshot, WorkflowEvent};
+use workflow_mcp::config::McpConfigSource;
+use workflow_mcp::{McpConnectionInfo, McpServerConfig};
 use workflow_providers::service::ProviderService;
 
 struct AppState {
@@ -202,6 +204,51 @@ async fn approve_mcp_tool(
     let runtime = state.runtime.lock().await.clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime.mcp().resolve_approval(&request_id, approved).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_mcp_connections(
+    state: State<'_, AppState>,
+) -> Result<Vec<McpConnectionInfo>, String> {
+    let runtime = state.runtime.lock().await.clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    Ok(runtime.mcp().list_connections().await)
+}
+
+#[tauri::command]
+async fn list_mcp_configs() -> Result<Vec<McpServerConfig>, String> {
+    let source = McpConfigSource::new(McpConfigSource::default_path());
+    source.load().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn add_mcp_server(
+    state: State<'_, AppState>,
+    config: McpServerConfig,
+) -> Result<(), String> {
+    // Persist config first
+    let source = McpConfigSource::new(McpConfigSource::default_path());
+    source.add_server(config.clone()).map_err(|e| e.to_string())?;
+    // Then connect
+    let runtime = state.runtime.lock().await.clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    runtime.mcp().connect_one(&config).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn remove_mcp_server(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    // Disconnect first
+    let runtime = state.runtime.lock().await.clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    let _ = runtime.mcp().disconnect(&name).await;
+    // Then remove from config
+    let source = McpConfigSource::new(McpConfigSource::default_path());
+    source.remove_server(&name).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -505,6 +552,10 @@ pub fn run() {
             load_config,
             load_roles,
             approve_mcp_tool,
+            list_mcp_connections,
+            list_mcp_configs,
+            add_mcp_server,
+            remove_mcp_server,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

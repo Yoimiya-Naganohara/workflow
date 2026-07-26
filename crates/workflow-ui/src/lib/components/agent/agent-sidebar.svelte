@@ -8,6 +8,9 @@
 	import { Plus, MessageSquare, Brain, Settings as SettingsIcon, ChevronRight, ChevronDown, X, Loader2, CircleDot, AlertCircle, Sun, Moon, Bug } from "@lucide/svelte";
 	import { cn, formatRole } from "$lib/utils.js";
 	import type { AgentInfo, AgentId, AgentStatus } from "$lib/types";
+	import type { McpConnectionInfo, McpServerConfig } from "$lib/types";
+
+	import McpPanel from "./mcp-panel.svelte";
 
 	const eventLog = getContext<{ open: boolean; toggle: () => void }>("event-log");
 
@@ -22,6 +25,12 @@
 		roles,
 		rolesExpanded,
 		onToggleRoles,
+		mcpConfigs,
+		mcpConnections,
+		mcpExpanded,
+		onToggleMcp,
+		onAddMcpServer,
+		onRemoveMcpServer,
 	}: {
 		agents: AgentInfo[];
 		selected: AgentId | null;
@@ -33,6 +42,12 @@
 		roles: import("$lib/types").RoleInfo[];
 		rolesExpanded: boolean;
 		onToggleRoles: () => void;
+		mcpConfigs: McpServerConfig[];
+		mcpConnections: McpConnectionInfo[];
+		mcpExpanded: boolean;
+		onToggleMcp: () => void;
+		onAddMcpServer: (config: McpServerConfig) => void;
+		onRemoveMcpServer: (name: string) => void;
 	} = $props();
 
 	function statusColor(status: AgentStatus): string {
@@ -161,6 +176,15 @@
 			{/each}
 		</div>
 	</ScrollArea>
+
+	<McpPanel
+		configs={mcpConfigs}
+		connections={mcpConnections}
+		expanded={mcpExpanded}
+		onToggle={onToggleMcp}
+		onAdd={onAddMcpServer}
+		onRemove={onRemoveMcpServer}
+	/>
 
 	<div class="shrink-0 ">
 		<button

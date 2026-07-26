@@ -52,6 +52,8 @@ import type {
     PendingAction,
     ChatItem,
     ProviderEntry,
+    McpConnectionInfo,
+    McpServerConfig,
 } from "./types";
 
 export interface LogEntry {
@@ -91,6 +93,11 @@ class AppState {
         tool: string;
         arguments: Record<string, unknown>;
     } | null>(null);
+
+    // ── MCP sidebar panel state ────────────────────────────────
+    mcpConfigs = $state<McpServerConfig[]>([]);
+    mcpConnections = $state<McpConnectionInfo[]>([]);
+    mcpExpanded = $state(true);
 
     #unlisten: (() => void) | null = null;
     #observer: MutationObserver | null = null;
@@ -223,6 +230,47 @@ class AppState {
     };
     toggleRoles = () => {
         this.rolesExpanded = !this.rolesExpanded;
+    };
+
+    toggleMcp = () => {
+        this.mcpExpanded = !this.mcpExpanded;
+    };
+
+    // ── MCP panel methods ─────────────────────────────────────
+    loadMcpConnections = async () => {
+        try {
+            this.mcpConnections = (await invoke("list_mcp_connections")) as McpConnectionInfo[];
+        } catch (e) {
+            console.error("load mcp connections:", e);
+        }
+    };
+
+    loadMcpConfigs = async () => {
+        try {
+            this.mcpConfigs = (await invoke("list_mcp_configs")) as McpServerConfig[];
+        } catch (e) {
+            console.error("load mcp configs:", e);
+        }
+    };
+
+    addMcpServer = async (config: McpServerConfig) => {
+        try {
+            await invoke("add_mcp_server", { config });
+            await this.loadMcpConfigs();
+            await this.loadMcpConnections();
+        } catch (e) {
+            this.error = `add mcp server: ${e}`;
+        }
+    };
+
+    removeMcpServer = async (name: string) => {
+        try {
+            await invoke("remove_mcp_server", { name });
+            await this.loadMcpConfigs();
+            await this.loadMcpConnections();
+        } catch (e) {
+            this.error = `remove mcp server: ${e}`;
+        }
     };
 
     loadRoles = async () => {
@@ -489,6 +537,8 @@ class AppState {
         this.loadRoles();
         this.pull(null);
         this.loadProviders();
+        this.loadMcpConfigs();
+        this.loadMcpConnections();
 
         const updateTheme = () => {
             const isDark = document.documentElement.classList.contains("dark");
@@ -533,12 +583,14 @@ class AppState {
                     } else {
                         this.mcpServers.push({ name: server, tool_count });
                     }
+                    this.loadMcpConnections();
                 }
                 if (event.payload.type === "mcp_disconnected") {
                     const msg: { type: "mcp_disconnected"; server: string } = event.payload as any;
                     this.mcpServers = this.mcpServers.filter(
                         (s) => s.name !== msg.server,
                     );
+                    this.loadMcpConnections();
                 }
                 if (event.payload.type === "mcp_tool_needs_approval") {
                     this.pendingMcpApproval = event.payload;

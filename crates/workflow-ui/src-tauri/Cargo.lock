@@ -10825,6 +10825,7 @@ dependencies = [
  "tokio",
  "workflow-config",
  "workflow-core",
+ "workflow-mcp",
  "workflow-providers",
 ]
 
