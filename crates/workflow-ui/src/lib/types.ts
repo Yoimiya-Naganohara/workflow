@@ -90,3 +90,12 @@ export type McpTransport =
 	| { type: "stdio"; command: string; args: string[]; env?: Record<string, string> }
 	| { type: "sse"; url: string }
 	| { type: "streamable_http"; url: string };
+
+/** Data payload for custom SvelteFlow AgentNode */
+export interface AgentNodeData extends Record<string, unknown> {
+	id: number;
+	role: string;
+	task: string | null;
+	status: AgentStatus;
+	roleColor: string;
+}
