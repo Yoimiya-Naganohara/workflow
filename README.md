@@ -55,7 +55,7 @@ The [`Runtime`](crates/core/src/lib.rs) is the central coordinator. It owns:
 
 ```mermaid
 flowchart LR
-    Init[initialize] --> RootAgent[Create Root Agent<br/>(planner)]
+    Init[initialize] --> RootAgent[Create Root Agent -- planner]
     RootAgent -->|orchestrate tool| Waves[Task Waves]
     Waves --> Child1[Child Agent A]
     Waves --> Child2[Child Agent B]
