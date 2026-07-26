@@ -16,24 +16,22 @@ async fn main() {
     let Some(messages) = response.messages else {
         return;
     };
-    messages.iter().for_each(|msg| match msg {
-        rig::message::Message::Assistant { id: _id, content } => {
-            content.iter().for_each(|c| match c {
-                rig::message::AssistantContent::Reasoning(Reasoning {
-                    id: _rid, content, ..
-                }) => {
+    messages.iter().for_each(|msg| {
+        if let rig::message::Message::Assistant { id: _id, content } = msg {
+            content.iter().for_each(|c| {
+                if let rig::message::AssistantContent::Reasoning(Reasoning {
+                    id: _rid,
+                    content,
+                    ..
+                }) = c
+                {
                     for content in content.iter() {
-                        match content {
-                            ReasoningContent::Text { text, .. } => {
-                                println!("{}", text)
-                            }
-                            _ => {}
+                        if let ReasoningContent::Text { text, .. } = content {
+                            println!("{}", text)
                         }
                     }
                 }
-                _ => {}
             });
         }
-        _ => {}
     });
 }
