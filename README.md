@@ -18,85 +18,51 @@
 
 ---
 
-## Overview
+## Why Workflow?
 
-**Workflow** is a Rust-native agentic runtime that orchestrates swarms of LLM-powered agents to decompose, delegate, and execute complex missions. It combines a role-based agent pool, a DAG-based task orchestrator, MCP (Model Context Protocol) tool integration, and a rich Tauri desktop UI.
+LLM agents today are isolated — each one operates alone, unaware of other agents, unable to delegate, and blind to the bigger picture. As tasks grow complex, a single agent hits context limits, loses focus, and produces shallow results.
 
-```mermaid
-flowchart TB
-    User -->|input| Runtime[Runtime]
-    Runtime -->|spawn / delegate| AgentPool[Agent Pool<br/>LRU-cached]
-    Runtime -->|roles| RolePool[Role Pool]
+**Workflow** turns that around. Instead of one agent doing everything, you get a **swarm of specialized agents** that:
 
-    AgentPool -->|tool calls| Orchestrate[Orchestrator]
-    Orchestrate -->|DAG waves| ChildAgents[Child Agents]
+- **Decompose** complex missions into smaller, focused tasks
+- **Delegate** subtasks to the right agent for each job (planner, researcher, coder, reviewer…)
+- **Orchestrate** execution in dependency-respecting waves — no step starts before its inputs are ready
+- **Extend** their capabilities through MCP servers — filesystem, database, browser, or any MCP-compatible tool
+- **Stay visible** — every agent streams text, reasoning, and tool calls to a desktop UI or CLI in real time
 
-    AgentPool -->|MCP tools| MCP[McpClientManager]
-    MCP -->|stdio / SSE / HTTP| External[External MCP Servers]
+The result: each agent does one thing well, within its context window, and the runtime handles the coordination.
 
-    AgentPool -->|events| Events[Event Bus<br/>broadcast::channel]
-    Events --> UI[Desktop UI<br/>Tauri + Svelte]
-    Events --> CLI[CLI stdout]
+## How It Works
 
-    Runtime -->|config| Config[Config Store<br/>XOR-obfuscated]
-```
+### Core Loop
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation, crate map, and design principles.
+1. **Create roles** — define agent personalities with system prompts (`planner`, `coder`, `reviewer`, ...)
+2. **Send a mission** — the root agent receives your prompt and decomposes it into a DAG of tasks
+3. **Tasks execute in waves** — each wave runs independent tasks in parallel; dependent tasks wait for their inputs
+4. **Agents use tools** — built-in tools (`send_message`, `orchestrate`, `list_agents`) plus any MCP server tools you connect
+5. **Results stream back** — text, reasoning, tool calls, and tool results appear in real time in the UI
 
-## Desktop UI (Tauri + Svelte)
-
-The [`workflow-ui`](crates/workflow-ui/) crate is a desktop application built with [Tauri 2](https://v2.tauri.app/) and [Svelte 5](https://svelte.dev/), styled with [Tailwind CSS 4](https://tailwindcss.com/) and [shadcn-svelte](https://shadcn-svelte.com/).
-
-- **Chat interface** — ChatGPT-style floating composer with streaming text and reasoning
-- **Agent sidebar** — live agent tree with state indicators
-- **Tool cards** — inline tool call/results display with expandable details
-- **MCP approval dialogs** — user confirmation for dangerous tool execution
-- **Syntax highlighting** — Shiki-powered code blocks with copy button
-- **Agent graph** — D3-based visualization of agent delegation hierarchy
-- **Event log** — real-time diagnostics panel
-- **Dark/light mode** — via `mode-watcher`
+### Quick Start
 
 ```bash
-cd crates/workflow-ui
-pnpm install
-pnpm tauri dev
-```
+# 1. Set your API key
+export OPENCODE_API_KEY="oc_..."
 
-## Getting Started
-
-```bash
-# Build the CLI
+# 2. Build and run the CLI
 cargo build --release
-
-# Run
 cargo run --release
 
-# Build and run the desktop UI (requires Node.js + pnpm)
+# 3. Open the desktop UI (requires Node.js + pnpm)
 cd crates/workflow-ui
 pnpm install
 pnpm tauri dev
-
-# CI gates
-./ci.sh
 ```
 
-### Prerequisites
-
-- Rust 1.96+ (edition 2024)
-- An LLM provider API key (OpenAI, Anthropic, OpenCode AI, or any OpenAI-compatible endpoint)
-- For the desktop UI: [Node.js](https://nodejs.org/) 20+ and [pnpm](https://pnpm.io/) 9+
-- Optional: [MCP servers](https://modelcontextprotocol.io/) for extended tool capabilities
+Type a mission into the CLI or desktop UI, and watch agents decompose, delegate, and execute.
 
 ### Configuration
 
-Provider keys and model selection are configured through a JSON file in `~/.workflow/provider_config.json`. The default provider is **OpenCode AI** (`big-pickle` model).
-
-```bash
-# Override via environment variable
-export OPENCODE_API_KEY="oc_..."
-```
-
-Configuration file structure:
+Provider settings live in `~/.workflow/provider_config.json`:
 
 ```json
 {
@@ -104,16 +70,12 @@ Configuration file structure:
   "name": "OpenCode AI",
   "protocol": "OpenAiCompatible",
   "base_url": "https://opencode.ai/zen/v1",
-  "api_key": "(XOR-obfuscated or plaintext)",
+  "api_key": "sk-...",
   "models": ["big-pickle"]
 }
 ```
 
-API keys can be stored in XOR-obfuscated form (combined with a machine-specific key) for casual security.
-
-### MCP Servers
-
-Define external MCP servers in `~/.workflow/mcp_servers.json`:
+Connect MCP servers (filesystem, browser, database, …) via `~/.workflow/mcp_servers.json`:
 
 ```json
 [
@@ -126,32 +88,37 @@ Define external MCP servers in `~/.workflow/mcp_servers.json`:
 ]
 ```
 
+### Prerequisites
+
+- **Rust 1.96+** — for the CLI runtime
+- **An API key** — any OpenAI-compatible provider (OpenCode AI, OpenAI, Anthropic, others)
+- **Node.js 20+ and pnpm** — only needed for the desktop UI
+- **MCP servers** — optional, for extended tool capabilities
+
+## Project Structure
+
+```
+crates/
+  workflow/          CLI binary
+  workflow-core/     Runtime, event bus, agent factory
+  workflow-agent/    Agent lifecycle, agent pool, A2A protocol
+  workflow-tool/     Built-in tools (orchestrate, send_message, ...)
+  workflow-mcp/      MCP client manager and server config
+  workflow-config/   Provider configuration, XOR secret storage
+  workflow-providers/ Model registry and cache
+  workflow-role/     Role definitions and role pool
+  workflow-ui/       Tauri 2 desktop app with Svelte 5 frontend
+  playground/        Standalone test binary
+```
+
+For detailed architecture, crate map, and design principles, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## CI Gates
 
 ```bash
-./ci.sh           # Run all gates (check, format, clippy, test, doc)
-./ci.sh --fix     # Auto-fix formatting issues
+./ci.sh              # check, fmt, clippy, test, doc
+./ci.sh --fix        # auto-fix formatting
 ```
-
-| Gate | Command | Fail exit |
-|------|---------|-----------|
-| `cargo check` | `cargo check` | 1 |
-| `cargo fmt` | `cargo fmt --check` (auto-fix via `--fix`) | 1 |
-| `cargo clippy` | `cargo clippy -- -D warnings` | 1 |
-| `cargo test` | `cargo test` | 1 |
-| `cargo doc` | `cargo doc --no-deps` | 1 |
-
-## Key Dependencies
-
-| Dependency | Usage |
-|------------|-------|
-| [rig](https://github.com/Yoimiya-Naganohara/rig) | LLM provider abstraction, agent framework, tool server |
-| [tokio](https://tokio.rs/) | Async runtime, channels, semaphores |
-| [rmcp](https://github.com/container-labs/rmcp) | MCP protocol client (stdio, SSE, HTTP transports) |
-| [serde](https://serde.rs/) | Serialization for configs, events, tool definitions |
-| [Tauri 2](https://v2.tauri.app/) | Desktop application shell |
-| [Svelte 5](https://svelte.dev/) | Frontend framework (workflow-ui) |
-| [Tailwind CSS 4](https://tailwindcss.com/) | Utility-first styling |
 
 ## License
 
@@ -160,5 +127,5 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 <p align="center">
-  <sub>Built with Rust, Tokio, rig, rmcp, Tauri, and Svelte.</sub>
+  <sub>Built with Rust, Tokio, rig, and rmcp.</sub>
 </p>
