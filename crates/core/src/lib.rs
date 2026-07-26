@@ -143,15 +143,7 @@ pub struct RuntimeConfig {
 impl RuntimeConfig {
     pub fn resolve() -> Self {
         let file = FileConfigSource::new(FileConfigSource::default_path());
-        let merged = match merge_configs(&[&DefaultConfigSource, &file, &EnvConfigSource]) {
-            Ok(c) => c,
-            Err(_) => return Self::default(),
-        };
-
-        let provider = merged
-            .iter()
-            .find(|p| p.requires_api_key() && !p.api_key.is_empty())
-            .or_else(|| merged.first());
+        let provider = file.load().ok().and_then(|p| p.first().cloned());
 
         let default = Self::default();
         match provider {

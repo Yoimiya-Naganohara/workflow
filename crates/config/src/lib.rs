@@ -19,63 +19,20 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderProtocol {
-    OpenAi,
     OpenAiCompatible,
-    Anthropic,
-    Cohere,
-    Gemini,
-    Mistral,
-    Ollama,
-    Llamafile,
-    Azure,
-    Copilot,
 }
 
 impl ProviderProtocol {
     pub fn from_id(provider_id: &str) -> Self {
         match provider_id {
-            "openai" => Self::OpenAi,
-            "anthropic" => Self::Anthropic,
-            "cohere" => Self::Cohere,
-            "gemini" | "google" => Self::Gemini,
-            "mistral" => Self::Mistral,
-            "ollama" => Self::Ollama,
-            "llamafile" => Self::Llamafile,
-            "azure" => Self::Azure,
-            "github-copilot" | "copilot" => Self::Copilot,
-            _ if provider_id.starts_with("custom-") => Self::OpenAiCompatible,
             _ => Self::OpenAiCompatible,
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
-            Self::OpenAi => "OpenAI",
             Self::OpenAiCompatible => "OpenAI Compatible",
-            Self::Anthropic => "Anthropic",
-            Self::Cohere => "Cohere",
-            Self::Gemini => "Gemini",
-            Self::Mistral => "Mistral",
-            Self::Ollama => "Ollama",
-            Self::Llamafile => "Llamafile",
-            Self::Azure => "Azure",
-            Self::Copilot => "GitHub Copilot",
         }
-    }
-
-    pub fn requires_api_key(&self) -> bool {
-        !matches!(self, Self::Ollama | Self::Llamafile)
-    }
-
-    pub fn supports_embeddings(&self) -> bool {
-        matches!(
-            self,
-            Self::OpenAi | Self::OpenAiCompatible | Self::Cohere | Self::Gemini | Self::Mistral
-        )
-    }
-
-    pub fn supports_tools(&self) -> bool {
-        !matches!(self, Self::Llamafile)
     }
 }
 
@@ -189,18 +146,6 @@ impl ProviderConfig {
     pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.timeout_secs)
     }
-
-    pub fn requires_api_key(&self) -> bool {
-        self.protocol.requires_api_key()
-    }
-
-    pub fn supports_embeddings(&self) -> bool {
-        self.protocol.supports_embeddings()
-    }
-
-    pub fn supports_tools(&self) -> bool {
-        self.protocol.supports_tools()
-    }
 }
 
 impl Default for ProviderConfig {
@@ -226,96 +171,6 @@ impl Default for ProviderConfig {
 pub trait ConfigSource: Send + Sync {
     fn name(&self) -> &'static str;
     fn load(&self) -> Result<Vec<ProviderConfig>>;
-}
-
-// ============================================================================
-//  EnvConfigSource — reads from environment variables
-// ============================================================================
-
-pub struct EnvConfigSource;
-
-impl ConfigSource for EnvConfigSource {
-    fn name(&self) -> &'static str {
-        "env"
-    }
-
-    fn load(&self) -> Result<Vec<ProviderConfig>> {
-        let mut configs = Vec::new();
-
-        let known_vars: &[(&str, &str, ProviderProtocol, Option<&str>)] = &[
-            ("OPENAI_API_KEY", "OpenAI", ProviderProtocol::OpenAi, None),
-            (
-                "ANTHROPIC_API_KEY",
-                "Anthropic",
-                ProviderProtocol::Anthropic,
-                None,
-            ),
-            ("COHERE_API_KEY", "Cohere", ProviderProtocol::Cohere, None),
-            ("GEMINI_API_KEY", "Gemini", ProviderProtocol::Gemini, None),
-            (
-                "MISTRAL_API_KEY",
-                "Mistral",
-                ProviderProtocol::Mistral,
-                None,
-            ),
-            ("AZURE_API_KEY", "Azure", ProviderProtocol::Azure, None),
-        ];
-
-        for (env_var, name, protocol, _) in known_vars {
-            if let Ok(key) = std::env::var(env_var) {
-                let base_url = Self::base_url_for(name);
-                configs.push(ProviderConfig {
-                    id: name.to_lowercase(),
-                    name: name.to_string(),
-                    protocol: *protocol,
-                    base_url,
-                    api_key: key,
-                    models: Vec::new(),
-                    ..Default::default()
-                });
-            }
-        }
-
-        if std::env::var("OLLAMA_API_BASE_URL").is_ok() || Self::probe_tcp("127.0.0.1:11434") {
-            let base_url = std::env::var("OLLAMA_API_BASE_URL").unwrap_or_default();
-            configs.push(ProviderConfig {
-                id: "ollama".to_string(),
-                name: "Ollama".to_string(),
-                protocol: ProviderProtocol::Ollama,
-                base_url,
-                ..Default::default()
-            });
-        }
-
-        if std::env::var("GITHUB_TOKEN").is_ok() || std::env::var("GITHUB_COPILOT_API_KEY").is_ok()
-        {
-            configs.push(ProviderConfig {
-                id: "github-copilot".to_string(),
-                name: "GitHub Copilot".to_string(),
-                protocol: ProviderProtocol::Copilot,
-                api_key: std::env::var("GITHUB_TOKEN")
-                    .or_else(|_| std::env::var("GITHUB_COPILOT_API_KEY"))
-                    .unwrap_or_default(),
-                ..Default::default()
-            });
-        }
-
-        Ok(configs)
-    }
-}
-
-impl EnvConfigSource {
-    fn base_url_for(name: &str) -> String {
-        let var = format!("{}_BASE_URL", name.to_uppercase());
-        std::env::var(&var).unwrap_or_default()
-    }
-
-    fn probe_tcp(addr: &str) -> bool {
-        let Ok(addr) = addr.parse::<std::net::SocketAddr>() else {
-            return false;
-        };
-        std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
-    }
 }
 
 // ============================================================================
@@ -355,24 +210,6 @@ impl ConfigSource for FileConfigSource {
 }
 
 // ============================================================================
-//  Merge logic
-// ============================================================================
-
-pub fn merge_configs(sources: &[&dyn ConfigSource]) -> Result<Vec<ProviderConfig>> {
-    let mut merged: HashMap<String, ProviderConfig> = HashMap::new();
-    for source in sources {
-        let configs = source.load()?;
-        for config in configs {
-            merged.insert(config.id.clone(), config);
-        }
-    }
-
-    let mut result: Vec<ProviderConfig> = merged.into_values().collect();
-    result.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(result)
-}
-
-// ============================================================================
 //  DefaultConfigSource — provides built-in defaults
 // ============================================================================
 
@@ -384,29 +221,11 @@ impl ConfigSource for DefaultConfigSource {
     }
 
     fn load(&self) -> Result<Vec<ProviderConfig>> {
-        Ok(vec![
-            ProviderConfig {
-                id: "openai".to_string(),
-                name: "OpenAI".to_string(),
-                protocol: ProviderProtocol::OpenAi,
-                base_url: "https://api.openai.com/v1".to_string(),
-                ..Default::default()
-            },
-            ProviderConfig {
-                id: "anthropic".to_string(),
-                name: "Anthropic".to_string(),
-                protocol: ProviderProtocol::Anthropic,
-                base_url: "https://api.anthropic.com/v1".to_string(),
-                ..Default::default()
-            },
-            ProviderConfig {
-                id: "ollama".to_string(),
-                name: "Ollama".to_string(),
-                protocol: ProviderProtocol::Ollama,
-                base_url: "http://localhost:11434".to_string(),
-                ..Default::default()
-            },
-        ])
+        Ok(vec![ProviderConfig {
+            id: "openai".to_string(),
+            name: "OpenAI".to_string(),
+            ..Default::default()
+        }])
     }
 }
 
@@ -544,35 +363,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_merge_configs_empty() {
-        let result = merge_configs(&[]).expect("merge of empty sources should succeed");
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_merge_configs_defaults_only() {
-        let defaults = DefaultConfigSource;
-        let result = merge_configs(&[&defaults]).expect("merge of defaults should succeed");
-        assert_eq!(result.len(), 3);
-    }
-
-    #[test]
-    fn test_merge_overrides() {
-        let defaults = DefaultConfigSource;
-        let higher = FileConfigSource {
-            path: PathBuf::from("/nonexistent"),
-        };
-        let result = merge_configs(&[&defaults, &higher])
-            .expect("merge with nonexistent file should succeed");
-        assert_eq!(result.len(), 3);
-    }
-
-    #[test]
     fn test_provider_config_default() {
         let cfg = ProviderConfig::default();
         assert_eq!(cfg.timeout_secs, 60);
         assert_eq!(cfg.max_retries, 3);
-        assert!(cfg.requires_api_key());
     }
 
     #[test]
@@ -584,10 +378,5 @@ mod tests {
             .find(|c| c.id == "openai")
             .expect("defaults should include openai");
         assert!(openai.base_url.contains("openai.com"));
-        let ollama = configs
-            .iter()
-            .find(|c| c.id == "ollama")
-            .expect("defaults should include ollama");
-        assert_eq!(ollama.protocol, ProviderProtocol::Ollama);
     }
 }
