@@ -41,6 +41,18 @@ export type UiEvent =
 	| { type: "mcp_disconnected"; server: string }
 	| { type: "mcp_tool_needs_approval"; request_id: string; server: string; tool: string; arguments: Record<string, unknown> };
 
+export interface PinnedMessage {
+	id: number;
+	chatItemId: number;
+	text: string;
+	type: "user" | "assistant" | "thinking" | "tool" | "error";
+	result?: string | null;
+	status?: "done" | "running";
+	timestamp: number;
+	agentId: AgentId | null;
+	agentRole?: string;
+}
+
 export type DialogId = "new-agent" | "settings" | "roles" | "mcp-approval";
 
 export type PendingAction =

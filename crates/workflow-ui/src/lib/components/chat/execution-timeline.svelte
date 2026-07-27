@@ -3,19 +3,28 @@
 	import ThinkingBlock from "$lib/components/chat/thinking-block.svelte";
 	import ToolCard from "$lib/components/chat/tool-card.svelte";
 	import ErrorBlock from "$lib/components/chat/error-block.svelte";
-	import { MessageSquare } from "@lucide/svelte";
+	import { MessageSquare, Pin, PinOff } from "@lucide/svelte";
 	import { Card } from "$lib/components/ui/card";
-	import type { ChatItem } from "$lib/types";
+	import { Button } from "$lib/components/ui/button";
+	import type { ChatItem, PinnedMessage } from "$lib/types";
 
 	let {
 		items,
 		empty,
 		agentRole,
+		pinnedMessages,
+		onPin,
 	}: {
 		items: ChatItem[];
 		empty: boolean;
 		agentRole?: string;
+		pinnedMessages: PinnedMessage[];
+		onPin: (item: ChatItem) => void;
 	} = $props();
+
+	function isPinned(item: ChatItem): boolean {
+		return pinnedMessages.some(p => p.chatItemId === item.id);
+	}
 
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 	let userScrolledUp = $state(false);
@@ -87,17 +96,38 @@
 		>
 			<div class="mx-auto max-w-3xl px-4 sm:px-6 py-4 space-y-3">
 				{#each items as item (item.id)}
-					{#if item.type === "assistant"}
-						<TextBlock text={item.text} role="assistant" streaming={item.streaming ?? false} />
-					{:else if item.type === "user"}
-						<TextBlock text={item.text} role="user" />
-					{:else if item.type === "thinking"}
-						<ThinkingBlock text={item.text} />
-					{:else if item.type === "tool"}
-						<ToolCard name={item.text} result={item.result == null ? undefined : item.result} status={item.status ?? "done"} />
-					{:else if item.type === "error"}
-						<ErrorBlock text={item.text} />
-					{/if}
+					{@const pinned = isPinned(item)}
+					<div class="group relative">
+						{#if item.type === "assistant"}
+							<TextBlock text={item.text} role="assistant" streaming={item.streaming ?? false} />
+						{:else if item.type === "user"}
+							<TextBlock text={item.text} role="user" />
+						{:else if item.type === "thinking"}
+							<ThinkingBlock text={item.text} />
+						{:else if item.type === "tool"}
+							<ToolCard name={item.text} result={item.result == null ? undefined : item.result} status={item.status ?? "done"} />
+						{:else if item.type === "error"}
+							<ErrorBlock text={item.text} />
+						{/if}
+						<div
+							class={`absolute top-0 right-0 transition-opacity ${pinned ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+						>
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								class={pinned ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground/40 hover:text-foreground'}
+								onclick={() => onPin(item)}
+								title={pinned ? "Unpin message" : "Pin to sidebar"}
+								aria-label={pinned ? "Unpin message" : "Pin to sidebar"}
+							>
+								{#if pinned}
+									<PinOff class="size-3" />
+								{:else}
+									<Pin class="size-3" />
+								{/if}
+							</Button>
+						</div>
+					</div>
 				{/each}
 			</div>
 		</div>

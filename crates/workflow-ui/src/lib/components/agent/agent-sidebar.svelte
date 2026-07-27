@@ -1,54 +1,54 @@
 <script lang="ts">
-	import { getContext } from "svelte";
-	import { toggleMode } from "mode-watcher";
-	import { Button } from "$lib/components/ui/button";
-	import { Badge } from "$lib/components/ui/badge";
-	import { ScrollArea } from "$lib/components/ui/scroll-area";
-	import { Tooltip, TooltipContent, TooltipTrigger } from "$lib/components/ui/tooltip";
-	import { Plus, MessageSquare, Brain, Settings as SettingsIcon, ChevronRight, ChevronDown, X, Loader2, CircleDot, AlertCircle, Sun, Moon, Bug } from "@lucide/svelte";
-	import { cn, formatRole } from "$lib/utils.js";
-	import type { AgentInfo, AgentId, AgentStatus } from "$lib/types";
-	import type { McpConnectionInfo, McpServerConfig } from "$lib/types";
+    import { getContext } from "svelte";
+    import { toggleMode } from "mode-watcher";
+    import { Button } from "$lib/components/ui/button";
+    import { Badge } from "$lib/components/ui/badge";
+    import { ScrollArea } from "$lib/components/ui/scroll-area";
+    import { Tooltip, TooltipContent, TooltipTrigger } from "$lib/components/ui/tooltip";
+    import { Plus, MessageSquare, Brain, Settings as SettingsIcon, ChevronRight, ChevronDown, X, Loader2, CircleDot, AlertCircle, Sun, Moon, Bug, Pin, PinOff } from "@lucide/svelte";
+    import { cn, formatRole } from "$lib/utils.js";
+    import type { AgentInfo, AgentId, AgentStatus } from "$lib/types";
+    import type { McpConnectionInfo, McpServerConfig } from "$lib/types";
 
-	import McpPanel from "./mcp-panel.svelte";
+    import McpPanel from "./mcp-panel.svelte";
 
-	const eventLog = getContext<{ open: boolean; toggle: () => void }>("event-log");
+    const eventLog = getContext<{ open: boolean; toggle: () => void }>("event-log");
 
-	let {
-		agents,
-		selected,
-		statuses,
-		onSelect,
-		onCreateClick,
-		onRemoveAgent,
-		onRolesClick,
-		roles,
-		rolesExpanded,
-		onToggleRoles,
-		mcpConfigs,
-		mcpConnections,
-		mcpExpanded,
-		onToggleMcp,
-		onAddMcpServer,
-		onRemoveMcpServer,
-	}: {
-		agents: AgentInfo[];
-		selected: AgentId | null;
-		statuses: Map<AgentId, AgentStatus>;
-		onSelect: (id: AgentId) => void;
-		onCreateClick: () => void;
-		onRemoveAgent: (id: AgentId) => void;
-		onRolesClick: () => void;
-		roles: import("$lib/types").RoleInfo[];
-		rolesExpanded: boolean;
-		onToggleRoles: () => void;
-		mcpConfigs: McpServerConfig[];
-		mcpConnections: McpConnectionInfo[];
-		mcpExpanded: boolean;
-		onToggleMcp: () => void;
-		onAddMcpServer: (config: McpServerConfig) => void;
-		onRemoveMcpServer: (name: string) => void;
-	} = $props();
+    let {
+            agents,
+            selected,
+            statuses,
+            onSelect,
+            onCreateClick,
+            onRemoveAgent,
+            onRolesClick,
+            roles,
+            rolesExpanded,
+            onToggleRoles,
+            mcpConfigs,
+            mcpConnections,
+            mcpExpanded,
+            onToggleMcp,
+            onAddMcpServer,
+            onRemoveMcpServer,
+        }: {
+            agents: AgentInfo[];
+            selected: AgentId | null;
+            statuses: Map<AgentId, AgentStatus>;
+            onSelect: (id: AgentId) => void;
+            onCreateClick: () => void;
+            onRemoveAgent: (id: AgentId) => void;
+            onRolesClick: () => void;
+            roles: import("$lib/types").RoleInfo[];
+            rolesExpanded: boolean;
+            onToggleRoles: () => void;
+            mcpConfigs: McpServerConfig[];
+            mcpConnections: McpConnectionInfo[];
+            mcpExpanded: boolean;
+            onToggleMcp: () => void;
+            onAddMcpServer: (config: McpServerConfig) => void;
+            onRemoveMcpServer: (name: string) => void;
+        } = $props();
 
 	function statusColor(status: AgentStatus): string {
 		switch (status) {
@@ -101,7 +101,7 @@
 		</div>
 	</div>
 
-	<ScrollArea class="flex-1 min-h-0 no-scrollbar">
+	        <ScrollArea class="flex-1 min-h-0 no-scrollbar">
 		<div class="py-1.5 px-2 flex flex-col gap-0.5" role="listbox" aria-label="Agent list">
 			{#each agents as agent (agent.id)}
 				{@const status = statuses.get(agent.id) ?? "idle"}

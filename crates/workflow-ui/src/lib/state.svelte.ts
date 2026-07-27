@@ -51,6 +51,7 @@ import type {
     DialogId,
     PendingAction,
     ChatItem,
+    PinnedMessage,
     ProviderEntry,
     McpConnectionInfo,
     McpServerConfig,
@@ -83,6 +84,9 @@ class AppState {
     input = $state("");
     running = $state(false);
 
+    // ── Pinned Messages ────────────────────────────────────────
+    pinnedMessages = $state<PinnedMessage[]>([]);
+
     eventLog = $state<LogEntry[]>([]);
 
     // ── MCP server status ──────────────────────────────────────
@@ -105,6 +109,8 @@ class AppState {
     #eventLogTrimmed = 0;
     #pullPromise: Promise<void> | null = null;
     #pullQueued = false;
+    #pinIdCounter = 0;
+    #PIN_STORAGE_KEY = "workflow-ui:pinned";
 
     chatItems: ChatItem[] = $derived.by(() => {
         let lastTextIdx = -1;
@@ -234,6 +240,68 @@ class AppState {
 
     toggleMcp = () => {
         this.mcpExpanded = !this.mcpExpanded;
+    };
+
+    pinMessage = (item: ChatItem) => {
+        const alreadyPinned = this.pinnedMessages.some(p =>
+            p.text === item.text &&
+            p.type === item.type &&
+            (p.result ?? null) === (item.result ?? null)
+        );
+        if (alreadyPinned) return;
+        const agent = this.agents.find(a => a.id === this.selected);
+        this.pinnedMessages = [
+            ...this.pinnedMessages,
+            {
+                id: this.#pinIdCounter++,
+                chatItemId: item.id,
+                text: item.text,
+                type: item.type,
+                result: item.result,
+                status: item.status,
+                timestamp: Date.now(),
+                agentId: this.selected,
+                agentRole: agent ? agent.role : undefined,
+            },
+        ];
+        this.#savePinnedMessages();
+    };
+
+    unpinMessage = (pinId: number) => {
+        this.pinnedMessages = this.pinnedMessages.filter(p => p.id !== pinId);
+        this.#savePinnedMessages();
+    };
+
+    togglePinMessage = (item: ChatItem) => {
+        const existing = this.pinnedMessages.find(p =>
+            p.text === item.text &&
+            p.type === item.type &&
+            (p.result ?? null) === (item.result ?? null)
+        );
+        if (existing) {
+            this.unpinMessage(existing.id);
+        } else {
+            this.pinMessage(item);
+        }
+    };
+
+    #savePinnedMessages = () => {
+        try {
+            localStorage.setItem(this.#PIN_STORAGE_KEY, JSON.stringify(this.pinnedMessages));
+        } catch { /* ignore */ }
+    };
+
+    #loadPinnedMessages = () => {
+        try {
+            const saved = localStorage.getItem(this.#PIN_STORAGE_KEY);
+            if (saved) {
+                const parsed = JSON.parse(saved) as PinnedMessage[];
+                this.pinnedMessages = parsed;
+                // restore counter past any existing ids
+                const maxId = parsed.reduce((max, p) => Math.max(max, p.id), -1);
+                this.#pinIdCounter = maxId + 1;
+            }
+        } catch { /* ignore */ }
     };
 
     // ── MCP panel methods ─────────────────────────────────────
@@ -539,6 +607,7 @@ class AppState {
         this.loadProviders();
         this.loadMcpConfigs();
         this.loadMcpConnections();
+        this.#loadPinnedMessages();
 
         const updateTheme = () => {
             const isDark = document.documentElement.classList.contains("dark");

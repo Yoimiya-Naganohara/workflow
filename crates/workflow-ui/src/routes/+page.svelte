@@ -6,15 +6,15 @@
 		MessageSquare,
 		GitBranch,
 		Settings,
-		Eye,
-		EyeOff,
 		PanelLeftClose,
 		PanelLeftOpen,
+		Pin,
 	} from "@lucide/svelte";
 	import { formatRole } from "$lib/utils.js";
 
 	import AgentSidebar from "$lib/components/agent/agent-sidebar.svelte";
 	import AgentGraph from "$lib/components/agent/agent-graph.svelte";
+	import PinnedPanel from "$lib/components/agent/pinned-panel.svelte";
 	import ExecutionTimeline from "$lib/components/chat/execution-timeline.svelte";
 	import ChatInput from "$lib/components/chat/chat-input.svelte";
 	import NewAgentDialog from "$lib/components/dialogs/new-agent-dialog.svelte";
@@ -24,20 +24,21 @@
 
 	import { state as app } from "$lib/state.svelte.js";
 
-	let showGraph = $state(true);
 	let showSidebar = $state(true);
+	let showGraph = $state(false);
+	let showPins = $state(true);
 	const STORAGE_KEY = "workflow-ui:layout";
 
 	let rafId: number | null = null;
 	function startResize(e: MouseEvent) {
 		e.preventDefault();
 		const startX = e.clientX;
-		const startWidth = graphWidth;
+		const startWidth = panelWidth;
 		function onMove(ev: MouseEvent) {
 			if (rafId != null) cancelAnimationFrame(rafId);
 			rafId = requestAnimationFrame(() => {
 				rafId = null;
-				graphWidth = startWidth - (ev.clientX - startX);
+				panelWidth = startWidth - (ev.clientX - startX);
 			});
 		}
 		function onUp() {
@@ -56,7 +57,7 @@
 		document.body.style.userSelect = "none";
 	}
 
-	let graphWidth = $state(320);
+	let panelWidth = $state(320);
 
 	function calcDefaultWidth() {
 		if (typeof window === "undefined") return 320;
@@ -68,7 +69,7 @@
 		try {
 			localStorage.setItem(
 				STORAGE_KEY,
-				JSON.stringify({ graphWidth, showGraph, showSidebar }),
+				JSON.stringify({ panelWidth, showGraph, showPins, showSidebar }),
 			);
 		} catch {
 			/* ignore */
@@ -85,18 +86,20 @@
 			const saved = localStorage.getItem(STORAGE_KEY);
 			if (saved) {
 				const {
-					graphWidth: w,
-					showGraph: s,
+					panelWidth: w,
+					showGraph: sg,
+					showPins: sp,
 					showSidebar: sb,
 				} = JSON.parse(saved);
-				if (typeof w === "number" && w >= 180) graphWidth = w;
-				if (typeof s === "boolean") showGraph = s;
+				if (typeof w === "number" && w >= 180) panelWidth = w;
+				if (typeof sg === "boolean") showGraph = sg;
+				if (typeof sp === "boolean") showPins = sp;
 				if (typeof sb === "boolean") showSidebar = sb;
 			} else {
-				graphWidth = calcDefaultWidth();
+				panelWidth = calcDefaultWidth();
 			}
 		} catch {
-			graphWidth = calcDefaultWidth();
+			panelWidth = calcDefaultWidth();
 		}
 		// Responsive auto-collapse
 		const mq = window.matchMedia("(max-width: 1024px)");
@@ -199,11 +202,6 @@
 					<PanelLeftOpen class="size-3.5" />
 				{/if}
 			</Button>
-			{#if app.mcpServers.length > 0}
-				<div class="ml-4 pl-4" title="{app.mcpServers.length} MCP server{app.mcpServers.length !== 1 ? 's' : ''} connected">
-					<span class="size-2 rounded-full bg-cyan-500 block"></span>
-				</div>
-			{/if}
 			<div class="flex-1"></div>
 			<Button
 				variant="ghost"
@@ -211,10 +209,27 @@
 				class={showGraph
 					? "bg-accent text-accent-foreground"
 					: "text-muted-foreground/50"}
-				onclick={() => (showGraph = !showGraph)}
+				onclick={() => {
+					showGraph = !showGraph;
+					if (showGraph) showPins = false;
+				}}
 				title={showGraph ? "Hide graph" : "Show graph"}
 			>
 				<GitBranch class="size-3.5" />
+			</Button>
+			<Button
+				variant="ghost"
+				size="icon-xs"
+				class={showPins
+					? "bg-accent text-accent-foreground"
+					: "text-muted-foreground/50"}
+				onclick={() => {
+					showPins = !showPins;
+					if (showPins) showGraph = false;
+				}}
+				title={showPins ? "Hide pinned messages" : "Show pinned messages"}
+			>
+				<Pin class="size-3.5" />
 			</Button>
 			<Button
 				variant="ghost"
@@ -233,7 +248,13 @@
 				class:justify-center={app.messages.length === 0}
 			>
 				{#if app.messages.length > 0}
-					<ExecutionTimeline items={app.chatItems} empty={false} agentRole={app.agents.find(a => a.id === app.selected)?.role} />
+					<ExecutionTimeline
+						items={app.chatItems}
+						empty={false}
+						agentRole={app.agents.find(a => a.id === app.selected)?.role}
+						pinnedMessages={app.pinnedMessages}
+						onPin={(item) => app.togglePinMessage(item)}
+					/>
 				{/if}
 
 				{#if app.error}
@@ -296,81 +317,119 @@
 				</div>
 			</div>
 
-			<div
-				class="relative shrink-0 bg-background flex flex-col min-h-0"
-				class:hidden={!showGraph}
-				style="width: {graphWidth}px"
-			>
+			{#if showGraph}
 				<div
-					role="presentation"
-					class="absolute inset-y-0 -left-[3px] w-[7px] z-10 cursor-col-resize group"
-					onmousedown={startResize}
+					class="relative shrink-0 bg-background flex flex-col min-h-0"
+					style="width: {panelWidth}px"
 				>
 					<div
-						class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border group-hover:bg-accent-foreground/20 group-active:bg-accent-foreground/30 transition-colors"
-					></div>
-					<div
-						class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-[3px] opacity-0 group-hover:opacity-100 transition-opacity"
+						role="presentation"
+						class="absolute inset-y-0 -left-[3px] w-[7px] z-10 cursor-col-resize group"
+						onmousedown={startResize}
 					>
 						<div
-							class="size-[3px] rounded-full bg-accent-foreground/30"
+							class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border group-hover:bg-accent-foreground/20 group-active:bg-accent-foreground/30 transition-colors"
 						></div>
 						<div
-							class="size-[3px] rounded-full bg-accent-foreground/30"
-						></div>
-						<div
-							class="size-[3px] rounded-full bg-accent-foreground/30"
-						></div>
+							class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-[3px] opacity-0 group-hover:opacity-100 transition-opacity"
+						>
+							<div
+								class="size-[3px] rounded-full bg-accent-foreground/30"
+							></div>
+							<div
+								class="size-[3px] rounded-full bg-accent-foreground/30"
+							></div>
+							<div
+								class="size-[3px] rounded-full bg-accent-foreground/30"
+							></div>
+						</div>
 					</div>
-				</div>
-				<AgentGraph
-					agents={app.agents}
-					statuses={app.agentStatuses}
-					selected={app.selected}
-					onSelect={(id) => app.selectAgent(id)}
-				/>
-				{#if app.selected != null}
-					{@const agent = app.agents.find(
-						(a) => a.id === app.selected,
-					)}
-					{@const status =
-						app.agentStatuses.get(app.selected) ?? "idle"}
-					{@const statusColor =
-						status === "thinking" || status === "running-tool"
-							? "#f59e0b"
-							: status === "responding"
-								? "#22c55e"
-								: status === "error"
-									? "#ef4444"
-									: "#6b7280"}
-					<div class="shrink-0 border-t border-border p-3 space-y-2">
-						<div class="flex items-center justify-between">
-							<div class="flex items-center gap-2">
-								<div
-									class="size-2 rounded-full"
-									style="background: {statusColor}"
-								></div>
-								<span class="text-xs font-medium"
-									>#{agent?.id}
-									{agent ? formatRole(agent.role) : ""}</span
+					<AgentGraph
+						agents={app.agents}
+						statuses={app.agentStatuses}
+						selected={app.selected}
+						onSelect={(id) => app.selectAgent(id)}
+					/>
+					{#if app.selected != null}
+						{@const agent = app.agents.find(
+							(a) => a.id === app.selected,
+						)}
+						{@const status =
+							app.agentStatuses.get(app.selected) ?? "idle"}
+						{@const statusColor =
+							status === "thinking" || status === "running-tool"
+								? "#f59e0b"
+								: status === "responding"
+									? "#22c55e"
+									: status === "error"
+										? "#ef4444"
+										: "#6b7280"}
+						<div class="shrink-0 border-t border-border p-3 space-y-2">
+							<div class="flex items-center justify-between">
+								<div class="flex items-center gap-2">
+									<div
+										class="size-2 rounded-full"
+										style="background: {statusColor}"
+									></div>
+									<span class="text-xs font-medium"
+										>#{agent?.id}
+										{agent ? formatRole(agent.role) : ""}</span
+									>
+								</div>
+								<span
+									class="text-[10px] text-muted-foreground/50 capitalize"
+									>{status.replace("-", " ")}</span
 								>
 							</div>
-							<span
-								class="text-[10px] text-muted-foreground/50 capitalize"
-								>{status.replace("-", " ")}</span
-							>
+							{#if agent?.current_task}
+								<div
+									class="text-xs text-muted-foreground/70 bg-muted/50 rounded px-2 py-1.5 truncate"
+									title={agent.current_task}
+								>
+									{agent.current_task}
+								</div>
+							{/if}
 						</div>
-						{#if agent?.current_task}
+					{/if}
+				</div>
+			{/if}
+
+			{#if showPins}
+				<div
+					class="relative shrink-0 bg-background flex flex-col min-h-0"
+					style="width: {panelWidth}px"
+				>
+					{#if !showGraph}
+						<div
+							role="presentation"
+							class="absolute inset-y-0 -left-[3px] w-[7px] z-10 cursor-col-resize group"
+							onmousedown={startResize}
+						>
 							<div
-								class="text-xs text-muted-foreground/70 bg-muted/50 rounded px-2 py-1.5 truncate"
-								title={agent.current_task}
+								class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border group-hover:bg-accent-foreground/20 group-active:bg-accent-foreground/30 transition-colors"
+							></div>
+							<div
+								class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-[3px] opacity-0 group-hover:opacity-100 transition-opacity"
 							>
-								{agent.current_task}
+								<div
+									class="size-[3px] rounded-full bg-accent-foreground/30"
+								></div>
+								<div
+									class="size-[3px] rounded-full bg-accent-foreground/30"
+								></div>
+								<div
+									class="size-[3px] rounded-full bg-accent-foreground/30"
+								></div>
 							</div>
-						{/if}
-					</div>
-				{/if}
-			</div>
+						</div>
+					{/if}
+					<PinnedPanel
+						messages={app.pinnedMessages}
+						onUnpin={(pinId) => app.unpinMessage(pinId)}
+						empty={app.pinnedMessages.length === 0}
+					/>
+				</div>
+			{/if}
 		</div>
 	</div>
 </div>
