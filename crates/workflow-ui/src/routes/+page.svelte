@@ -121,20 +121,20 @@
 	}}
 />
 
-<SettingsDialog
-	open={app.dialog === "settings"}
-	providers={app.providers}
-	selectedProvider={app.selectedProvider}
-	selectedModel={app.selectedModel}
-	apiKey={app.settingsApiKey}
-	configured={app.configured}
-	refreshing={app.pendingAction?.type === "refresh-providers"}
-	onOpenChange={(o) => {
-		if (!o) app.closeDialog();
-	}}
-	onConfigure={(pid, key, model) => app.configureRuntime(pid, key, model)}
-	onRefreshProviders={() => app.refreshProviders()}
-/>
+	<SettingsDialog
+		open={app.dialog === "settings"}
+		providers={app.providers}
+		selectedProvider={app.selectedProvider}
+		selectedModel={app.selectedModel}
+		apiKey={app.settingsApiKey}
+		configured={app.configured}
+		refreshing={app.pendingAction?.type === "refresh-providers"}
+		onOpenChange={(o) => {
+			if (!o) app.closeDialog();
+		}}
+		onConfigure={(pid, key, model) => app.configureRuntime(pid, key, model)}
+		onRefreshProviders={() => app.refreshProviders()}
+	/>
 
 <RolesDialog
 	open={app.dialog === "roles"}
@@ -179,6 +179,12 @@
 			onToggleMcp={() => app.toggleMcp()}
 			onAddMcpServer={(config) => app.addMcpServer(config)}
 			onRemoveMcpServer={(name) => app.removeMcpServer(name)}
+			projectPath={app.projectPath}
+			projectName={app.projectName}
+			projectExpanded={app.projectExpanded}
+			onToggleProject={() => app.toggleProject()}
+			onChangeProject={(path) => app.reconfigureProject(path)}
+			onClearProject={() => app.clearProject()}
 		/>
 	</div>
 

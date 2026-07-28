@@ -4,8 +4,10 @@
 //!
 //! Each tool implements [`rig::tool::Tool`] and can be registered on a
 //! [`rig::tool::server::ToolServer`].
+pub mod get_project_info;
 pub mod list_agents;
 pub mod orchestrate;
+pub mod read_project_file;
 pub mod send_message;
 
 use workflow_agent::{AgentId, Message};

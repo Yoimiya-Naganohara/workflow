@@ -229,6 +229,42 @@ impl ConfigSource for DefaultConfigSource {
 }
 
 // ============================================================================
+//  ProjectConfig — describes an opened project directory
+// ============================================================================
+
+/// Configuration for an opened project that agents can work with.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectConfig {
+    /// Absolute path to the project root directory.
+    pub path: String,
+    /// Optional human-friendly name (defaults to directory name).
+    #[serde(default)]
+    pub name: String,
+}
+
+impl ProjectConfig {
+    pub fn new(path: impl Into<String>) -> Self {
+        let path = path.into();
+        let name = std::path::Path::new(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+        Self { path, name }
+    }
+
+    pub fn name(&self) -> String {
+        if self.name.is_empty() {
+            std::path::Path::new(&self.path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| self.path.clone())
+        } else {
+            self.name.clone()
+        }
+    }
+}
+
+// ============================================================================
 //  UserConfig — persisted user preferences (last-used provider, model, api key)
 //  The API key is encrypted at rest using AES-256-GCM.
 // ============================================================================
@@ -241,6 +277,8 @@ pub struct UserConfig {
     pub api_key: String,
     #[serde(default)]
     pub encrypted: bool,
+    #[serde(default)]
+    pub project_path: String,
 }
 
 impl UserConfig {

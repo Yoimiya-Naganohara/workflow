@@ -81,6 +81,11 @@ class AppState {
     selectedModel = $state<string>("");
     settingsApiKey = $state("");
 
+    // ── Project support ─────────────────────────────────────────
+    projectPath = $state("");
+    projectName = $state("");
+    projectExpanded = $state(true);
+
     input = $state("");
     running = $state(false);
 
@@ -231,6 +236,10 @@ class AppState {
     openDialog = (id: DialogId) => {
         this.dialog = id;
     };
+    toggleProject = () => {
+        this.projectExpanded = !this.projectExpanded;
+    };
+
     closeDialog = () => {
         this.dialog = null;
     };
@@ -502,6 +511,7 @@ class AppState {
                     selected_provider: this.selectedProvider,
                     selected_model: this.selectedModel,
                     api_key: this.settingsApiKey,
+                    project_path: this.projectPath,
                 },
             });
         } catch (e) {
@@ -515,11 +525,15 @@ class AppState {
                 selected_provider: string;
                 selected_model: string;
                 api_key: string;
+                project_path?: string;
             } | null;
             if (cfg) {
                 this.selectedProvider = cfg.selected_provider;
                 this.selectedModel = cfg.selected_model;
                 this.settingsApiKey = cfg.api_key;
+                if (cfg.project_path) {
+                    this.projectPath = cfg.project_path;
+                }
             }
         } catch (e) {
             console.error("load config:", e);
@@ -551,13 +565,66 @@ class AppState {
         }
     };
 
+    refreshProject = async () => {
+        try {
+            const info = await invoke<{ name: string; path: string } | null>("get_project");
+            if (info) {
+                this.projectName = info.name;
+                this.projectPath = info.path;
+            }
+        } catch {
+            // runtime not configured yet
+        }
+    };
+
+    reconfigureProject = async (newPath: string) => {
+        // Reconfigure with existing provider settings but new project path.
+        try {
+            await invoke("configure_runtime", {
+                providerId: this.selectedProvider,
+                apiKey: this.settingsApiKey,
+                model: this.selectedModel,
+                projectPath: newPath,
+            });
+            this.configured = true;
+            this.error = "";
+            this.roles = (await invoke("load_roles")) as RoleInfo[];
+            await this.refreshProject();
+            await this.pull(null);
+        } catch (e) {
+            this.error = `project: ${e}`;
+            throw e; // re-throw so UI shows the error in the panel
+        }
+    };
+
+    clearProject = async () => {
+        // Reconfigure without a project.
+        try {
+            await invoke("configure_runtime", {
+                providerId: this.selectedProvider,
+                apiKey: this.settingsApiKey,
+                model: this.selectedModel,
+                projectPath: null,
+            });
+            this.configured = true;
+            this.projectName = "";
+            this.projectPath = "";
+            this.error = "";
+            await this.pull(null);
+        } catch (e) {
+            this.error = `project: ${e}`;
+            throw e;
+        }
+    };
+
     configureRuntime = async (
         providerId: string,
         apiKey: string,
         model: string,
+        projectPath?: string,
     ) => {
         try {
-            await invoke("configure_runtime", { providerId, apiKey, model });
+            await invoke("configure_runtime", { providerId, apiKey, model, projectPath: projectPath || null });
             this.selectedProvider = providerId;
             this.selectedModel = model;
             this.settingsApiKey = apiKey;
@@ -565,6 +632,7 @@ class AppState {
             this.error = "";
             this.closeDialog();
             this.roles = (await invoke("load_roles")) as RoleInfo[];
+            await this.refreshProject();
             await this.pull(null);
             await this.saveUserConfig();
         } catch (e) {
@@ -599,6 +667,7 @@ class AppState {
                     this.selectedProvider,
                     this.settingsApiKey,
                     this.selectedModel,
+                    this.projectPath || undefined,
                 );
             }
         });

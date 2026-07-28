@@ -11,6 +11,7 @@
     import type { McpConnectionInfo, McpServerConfig } from "$lib/types";
 
     import McpPanel from "./mcp-panel.svelte";
+    import ProjectPanel from "./project-panel.svelte";
 
     const eventLog = getContext<{ open: boolean; toggle: () => void }>("event-log");
 
@@ -31,6 +32,12 @@
             onToggleMcp,
             onAddMcpServer,
             onRemoveMcpServer,
+            projectPath,
+            projectName,
+            projectExpanded,
+            onToggleProject,
+            onChangeProject,
+            onClearProject,
         }: {
             agents: AgentInfo[];
             selected: AgentId | null;
@@ -48,6 +55,12 @@
             onToggleMcp: () => void;
             onAddMcpServer: (config: McpServerConfig) => void;
             onRemoveMcpServer: (name: string) => void;
+            projectPath: string;
+            projectName: string;
+            projectExpanded: boolean;
+            onToggleProject: () => void;
+            onChangeProject: (path: string) => void;
+            onClearProject: () => void;
         } = $props();
 
 	function statusColor(status: AgentStatus): string {
@@ -225,6 +238,15 @@
 			</div>
 		{/if}
 	</div>
+
+	<ProjectPanel
+		{projectPath}
+		{projectName}
+		expanded={projectExpanded}
+		onToggle={onToggleProject}
+		onChangeProject={onChangeProject}
+		onClearProject={onClearProject}
+	/>
 
 	<div class="shrink-0  px-3 py-2 flex items-center justify-between">
 		<button

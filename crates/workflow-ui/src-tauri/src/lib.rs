@@ -2,11 +2,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_decoration::WebviewWindowExt;
-use workflow_config::UserConfig;
+use tauri_plugin_dialog::DialogExt;
+use workflow_config::{ProjectConfig, UserConfig};
 use workflow_core::{Runtime, RuntimeConfig, RuntimeSnapshot, WorkflowEvent};
 use workflow_mcp::config::McpConfigSource;
 use workflow_mcp::{McpConnectionInfo, McpServerConfig};
@@ -35,16 +36,33 @@ pub struct ProviderEntry {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum UiEvent {
-    AgentAdded { agent_id: u32 },
-    AgentRemoved { agent_id: u32 },
-    AgentStopped { agent_id: u32 },
-    AgentOutput { agent_id: u32 },
-    TranscriptChanged { agent_id: u32 },
+    AgentAdded {
+        agent_id: u32,
+    },
+    AgentRemoved {
+        agent_id: u32,
+    },
+    AgentStopped {
+        agent_id: u32,
+    },
+    AgentOutput {
+        agent_id: u32,
+    },
+    TranscriptChanged {
+        agent_id: u32,
+    },
     RolesChanged,
     ResyncRequired,
-    Error { message: String },
-    McpConnected { server: String, tool_count: usize },
-    McpDisconnected { server: String },
+    Error {
+        message: String,
+    },
+    McpConnected {
+        server: String,
+        tool_count: usize,
+    },
+    McpDisconnected {
+        server: String,
+    },
     McpToolNeedsApproval {
         request_id: String,
         server: String,
@@ -63,13 +81,9 @@ impl From<WorkflowEvent> for UiEvent {
             WorkflowEvent::TranscriptChanged(agent_id) => Self::TranscriptChanged { agent_id },
             WorkflowEvent::RolesChanged => Self::RolesChanged,
             WorkflowEvent::ResyncRequired => Self::ResyncRequired,
-            WorkflowEvent::McpConnected {
-                server,
-                tool_count,
-            } => Self::McpConnected {
-                server,
-                tool_count,
-            },
+            WorkflowEvent::McpConnected { server, tool_count } => {
+                Self::McpConnected { server, tool_count }
+            }
             WorkflowEvent::McpDisconnected { server } => Self::McpDisconnected { server },
             WorkflowEvent::McpToolNeedsApproval {
                 request_id,
@@ -149,12 +163,28 @@ async fn fetch_providers(state: State<'_, AppState>) -> Result<Vec<ProviderEntry
 }
 
 #[tauri::command]
+async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
+    let result = app.dialog().file().blocking_pick_folder();
+    match result {
+        Some(path) => {
+            let path_str = path
+                .as_path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            Ok(Some(path_str))
+        }
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
 async fn configure_runtime(
     app: AppHandle,
     state: State<'_, AppState>,
     provider_id: String,
     api_key: String,
     model: String,
+    project_path: Option<String>,
 ) -> Result<(), String> {
     let needs_init = state.service.lock().await.store().providers().is_empty();
     if needs_init {
@@ -183,11 +213,29 @@ async fn configure_runtime(
         models: vec![model.clone()],
         ..Default::default()
     };
+
+    // Resolve project path if provided.
+    let project = match project_path {
+        Some(path) => {
+            let canonical = std::fs::canonicalize(&path)
+                .map_err(|e| format!("Project path '{}' does not exist: {e}", path))?;
+            if canonical.is_dir() {
+                Some(ProjectConfig::new(canonical.to_string_lossy().to_string()))
+            } else {
+                let parent = canonical
+                    .parent()
+                    .ok_or_else(|| format!("Project path '{}' has no parent directory", path))?;
+                Some(ProjectConfig::new(parent.to_string_lossy().to_string()))
+            }
+        }
+        None => None,
+    };
+
     let runtime_config = RuntimeConfig {
         provider: provider_config,
         model,
-        agent_capacity: std::num::NonZeroUsize::new(100)
-            .expect("100 must be non-zero"),
+        agent_capacity: std::num::NonZeroUsize::new(100).expect("100 must be non-zero"),
+        project,
     };
     let runtime = Arc::new(Runtime::try_new(runtime_config).map_err(|e| e.to_string())?);
     spawn_event_bridge(app, Arc::clone(&runtime));
@@ -201,7 +249,11 @@ async fn approve_mcp_tool(
     request_id: String,
     approved: bool,
 ) -> Result<(), String> {
-    let runtime = state.runtime.lock().await.clone()
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime.mcp().resolve_approval(&request_id, approved).await;
     Ok(())
@@ -211,7 +263,11 @@ async fn approve_mcp_tool(
 async fn list_mcp_connections(
     state: State<'_, AppState>,
 ) -> Result<Vec<McpConnectionInfo>, String> {
-    let runtime = state.runtime.lock().await.clone()
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     Ok(runtime.mcp().list_connections().await)
 }
@@ -223,27 +279,35 @@ async fn list_mcp_configs() -> Result<Vec<McpServerConfig>, String> {
 }
 
 #[tauri::command]
-async fn add_mcp_server(
-    state: State<'_, AppState>,
-    config: McpServerConfig,
-) -> Result<(), String> {
+async fn add_mcp_server(state: State<'_, AppState>, config: McpServerConfig) -> Result<(), String> {
     // Persist config first
     let source = McpConfigSource::new(McpConfigSource::default_path());
-    source.add_server(config.clone()).map_err(|e| e.to_string())?;
+    source
+        .add_server(config.clone())
+        .map_err(|e| e.to_string())?;
     // Then connect
-    let runtime = state.runtime.lock().await.clone()
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
-    runtime.mcp().connect_one(&config).await.map_err(|e| e.to_string())?;
+    runtime
+        .mcp()
+        .connect_one(&config)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-async fn remove_mcp_server(
-    state: State<'_, AppState>,
-    name: String,
-) -> Result<(), String> {
+async fn remove_mcp_server(state: State<'_, AppState>, name: String) -> Result<(), String> {
     // Disconnect first
-    let runtime = state.runtime.lock().await.clone()
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     let _ = runtime.mcp().disconnect(&name).await;
     // Then remove from config
@@ -252,12 +316,36 @@ async fn remove_mcp_server(
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectInfo {
+    pub name: String,
+    pub path: String,
+}
+
+#[tauri::command]
+async fn get_project(state: State<'_, AppState>) -> Result<Option<ProjectInfo>, String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+    Ok(runtime.project().map(|p| ProjectInfo {
+        name: p.name(),
+        path: p.path.clone(),
+    }))
+}
+
 #[tauri::command]
 async fn snapshot(
     state: State<'_, AppState>,
     selected: Option<u32>,
 ) -> Result<RuntimeSnapshot, String> {
-    let runtime = state.runtime.lock().await.clone()
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime
         .initialize()
@@ -272,7 +360,11 @@ async fn send(
     target: u32,
     text: String,
 ) -> Result<RuntimeSnapshot, String> {
-    let runtime = state.runtime.lock().await.clone()
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime
         .initialize()
@@ -286,11 +378,12 @@ async fn send(
 }
 
 #[tauri::command]
-async fn stop_agent(
-    state: State<'_, AppState>,
-    target: u32,
-) -> Result<(), String> {
-    let runtime = state.runtime.lock().await.clone()
+async fn stop_agent(state: State<'_, AppState>, target: u32) -> Result<(), String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime
         .stop_agent(target)
@@ -303,7 +396,11 @@ async fn create_agent(
     state: State<'_, AppState>,
     role_name: String,
 ) -> Result<Vec<workflow_core::AgentInfo>, String> {
-    let runtime = state.runtime.lock().await.clone()
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime
         .initialize()
@@ -321,7 +418,11 @@ async fn remove_agent(
     state: State<'_, AppState>,
     id: u32,
 ) -> Result<Vec<workflow_core::AgentInfo>, String> {
-    let runtime = state.runtime.lock().await.clone()
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
         .ok_or_else(|| "runtime not configured".to_string())?;
     runtime
         .initialize()
@@ -391,7 +492,10 @@ fn write_saved_roles(roles: &[SavedRole]) {
     }
 }
 
-fn merge_roles(defaults: Vec<workflow_core::RoleInfo>, saved: Vec<SavedRole>) -> Vec<workflow_core::RoleInfo> {
+fn merge_roles(
+    defaults: Vec<workflow_core::RoleInfo>,
+    saved: Vec<SavedRole>,
+) -> Vec<workflow_core::RoleInfo> {
     let mut names: HashSet<String> = defaults.iter().map(|r| r.name.clone()).collect();
     let mut merged = defaults;
     for s in saved {
@@ -414,10 +518,13 @@ fn add_role(
 ) -> Vec<workflow_core::RoleInfo> {
     if let Some(runtime) = state.runtime.blocking_lock().clone() {
         let roles = runtime.add_role(name.clone(), definition.clone());
-        let saved: Vec<SavedRole> = roles.iter().map(|r| SavedRole {
-            name: r.name.clone(),
-            definition: r.definition.clone(),
-        }).collect();
+        let saved: Vec<SavedRole> = roles
+            .iter()
+            .map(|r| SavedRole {
+                name: r.name.clone(),
+                definition: r.definition.clone(),
+            })
+            .collect();
         write_saved_roles(&saved);
         return roles;
     }
@@ -441,10 +548,13 @@ fn load_roles(state: State<'_, AppState>) -> Vec<workflow_core::RoleInfo> {
             }
         }
         let all = runtime.list_roles();
-        let saved: Vec<SavedRole> = all.iter().map(|r| SavedRole {
-            name: r.name.clone(),
-            definition: r.definition.clone(),
-        }).collect();
+        let saved: Vec<SavedRole> = all
+            .iter()
+            .map(|r| SavedRole {
+                name: r.name.clone(),
+                definition: r.definition.clone(),
+            })
+            .collect();
         write_saved_roles(&saved);
         return all;
     }
@@ -487,10 +597,7 @@ fn spawn_event_bridge(app: AppHandle, runtime: Arc<Runtime>) {
             };
 
             // Forward critical events immediately without coalescing.
-            let is_critical = matches!(
-                &event,
-                WorkflowEvent::McpToolNeedsApproval { .. }
-            );
+            let is_critical = matches!(&event, WorkflowEvent::McpToolNeedsApproval { .. });
             if is_critical {
                 let _ = app.emit("workflow:event", UiEvent::from(event));
                 continue;
@@ -522,6 +629,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_decoration::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let service = Mutex::new(ProviderService::new());
             let runtime = Mutex::new(None);
@@ -541,6 +649,8 @@ pub fn run() {
             list_providers,
             fetch_providers,
             configure_runtime,
+            get_project,
+            pick_folder,
             snapshot,
             send,
             stop_agent,

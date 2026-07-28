@@ -8172,6 +8172,7 @@ name = "workflow-tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "reqwest 0.13.4",
  "rig",
  "serde",
@@ -8179,6 +8180,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "workflow-agent",
+ "workflow-config",
 ]
 
 [[package]]

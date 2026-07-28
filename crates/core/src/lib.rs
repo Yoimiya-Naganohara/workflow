@@ -24,8 +24,10 @@ use workflow_role::{Role, RoleId, RolePool};
 use workflow_tool::ToolError;
 use workflow_tool::{
     RoleChecker,
+    get_project_info::GetProjectInfo,
     list_agents::ListAgents,
     orchestrate::{AgentFactory, Orchestrate},
+    read_project_file::ReadProjectFile,
     send_message::SendMessage,
 };
 
@@ -138,6 +140,8 @@ pub struct RuntimeConfig {
     pub provider: ProviderConfig,
     pub model: String,
     pub agent_capacity: NonZeroUsize,
+    /// Optional project configuration when a project is opened.
+    pub project: Option<workflow_config::ProjectConfig>,
 }
 
 impl RuntimeConfig {
@@ -161,6 +165,7 @@ impl RuntimeConfig {
                     provider,
                     model,
                     agent_capacity: default.agent_capacity,
+                    project: None,
                 }
             }
             None => default,
@@ -183,6 +188,7 @@ impl Default for RuntimeConfig {
             model: "big-pickle".to_owned(),
             agent_capacity: NonZeroUsize::new(DEFAULT_AGENT_CAPACITY)
                 .expect("DEFAULT_AGENT_CAPACITY must be non-zero"),
+            project: None,
         }
     }
 }
@@ -294,6 +300,7 @@ pub struct Runtime {
     next_id: Arc<AtomicU32>,
     initialized: OnceCell<()>,
     mcp_manager: Arc<workflow_mcp::McpClientManager>,
+    project: Option<workflow_config::ProjectConfig>,
 }
 
 impl Default for Runtime {
@@ -335,6 +342,7 @@ impl Runtime {
             Arc::clone(&roles),
             Arc::clone(&handle_cell),
             Arc::clone(&observer),
+            config.project.clone(),
         );
 
         // Shared cell so the install_mcp_server tool can resolve the manager.
@@ -347,9 +355,14 @@ impl Runtime {
             workflow_mcp::tool::RemoveMcpServer::new(Arc::clone(&mcp_manager_cell));
         let mcp_call_tool = workflow_mcp::tool::CallMcpTool::new(Arc::clone(&mcp_manager_cell));
 
+        let project_cell: Arc<Option<workflow_config::ProjectConfig>> =
+            Arc::new(config.project.clone());
+
         let tool_handle = ToolServer::new()
             .tool(SendMessage::new(Arc::clone(&agent_pool)))
             .tool(ListAgents::new(Arc::clone(&agent_pool)))
+            .tool(GetProjectInfo::new(Arc::clone(&project_cell)))
+            .tool(ReadProjectFile::new(Arc::clone(&project_cell)))
             .tool(mcp_install_tool)
             .tool(mcp_list_tool)
             .tool(mcp_remove_tool)
@@ -419,6 +432,7 @@ impl Runtime {
             next_id,
             initialized: OnceCell::new(),
             mcp_manager,
+            project: config.project,
         })
     }
 
@@ -576,6 +590,11 @@ impl Runtime {
     /// Access the MCP client manager.
     pub fn mcp(&self) -> &workflow_mcp::McpClientManager {
         &self.mcp_manager
+    }
+
+    /// Access the project configuration, if a project is opened.
+    pub fn project(&self) -> Option<&workflow_config::ProjectConfig> {
+        self.project.as_ref()
     }
 
     /// Reload MCP server config and reconnect all servers.
@@ -813,9 +832,11 @@ fn make_agent_factory(
     roles: Arc<RwLock<RolePool>>,
     handle_cell: Arc<Mutex<Option<rig::tool::server::ToolServerHandle>>>,
     observer: Arc<RwLock<Option<AgentObserver>>>,
+    project: Option<workflow_config::ProjectConfig>,
 ) -> AgentFactory {
     let client = client.clone();
     let model = model.to_owned();
+    let project_context = project.map(|p| build_project_context(&p));
     Arc::new(move |id, requested_role| {
         let handle = handle_cell
             .lock()
@@ -835,16 +856,28 @@ fn make_agent_factory(
         } else {
             requested_role
         };
+
+        // Build preamble with optional project context.
+        let preamble = match &project_context {
+            Some(ctx) => format!(
+                "{}\n\n{}\n\n{}",
+                role.definition(),
+                ctx,
+                workflow_agent::protocol::A2A_SYSTEM_PROMPT
+            ),
+            None => format!(
+                "{}\n{}",
+                role.definition(),
+                workflow_agent::protocol::A2A_SYSTEM_PROMPT
+            ),
+        };
+
         let rig_agent = client
             .agent(&model)
             .tool_server_handle(handle)
             .memory(InMemoryConversationMemory::new())
             .conversation(id.to_string())
-            .preamble(&format!(
-                "{}\n{}",
-                role.definition(),
-                workflow_agent::protocol::A2A_SYSTEM_PROMPT
-            ))
+            .preamble(&preamble)
             .build();
         let agent = Arc::new(Agent::new(id, agent_role, rig_agent));
         if let Some(observer) = observer
@@ -856,6 +889,15 @@ fn make_agent_factory(
         }
         agent
     })
+}
+
+/// Build a project context string that describes the opened project.
+fn build_project_context(project: &workflow_config::ProjectConfig) -> String {
+    format!(
+        "You are working on project: {} at {}",
+        project.name(),
+        project.path
+    )
 }
 
 #[cfg(test)]
