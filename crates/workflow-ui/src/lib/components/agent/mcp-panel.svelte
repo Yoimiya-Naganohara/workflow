@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { Button } from "$lib/components/ui/button";
 	import { Badge } from "$lib/components/ui/badge";
-	import { Input } from "$lib/components/ui/input";
 	import { Tooltip, TooltipContent, TooltipTrigger } from "$lib/components/ui/tooltip";
 	import {
 		Plus,
@@ -15,7 +14,8 @@
 		Loader2,
 	} from "@lucide/svelte";
 	import { cn } from "$lib/utils.js";
-	import type { McpConnectionInfo, McpServerConfig, McpTransport } from "$lib/types";
+	import type { McpConnectionInfo, McpServerConfig } from "$lib/types";
+	import McpAddForm from "./mcp-add-form.svelte";
 
 	let {
 		configs,
@@ -36,27 +36,8 @@
 	let showAddForm = $state(false);
 	let adding = $state(false);
 
-	// Add form fields
-	let newName = $state("");
-	let newTransport = $state<"stdio" | "sse" | "streamable_http">("stdio");
-	let newCommand = $state("");
-	let newArgs = $state("");
-	let newUrl = $state("");
-	let newDangerousTools = $state("");
-
-	function resetForm() {
-		newName = "";
-		newTransport = "stdio";
-		newCommand = "";
-		newArgs = "";
-		newUrl = "";
-		newDangerousTools = "";
-		showAddForm = false;
-	}
-
-	function transportLabel(t: McpTransport): string {
+	function transportLabel(t: McpServerConfig["transport"]): string {
 		if (t.type === "stdio") return `${t.command} ${t.args.join(" ")}`;
-		if (t.type === "sse") return t.url;
 		return t.url;
 	}
 
@@ -68,40 +49,24 @@
 		return connections.find((c) => c.name === name);
 	}
 
-	async function handleAdd() {
-		if (!newName.trim()) return;
+	function toggleAddForm() {
+		showAddForm = !showAddForm;
+	}
+
+	async function handleAdd(config: McpServerConfig) {
 		adding = true;
 		try {
-			let transport: McpTransport;
-			if (newTransport === "stdio") {
-				const args = newArgs
-					.split(",")
-					.map((a) => a.trim())
-					.filter((a) => a.length > 0);
-				transport = { type: "stdio", command: newCommand.trim(), args };
-			} else if (newTransport === "sse") {
-				transport = { type: "sse", url: newUrl.trim() };
-			} else {
-				transport = { type: "streamable_http", url: newUrl.trim() };
-			}
-			const config: McpServerConfig = {
-				name: newName.trim(),
-				transport,
-			};
-			const dangerous = newDangerousTools
-				.split(",")
-				.map((t) => t.trim())
-				.filter((t) => t.length > 0);
-			if (dangerous.length > 0) {
-				config.dangerous_tools = dangerous;
-			}
 			await onAdd(config);
-			resetForm();
+			showAddForm = false;
 		} catch {
 			// error handled by parent
 		} finally {
 			adding = false;
 		}
+	}
+
+	function handleCancelAdd() {
+		showAddForm = false;
 	}
 </script>
 
@@ -123,8 +88,7 @@
 				size="icon-xs"
 				onclick={(e) => {
 					e.stopPropagation();
-					showAddForm = !showAddForm;
-					if (!showAddForm) resetForm();
+					toggleAddForm();
 				}}
 				title="Add MCP server"
 				aria-label="Add MCP server"
@@ -218,111 +182,12 @@
 				{/each}
 			{/if}
 
-			<!-- Add server form -->
 			{#if showAddForm}
-				<div class="flex flex-col gap-2 px-2 py-2 mt-1 rounded-md bg-muted/30 border border-border/30">
-					<span class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">New Server</span>
-
-					<div class="flex flex-col gap-1">
-						<label for="mcp-name" class="text-[10px] text-muted-foreground/70">Name</label>
-						<Input
-							id="mcp-name"
-							type="text"
-							placeholder="my-server"
-							class="h-6 text-xs px-2"
-							bind:value={newName}
-						/>
-					</div>
-
-					<div class="flex flex-col gap-1">
-						<span class="text-[10px] text-muted-foreground/70">Transport</span>
-						<div class="flex gap-1">
-							{#each ["stdio", "sse", "streamable_http"] as t}
-								<button
-									class={cn(
-										"flex-1 text-[10px] px-1.5 py-1 rounded font-medium transition-colors",
-										newTransport === t
-											? "bg-accent text-accent-foreground"
-											: "bg-muted/50 text-muted-foreground/70 hover:bg-muted",
-									)}
-									onclick={() => { newTransport = t as typeof newTransport; }}
-								>
-									{t}
-								</button>
-							{/each}
-						</div>
-					</div>
-
-					{#if newTransport === "stdio"}
-						<div class="flex flex-col gap-1">
-							<label for="mcp-command" class="text-[10px] text-muted-foreground/70">Command</label>
-							<Input
-								id="mcp-command"
-								type="text"
-								placeholder="npx, uvx, node..."
-								class="h-6 text-xs px-2"
-								bind:value={newCommand}
-							/>
-						</div>
-						<div class="flex flex-col gap-1">
-							<label for="mcp-args" class="text-[10px] text-muted-foreground/70">Args (comma-separated)</label>
-							<Input
-								id="mcp-args"
-								type="text"
-								placeholder="-y, @modelcontextprotocol/server-filesystem, /path"
-								class="h-6 text-xs px-2"
-								bind:value={newArgs}
-							/>
-						</div>
-					{:else}
-						<div class="flex flex-col gap-1">
-							<label for="mcp-url" class="text-[10px] text-muted-foreground/70">URL</label>
-							<Input
-								id="mcp-url"
-								type="text"
-								placeholder="https://..."
-								class="h-6 text-xs px-2"
-								bind:value={newUrl}
-							/>
-						</div>
-					{/if}
-
-					<div class="flex flex-col gap-1">
-						<label for="mcp-dangerous" class="text-[10px] text-muted-foreground/70">
-							Dangerous tools <span class="text-muted-foreground/40">(optional, comma-separated, or * for all)</span>
-						</label>
-						<Input
-							id="mcp-dangerous"
-							type="text"
-							placeholder="*"
-							class="h-6 text-xs px-2"
-							bind:value={newDangerousTools}
-						/>
-					</div>
-
-					<div class="flex items-center gap-1.5 mt-1">
-						<Button
-							variant="default"
-							size="xs"
-							class="flex-1 h-6 text-[11px]"
-							disabled={adding || !newName.trim() || (newTransport === "stdio" && !newCommand.trim())}
-							onclick={handleAdd}
-						>
-							{#if adding}
-								<Loader2 class="size-2.5 animate-spin" />
-							{/if}
-							Add
-						</Button>
-						<Button
-							variant="ghost"
-							size="xs"
-							class="h-6 text-[11px]"
-							onclick={resetForm}
-						>
-							Cancel
-						</Button>
-					</div>
-				</div>
+				<McpAddForm
+					{adding}
+					onAdd={handleAdd}
+					onCancel={handleCancelAdd}
+				/>
 			{/if}
 		</div>
 	{/if}
