@@ -91,8 +91,8 @@
 				{#each items as item (item.id)}
 					{@const pinned = isPinned(item)}
 					<div class="group relative">
-						{#if item.type === "assistant"}
-							<TextBlock text={item.text} role="assistant" streaming={item.streaming ?? false} />
+						{#if item.type === "text"}
+							<TextBlock text={item.text} role="assistant" streaming={true} />
 						{:else if item.type === "user"}
 							<TextBlock text={item.text} role="user" />
 						{:else if item.type === "thinking"}

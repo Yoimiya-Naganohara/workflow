@@ -31,7 +31,7 @@ describe("state", () => {
 
 		expect(state.chatItems).toHaveLength(5);
 		expect(state.chatItems[0]).toMatchObject({ type: "user", text: "hello" });
-		expect(state.chatItems[1]).toMatchObject({ type: "assistant", text: "world" });
+		expect(state.chatItems[1]).toMatchObject({ type: "text", text: "world" });
 		expect(state.chatItems[2]).toMatchObject({ type: "thinking", text: "hmm" });
 		expect(state.chatItems[3]).toMatchObject({ type: "tool", text: "search", status: "running" });
 		expect(state.chatItems[4]).toMatchObject({ type: "error", text: "fail" });

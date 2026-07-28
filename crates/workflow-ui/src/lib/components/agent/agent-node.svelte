@@ -91,8 +91,8 @@
 					<div class="space-y-1.5">
 						{#each data.chatItems as item}
 							<div class="scroll-line">
-								{#if item.type === "assistant"}
-									<TextBlock text={item.text} role="assistant" />
+								{#if item.type === "text"}
+									<TextBlock text={item.text} role="assistant" streaming={true} />
 								{:else if item.type === "user"}
 									<TextBlock text={item.text} role="user" />
 								{:else if item.type === "thinking"}

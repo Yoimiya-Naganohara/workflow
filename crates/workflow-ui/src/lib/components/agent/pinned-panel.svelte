@@ -58,7 +58,7 @@
                         </div>
                     </div>
                     <div class="text-xs leading-relaxed">
-                        {#if pin.type === "user" || pin.type === "assistant"}
+                        {#if pin.type === "user" || pin.type === "text"}
                             <div
                                 class="prose-sm dark:prose-invert prose-code:before:content-none prose-code:after:content-none max-w-full"
                             >

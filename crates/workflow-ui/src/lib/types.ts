@@ -45,7 +45,7 @@ export interface PinnedMessage {
 	id: number;
 	chatItemId: number;
 	text: string;
-	type: "user" | "assistant" | "thinking" | "tool" | "error";
+	type: "user" | "text" | "thinking" | "tool" | "error";
 	result?: string | null;
 	status?: "done" | "running" | "error";
 	timestamp: number;
@@ -78,7 +78,7 @@ export interface ProviderEntry {
 
 export interface ChatItem {
 	id: number;
-	type: "user" | "assistant" | "thinking" | "tool" | "error";
+	type: "user" | "text" | "thinking" | "tool" | "error";
 	text: string;
 	result?: string | null;
 	status?: "running" | "done" | "error";
