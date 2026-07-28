@@ -538,6 +538,21 @@ fn add_role(
 }
 
 #[tauri::command]
+fn remove_role(state: State<'_, AppState>, name: String) -> Vec<workflow_core::RoleInfo> {
+    // Remove from saved roles
+    let mut saved = read_saved_roles();
+    saved.retain(|r| r.name != name);
+    write_saved_roles(&saved);
+
+    // Remove from runtime if available
+    if let Some(runtime) = state.runtime.blocking_lock().clone() {
+        return runtime.remove_role(&name);
+    }
+
+    merge_roles(default_roles(), saved)
+}
+
+#[tauri::command]
 fn load_roles(state: State<'_, AppState>) -> Vec<workflow_core::RoleInfo> {
     if let Some(runtime) = state.runtime.blocking_lock().clone() {
         let saved = read_saved_roles();
@@ -658,6 +673,7 @@ pub fn run() {
             remove_agent,
             get_roles,
             add_role,
+            remove_role,
             save_config,
             load_config,
             load_roles,

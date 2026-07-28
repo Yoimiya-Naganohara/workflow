@@ -21,7 +21,7 @@
 
 <ModeWatcher />
 <TooltipProvider>
-    <div class="flex h-dvh w-screen flex-col relative">
+    <div class="flex h-screen w-screen flex-col relative">
         <header
             class="flex items-center justify-between h-8 shrink-0 bg-transparent select-none data-tauri-drag-region"
         >
@@ -32,7 +32,7 @@
                 <span class="text-[10px] text-muted-foreground/30 font-mono tabular-nums">v0.1</span>
             </div>
         </header>
-        <div class="flex flex-1 min-w-0" style="transition: var(--transition-theme)">
+        <div class="flex flex-1 min-w-0 min-h-0" style="transition: var(--transition-theme)">
             {@render children()}
         </div>
         <EventLog open={showEventLog} />

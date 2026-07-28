@@ -84,6 +84,10 @@ impl RolePool {
     pub fn list(&self) -> Vec<&Role> {
         self.roles.values().collect()
     }
+
+    pub fn remove(&mut self, role_id: &RoleId) -> Option<Role> {
+        self.roles.remove(role_id)
+    }
 }
 
 // ── Experience ──────────────────────────────────────────────

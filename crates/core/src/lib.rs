@@ -580,6 +580,14 @@ impl Runtime {
         self.list_roles()
     }
 
+    pub fn remove_role(&self, name: &str) -> Vec<RoleInfo> {
+        self.roles
+            .write()
+            .expect("roles write lock poisoned")
+            .remove(&RoleId::from(name));
+        self.list_roles()
+    }
+
     /// Access the MCP client manager.
     pub fn mcp(&self) -> &workflow_mcp::McpClientManager {
         &self.mcp_manager
