@@ -163,6 +163,7 @@
 				<GraphPanel
 					agents={app.agents}
 					statuses={app.agentStatuses}
+					chatItems={app.chatItems}
 					selected={app.selected}
 					{panelWidth}
 					onSelect={(id) => app.selectAgent(id)}

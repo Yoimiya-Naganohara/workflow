@@ -2,23 +2,25 @@
 	import { formatRole } from "$lib/utils.js";
 	import AgentGraph from "$lib/components/agent/agent-graph.svelte";
 	import ResizeHandle from "./resize-handle.svelte";
-	import type { AgentId, AgentInfo, AgentStatus } from "$lib/types";
+	import type { AgentId, AgentInfo, AgentStatus, ChatItem } from "$lib/types";
 
 	let {
-		agents,
-		statuses,
-		selected,
-		panelWidth,
-		onSelect,
-		onResize,
-	}: {
-		agents: AgentInfo[];
-		statuses: Map<AgentId, AgentStatus>;
-		selected: AgentId | null;
-		panelWidth: number;
-		onSelect: (id: AgentId) => void;
-		onResize: (deltaX: number) => void;
-	} = $props();
+			agents,
+			statuses,
+			chatItems,
+			selected,
+			panelWidth,
+			onSelect,
+			onResize,
+		}: {
+			agents: AgentInfo[];
+			statuses: Map<AgentId, AgentStatus>;
+			chatItems: ChatItem[];
+			selected: AgentId | null;
+			panelWidth: number;
+			onSelect: (id: AgentId) => void;
+			onResize: (deltaX: number) => void;
+		} = $props();
 
 	const agent = $derived(agents.find((a) => a.id === selected));
 	const status = $derived(selected != null ? (statuses.get(selected) ?? "idle") : "idle");
@@ -42,6 +44,7 @@
 	<AgentGraph
 		{agents}
 		{statuses}
+		{chatItems}
 		{selected}
 		{onSelect}
 	/>

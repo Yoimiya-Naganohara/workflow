@@ -110,4 +110,6 @@ export interface AgentNodeData extends Record<string, unknown> {
 	task: string | null;
 	status: AgentStatus;
 	roleColor: string;
+	expanded?: boolean;
+	chatItems?: ChatItem[];
 }
