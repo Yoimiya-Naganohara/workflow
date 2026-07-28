@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::{num::NonZeroUsize, sync::Arc};
 
 use anyhow::Result;
@@ -80,6 +81,24 @@ impl AgentPool {
 
     fn shutdown(entity: &AgentEntity) {
         entity.handler.abort();
+    }
+
+    pub async fn find_idle_agent(
+        &self,
+        role: &str,
+        reserved: &HashSet<AgentId>,
+    ) -> Option<Arc<Agent>> {
+        let lru = self.lru.lock().await;
+        for (_, entity) in lru.iter() {
+            let agent = &entity.agent;
+            if agent.role() == role
+                && agent.current_task().read().await.is_none()
+                && !reserved.contains(&agent.id())
+            {
+                return Some(agent.clone());
+            }
+        }
+        None
     }
 
     pub async fn remove_agent(&self, id: &AgentId) {

@@ -8111,6 +8111,7 @@ name = "workflow-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dashmap",
  "rig",
  "serde",
  "serde_json",
@@ -8178,6 +8179,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
  "workflow-agent",
  "workflow-config",
 ]

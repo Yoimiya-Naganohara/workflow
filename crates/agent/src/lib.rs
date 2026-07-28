@@ -167,7 +167,7 @@ impl Agent {
         //TODO: MAKE THIS CONFIGURABLE
         const MAX_TURNS: usize = 100;
         const MAX_TOOL_RESULT_CHARS: usize = 100_000;
-        const CHANNEL_CAPACITY: usize = 32;
+        const CHANNEL_CAPACITY: usize = 1024;
 
         let (sender, inbox) = channel::<Message>(CHANNEL_CAPACITY);
         let (controls, control_inbox) = unbounded_channel::<ControlMessage>();
@@ -211,24 +211,17 @@ impl Agent {
                                     .unwrap_or_else(|| "unknown".to_string());
                                 let result_text = tool_result.content.iter()
                                     .filter_map(|c| match c {
-                                        rig::completion::message::ToolResultContent::Text(t) => Some(t.text.clone()),
+                                        rig::completion::message::ToolResultContent::Text(t) => Some(t.text.as_str()),
                                         _ => None,
                                     })
                                     .collect::<Vec<_>>()
                                     .join("\n");
                                 // Truncate overly large tool results to keep context manageable.
                                 let result_text = if result_text.len() > MAX_TOOL_RESULT_CHARS {
-                                    // Find the last char boundary ≤ MAX_TOOL_RESULT_CHARS.
-                                    let cutoff = result_text
-                                        .char_indices()
-                                        .take_while(|(i, _)| *i <= MAX_TOOL_RESULT_CHARS)
-                                        .last()
-                                        .map(|(i, c)| i + c.len_utf8())
-                                        .unwrap_or(MAX_TOOL_RESULT_CHARS);
-                                    let truncated = &result_text[..cutoff];
+                                    let cutoff = result_text.floor_char_boundary(MAX_TOOL_RESULT_CHARS);
                                     format!(
                                         "{}...\n\n[Tool result truncated at {} characters (original was {} bytes). Use targeted queries for full data.]",
-                                        truncated,
+                                        &result_text[..cutoff],
                                         MAX_TOOL_RESULT_CHARS,
                                         result_text.len(),
                                     )

@@ -7,6 +7,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::McpError;
 
+/// Workflow config directory name.
+pub const WORKFLOW_DIR: &str = ".workflow";
+/// MCP server config file name.
+pub const MCP_SERVERS_FILE: &str = "mcp_servers.json";
+
+/// Resolve the `~/.workflow` directory path.
+pub fn workflow_dir() -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(WORKFLOW_DIR)
+}
+
 /// Describes how to connect to a single MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
@@ -73,12 +86,7 @@ impl McpConfigSource {
 
     /// Return the default config path: `~/.workflow/mcp_servers.json`.
     pub fn default_path() -> PathBuf {
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home)
-            .join(".workflow")
-            .join("mcp_servers.json")
+        workflow_dir().join(MCP_SERVERS_FILE)
     }
 
     /// Read and parse the config file.
@@ -149,11 +157,10 @@ impl McpConfigSource {
     }
 
     fn write(&self, servers: &[McpServerConfig]) -> Result<(), McpError> {
-        let file = McpConfigFile {
-            servers: servers.to_vec(),
-        };
-        let content = serde_json::to_string_pretty(&file)
-            .map_err(|source| McpError::Other(format!("failed to serialize config: {source}")))?;
+        let content = serde_json::to_string_pretty(&McpConfigFile {
+            servers: servers.to_owned(),
+        })
+        .map_err(|source| McpError::Other(format!("failed to serialize config: {source}")))?;
 
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|source| McpError::ConfigRead {

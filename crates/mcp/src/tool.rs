@@ -378,10 +378,14 @@ impl Tool for CallMcpTool {
 }
 
 fn extract_text(content: &[rmcp::model::Content]) -> String {
-    content
-        .iter()
-        .filter_map(|c| c.raw.as_text())
-        .map(|t| t.text.clone())
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut out = String::new();
+    for c in content {
+        if let Some(text) = c.raw.as_text() {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&text.text);
+        }
+    }
+    out
 }

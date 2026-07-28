@@ -89,6 +89,7 @@ impl Tool for SendMessage {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(target = args.target_id))]
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let from_id = current_agent_id();
 
@@ -107,9 +108,10 @@ impl Tool for SendMessage {
         };
 
         let msg_id = NEXT_MSG_ID.fetch_add(1, Ordering::Relaxed);
+        let thread_id = args.thread_id.unwrap_or_else(|| msg_id);
         let msg = PeerMessage {
             id: msg_id,
-            thread_id: args.thread_id.unwrap_or(0),
+            thread_id,
             from: from_id,
             to: args.target_id,
             intent,

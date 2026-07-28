@@ -12,6 +12,7 @@
 	import type { AgentInfo, AgentId, AgentStatus, AgentNodeData, ChatItem } from "$lib/types";
 	import AgentNode from "./agent-node.svelte";
 	import FitViewButton from "./fit-view-button.svelte";
+	import AutoScroll from "./auto-scroll.svelte";
 
 	let {
 		agents,
@@ -199,6 +200,7 @@
 			panOnDrag={true}
 			zoomOnScroll={true}
 		>
+			<AutoScroll {expandedNodeId} />
 			<Panel position="top-right">
 				<FitViewButton />
 			</Panel>
@@ -234,4 +236,20 @@
 		height: 100% !important;
 	}
 
+	/* ── Smooth node position transitions (dagre relayout) ── */
+	:global(.svelte-flow__node) {
+		transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+	}
+
+	/* ── Smooth edge redrawing ── */
+	:global(.svelte-flow__edge-path) {
+		stroke: var(--foreground) !important;
+		stroke-opacity: 0.2 !important;
+		transition: d 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+	}
+
+	/* ── Edge wrapper fade when rerouting ── */
+	:global(.svelte-flow__edge) {
+		transition: opacity 0.3s ease;
+	}
 </style>

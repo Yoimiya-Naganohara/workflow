@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     num::NonZeroUsize,
     sync::{
         Arc, Mutex, RwLock,
@@ -7,13 +7,15 @@ use std::{
     },
 };
 
+use dashmap::DashMap;
+
 use rig::{
     client::CompletionClient, memory::InMemoryConversationMemory,
     providers::openai::CompletionsClient, tool::server::ToolServer,
     vector_store::VectorStoreIndexDyn,
 };
 use serde::Serialize;
-use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
+use tokio::sync::{OnceCell, broadcast};
 pub use workflow_agent::agent_pool::AgentInfo;
 use workflow_agent::{
     Agent, AgentEvent, AgentId, ControlMessage, Message,
@@ -292,7 +294,7 @@ impl WorkflowEvent {
 pub struct Runtime {
     agent_pool: Arc<AgentPool>,
     roles: Arc<RwLock<RolePool>>,
-    messages: Arc<AsyncRwLock<HashMap<AgentId, Vec<ConversationMessage>>>>,
+    messages: Arc<DashMap<AgentId, Vec<ConversationMessage>>>,
     events: broadcast::Sender<WorkflowEvent>,
     factory: AgentFactory,
     observer: Arc<RwLock<Option<AgentObserver>>>,
@@ -419,7 +421,7 @@ impl Runtime {
         Ok(Self {
             agent_pool,
             roles,
-            messages: Arc::new(AsyncRwLock::new(HashMap::new())),
+            messages: Arc::new(DashMap::new()),
             events,
             factory,
             observer,
@@ -511,8 +513,6 @@ impl Runtime {
             .ok_or(RuntimeError::AgentNotFound(id))?;
 
         self.messages
-            .write()
-            .await
             .entry(id)
             .or_default()
             .push(ConversationMessage::User { text: text.clone() });
@@ -550,10 +550,8 @@ impl Runtime {
         let messages = match selected {
             Some(id) => self
                 .messages
-                .read()
-                .await
                 .get(&id)
-                .cloned()
+                .map(|e| e.clone())
                 .unwrap_or_default(),
             None => Vec::new(),
         };
@@ -693,7 +691,7 @@ impl Runtime {
                             .lock()
                             .expect("observed_agents lock poisoned")
                             .remove(&id);
-                        runtime.messages.write().await.remove(&id);
+                        runtime.messages.remove(&id);
                         let _ = runtime.events.send(WorkflowEvent::AgentRemoved(id));
                     }
                 }
@@ -702,11 +700,10 @@ impl Runtime {
     }
 
     async fn record_agent_event(&self, id: AgentId, event: &AgentEvent) {
-        let mut messages = self.messages.write().await;
-        let messages = messages.entry(id).or_default();
+        let mut messages = self.messages.entry(id).or_default();
         match event {
-            AgentEvent::Text(text) => append_text(messages, text, false),
-            AgentEvent::Reasoning(text) => append_text(messages, text, true),
+            AgentEvent::Text(text) => append_text(&mut messages, text, false),
+            AgentEvent::Reasoning(text) => append_text(&mut messages, text, true),
             AgentEvent::ToolCall { name, params } => messages.push(ConversationMessage::Tool {
                 text: format!("{name}: {params}"),
                 result: None,

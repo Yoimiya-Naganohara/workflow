@@ -18,3 +18,4 @@ workflow-role = { path = "../role" }
 workflow-config = { path = "../config" }
 workflow-mcp = { path = "../mcp" }
 tracing.workspace = true
+dashmap.workspace = true

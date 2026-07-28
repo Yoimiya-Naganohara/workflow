@@ -1,10 +1,21 @@
 <script lang="ts">
 	import { Handle, Position, type NodeProps, type Node } from "@xyflow/svelte";
 	import { formatRole } from "$lib/utils.js";
-	import type { AgentNodeData, ChatItem } from "$lib/types";
+	import type { AgentNodeData } from "$lib/types";
 
 	type AgentNode = Node<AgentNodeData, string>;
 	let { data }: NodeProps<AgentNode> = $props();
+
+	let scrollEl = $state<HTMLDivElement | null>(null);
+
+	// Auto-scroll to bottom when messages change
+	$effect(() => {
+		data.chatItems?.length;
+		if (!scrollEl || !data.expanded) return;
+		requestAnimationFrame(() => {
+			scrollEl!.scrollTop = scrollEl!.scrollHeight;
+		});
+	});
 
 	const statusColor = $derived.by(() => {
 		switch (data.status) {
@@ -16,22 +27,20 @@
 	});
 
 	const isActive = $derived(data.status === "thinking" || data.status === "running-tool" || data.status === "responding");
-	const showPulse = $derived(data.status === "thinking" || data.status === "running-tool");
 	const circumference = 2 * Math.PI * 24;
 
-	function messageIcon(type: ChatItem["type"]): string {
+	function messageIcon(type: string): string {
 		switch (type) {
 			case "user": return "💬";
 			case "assistant": return "🤖";
 			case "thinking": return "💭";
 			case "tool": return "🔧";
 			case "error": return "⚠️";
+			default: return "💬";
 		}
 	}
 
-	function truncate(text: string, max: number): string {
-		return text.length > max ? text.slice(0, max) + "…" : text;
-	}
+
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -110,19 +119,7 @@
 				{/if}
 			</circle>
 
-			<!-- Pulse ring (expanding) -->
-			{#if showPulse}
-				<circle
-					cx="50" cy="42" r="25"
-					fill="none"
-					stroke={data.roleColor}
-					stroke-width="2"
-					opacity="0.5"
-				>
-					<animate attributeName="r" values="25;32;25" dur="1.8s" repeatCount="indefinite"/>
-					<animate attributeName="opacity" values="0.5;0;0.5" dur="1.8s" repeatCount="indefinite"/>
-				</circle>
-			{/if}
+
 
 			<!-- Node ID -->
 			<text
@@ -148,68 +145,50 @@
 		{/if}
 	{/if}
 
-	<!-- ─── EXPANDED VIEW: agent info card ─── -->
+	<!-- ─── EXPANDED VIEW: terminal scrolling ─── -->
 	{#if data.expanded}
 		<div
-			class="expanded-card size-full rounded-xl border border-border/60 bg-background/90 backdrop-blur-md shadow-xl flex flex-col overflow-hidden"
+			class="terminal-card size-full rounded-xl border border-border/60 shadow-xl flex flex-col overflow-hidden"
 			style="border-top: 3px solid {data.roleColor};"
 		>
-			<!-- Header -->
-			<div class="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
-				<div class="size-3 rounded-full shrink-0" style="background: {statusColor}"></div>
-				<span class="text-sm font-bold text-foreground leading-tight">
+			<!-- Terminal header bar -->
+			<div
+				class="flex items-center gap-1.5 px-3 py-2 shrink-0 border-b border-border/20 bg-muted/30"
+			>
+				<div class="size-2 rounded-full" style="background: {statusColor}"></div>
+				<span class="text-[11px] font-mono font-bold text-foreground/80">
 					#{data.id} {formatRole(data.role)}
 				</span>
-				<div class="ml-auto flex items-center gap-1.5">
-					{#if showPulse}
-						<span class="size-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-					{/if}
-					<span
-						class="text-[10px] capitalize px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/70 font-medium leading-none"
-					>
-						{data.status.replace("-", " ")}
-					</span>
-				</div>
+				<span class="ml-auto text-[9px] font-mono text-muted-foreground/40">
+					{data.status.replace("-", " ")}
+				</span>
 			</div>
 
-			<!-- Task (if present) -->
-			{#if data.task}
-				<div class="px-3 pb-1.5">
-					<div
-						class="text-[11px] text-muted-foreground/80 bg-muted/40 rounded-md px-2 py-1.5 leading-relaxed line-clamp-2 border border-border/30"
-						title={data.task}
-					>
-						<span class="font-medium text-muted-foreground/60 mr-1">📋</span>
-						{data.task}
-					</div>
-				</div>
-			{/if}
-
-			<!-- Recent activity -->
+			<!-- Terminal messages -->
 			{#if data.chatItems && data.chatItems.length > 0}
-				<div class="flex-1 flex flex-col min-h-0 px-3 pb-2.5">
-					<div class="text-[9px] font-semibold text-muted-foreground/40 uppercase tracking-wider mb-1 mt-0.5">
-						Recent Activity
-					</div>
-					<div class="flex-1 space-y-0.5 overflow-y-auto min-h-0 max-h-[108px]">
-						{#each data.chatItems as item}
-							<div
-								class="flex items-start gap-1.5 text-[11px] px-1.5 py-1 rounded-md hover:bg-muted/30 transition-colors"
-							>
-								<span class="shrink-0 mt-0.5 text-[10px]">{messageIcon(item.type)}</span>
-								<span class="text-muted-foreground/75 leading-snug line-clamp-2 min-w-0">
-									{item.type === "tool" ? item.text : truncate(item.text, 140)}
-								</span>
-							</div>
-						{/each}
-					</div>
-					<div class="text-[9px] text-muted-foreground/30 text-center pt-1 border-t border-border/20 mt-1">
-						showing {data.chatItems.length} message{data.chatItems.length !== 1 ? "s" : ""}
-					</div>
+				<div
+					bind:this={scrollEl}
+					class="flex-1 overflow-y-auto px-2.5 py-2 font-mono text-[11px] leading-relaxed space-y-1 scroll-smooth"
+				>
+					{#each data.chatItems as item}
+						<div class="scroll-line flex items-start gap-2">
+							<span class="shrink-0 mt-0.5">{messageIcon(item.type)}</span>
+							<span
+								class="terminal-text leading-snug"
+								class:type-thinking={item.type === "thinking"}
+								class:type-assistant={item.type === "assistant"}
+								class:type-error={item.type === "error"}
+								class:type-tool={item.type === "tool"}
+							>{(item.type === "tool" ? item.text : item.text).slice(0, 180)}{item.text.length > 180 ? "…" : ""}</span
+						>
+						</div>
+					{/each}
 				</div>
 			{:else}
-				<div class="flex-1 flex items-center justify-center px-3 pb-2.5">
-					<span class="text-[11px] text-muted-foreground/30 italic">No recent activity</span>
+				<div class="flex-1 flex items-center justify-center p-3">
+					<span class="text-[11px] font-mono text-muted-foreground/30 italic">
+						<span class="animate-pulse">_</span>
+					</span>
 				</div>
 			{/if}
 		</div>
@@ -217,7 +196,7 @@
 </div>
 
 <style>
-	/* Selected node: brighter body stroke + glow */
+	/* ── Selected node: brighter body stroke + glow ── */
 	:global(.svelte-flow__node.selected) .agent-node:not(.expanded) .node-body {
 		stroke-width: 2.5;
 		stroke-opacity: 1;
@@ -226,8 +205,97 @@
 		opacity: 0.2 !important;
 	}
 
-	/* Expanded card transitions */
+	/* ── Hover lift for collapsed nodes ── */
+	:global(.svelte-flow__node:not(.dragging)) .agent-node:not(.expanded) {
+		transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+		            height 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+		            transform 0.2s ease,
+		            filter 0.2s ease;
+	}
+	:global(.svelte-flow__node:not(.dragging)) .agent-node:not(.expanded):hover {
+		transform: scale(1.08);
+		filter: brightness(1.15);
+	}
+
+	/* ── Base size transition for .agent-node ── */
 	.agent-node {
-		transition: width 0.25s ease, height 0.25s ease;
+		transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+		            height 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	/* ── Terminal card entrance ── */
+	.terminal-card {
+		animation: terminal-appear 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+	}
+
+	@keyframes terminal-appear {
+		from {
+			opacity: 0;
+			transform: scale(0.95);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+
+	/* ── Terminal scroll-in lines ── */
+	.scroll-line {
+		animation: scroll-up 0.35s ease-out both;
+		overflow: hidden;
+	}
+
+	.scroll-line:nth-child(1) { animation-delay: 0.02s; }
+	.scroll-line:nth-child(2) { animation-delay: 0.06s; }
+	.scroll-line:nth-child(3) { animation-delay: 0.10s; }
+	.scroll-line:nth-child(4) { animation-delay: 0.14s; }
+
+	@keyframes scroll-up {
+		from {
+			opacity: 0;
+			transform: translateY(12px);
+			max-height: 0;
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+			max-height: 60px;
+		}
+	}
+
+	/* ── Terminal text colors (default + type-specific) ── */
+	.terminal-text {
+		display: inline;
+		color: rgb(156 163 175 / 0.8);
+	}
+	.type-thinking { color: rgb(252 211 77 / 0.9); }
+	.type-assistant { color: rgb(74 222 128 / 0.9); }
+	.type-error    { color: rgb(248 113 113 / 0.8); }
+	.type-tool     { color: rgb(125 211 252 / 0.8); }
+
+	/* ── Terminal text scroll reveal ── */
+	.terminal-text {
+		animation: text-reveal 0.3s ease-out both;
+	}
+
+	.scroll-line:nth-child(1) .terminal-text { animation-delay: 0.10s; }
+	.scroll-line:nth-child(2) .terminal-text { animation-delay: 0.20s; }
+	.scroll-line:nth-child(3) .terminal-text { animation-delay: 0.30s; }
+	.scroll-line:nth-child(4) .terminal-text { animation-delay: 0.40s; }
+
+	@keyframes text-reveal {
+		from {
+			opacity: 0;
+			clip-path: inset(0 100% 0 0);
+		}
+		to {
+			opacity: 1;
+			clip-path: inset(0 0 0 0);
+		}
+	}
+
+	/* ── SVG status-ring opacity transition ── */
+	:global(.svelte-flow__node) .agent-node svg circle[stroke-dasharray] {
+		transition: opacity 0.4s ease;
 	}
 </style>
