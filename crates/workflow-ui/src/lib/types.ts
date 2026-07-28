@@ -53,7 +53,7 @@ export interface PinnedMessage {
 	agentRole?: string;
 }
 
-export type DialogId = "new-agent" | "settings" | "roles" | "mcp-approval";
+export type DialogId = "new-agent" | "mcp-approval";
 
 export type PendingAction =
 	| { type: "send"; agentId: AgentId }

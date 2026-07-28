@@ -12,6 +12,5 @@ serde.workspace=true
 serde_json.workspace=true
 thiserror.workspace=true
 tokio.workspace=true
-base64.workspace = true
 workflow-agent = {path="../agent"}
 workflow-config = {path="../config"}

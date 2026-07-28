@@ -166,6 +166,7 @@ impl Agent {
     {
         //TODO: MAKE THIS CONFIGURABLE
         const MAX_TURNS: usize = 100;
+        const MAX_TOOL_RESULT_CHARS: usize = 100_000;
         const CHANNEL_CAPACITY: usize = 32;
 
         let (sender, inbox) = channel::<Message>(CHANNEL_CAPACITY);
@@ -215,6 +216,25 @@ impl Agent {
                                     })
                                     .collect::<Vec<_>>()
                                     .join("\n");
+                                // Truncate overly large tool results to keep context manageable.
+                                let result_text = if result_text.len() > MAX_TOOL_RESULT_CHARS {
+                                    // Find the last char boundary ≤ MAX_TOOL_RESULT_CHARS.
+                                    let cutoff = result_text
+                                        .char_indices()
+                                        .take_while(|(i, _)| *i <= MAX_TOOL_RESULT_CHARS)
+                                        .last()
+                                        .map(|(i, c)| i + c.len_utf8())
+                                        .unwrap_or(MAX_TOOL_RESULT_CHARS);
+                                    let truncated = &result_text[..cutoff];
+                                    format!(
+                                        "{}...\n\n[Tool result truncated at {} characters (original was {} bytes). Use targeted queries for full data.]",
+                                        truncated,
+                                        MAX_TOOL_RESULT_CHARS,
+                                        result_text.len(),
+                                    )
+                                } else {
+                                    result_text
+                                };
                                 Some(AgentEvent::ToolResult { name, result: result_text })
                             }
                         },

@@ -2,10 +2,9 @@
     import { getContext } from "svelte";
     import { toggleMode } from "mode-watcher";
     import { Button } from "$lib/components/ui/button";
-    import { Badge } from "$lib/components/ui/badge";
     import { ScrollArea } from "$lib/components/ui/scroll-area";
     import { Tooltip, TooltipContent, TooltipTrigger } from "$lib/components/ui/tooltip";
-    import { Plus, MessageSquare, Brain, Settings as SettingsIcon, ChevronRight, ChevronDown, X, Loader2, CircleDot, AlertCircle, Sun, Moon, Bug, Pin, PinOff } from "@lucide/svelte";
+    import { Plus, MessageSquare, Brain, X, Loader2, CircleDot, AlertCircle, Sun, Moon, Bug } from "@lucide/svelte";
     import { cn, formatRole } from "$lib/utils.js";
     import type { AgentInfo, AgentId, AgentStatus } from "$lib/types";
     import type { McpConnectionInfo, McpServerConfig } from "$lib/types";
@@ -22,10 +21,7 @@
             onSelect,
             onCreateClick,
             onRemoveAgent,
-            onRolesClick,
             roles,
-            rolesExpanded,
-            onToggleRoles,
             mcpConfigs,
             mcpConnections,
             mcpExpanded,
@@ -45,10 +41,7 @@
             onSelect: (id: AgentId) => void;
             onCreateClick: () => void;
             onRemoveAgent: (id: AgentId) => void;
-            onRolesClick: () => void;
             roles: import("$lib/types").RoleInfo[];
-            rolesExpanded: boolean;
-            onToggleRoles: () => void;
             mcpConfigs: McpServerConfig[];
             mcpConnections: McpConnectionInfo[];
             mcpExpanded: boolean;
@@ -199,44 +192,9 @@
 		onRemove={onRemoveMcpServer}
 	/>
 
-	<div class="shrink-0 ">
-		<button
-			class="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:bg-muted/30 transition-colors"
-			onclick={onToggleRoles}
-		>
-			<div class="flex items-center gap-2">
-				<Brain class="size-3.5" />
-				<span>Roles</span>
-				<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 min-w-0">{roles.length}</Badge>
-			</div>
-			<div class="flex items-center gap-1">
-				<Button variant="ghost" size="icon-xs" onclick={(e) => { e.stopPropagation(); onRolesClick(); }} title="Manage roles" aria-label="Manage roles">
-					<SettingsIcon class="size-3" />
-				</Button>
-				{#if rolesExpanded}
-					<ChevronDown class="size-3 transition-transform" />
-				{:else}
-					<ChevronRight class="size-3 transition-transform" />
-				{/if}
-			</div>
-		</button>
-		{#if rolesExpanded}
-			<div class="px-3 pb-2 flex flex-col gap-1 max-h-32 overflow-y-auto no-scrollbar">
-				{#each roles as r}
-					<Tooltip>
-						<TooltipTrigger>
-							<div class="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/30 transition-colors cursor-default">
-								<span class="text-xs truncate">{r.name}</span>
-							</div>
-						</TooltipTrigger>
-						<TooltipContent side="right" class="max-w-48">
-							<p class="text-xs font-medium">{r.name}</p>
-							<p class="text-[11px] text-muted-foreground mt-0.5">{r.definition}</p>
-						</TooltipContent>
-					</Tooltip>
-				{/each}
-			</div>
-		{/if}
+	<div class="shrink-0 px-3 py-1.5 flex items-center gap-2 text-xs text-muted-foreground/60">
+		<Brain class="size-3" />
+		<span>{roles.length} role{roles.length !== 1 ? "s" : ""}</span>
 	</div>
 
 	<ProjectPanel

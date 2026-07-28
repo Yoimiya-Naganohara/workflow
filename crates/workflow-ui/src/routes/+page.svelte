@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { goto } from "$app/navigation";
 	import { Button } from "$lib/components/ui/button";
 	import { Card } from "$lib/components/ui/card";
 	import {
@@ -18,8 +19,6 @@
 	import ExecutionTimeline from "$lib/components/chat/execution-timeline.svelte";
 	import ChatInput from "$lib/components/chat/chat-input.svelte";
 	import NewAgentDialog from "$lib/components/dialogs/new-agent-dialog.svelte";
-	import SettingsDialog from "$lib/components/dialogs/settings-dialog.svelte";
-	import RolesDialog from "$lib/components/dialogs/roles-dialog.svelte";
 	import McpApprovalDialog from "$lib/components/dialogs/mcp-approval-dialog.svelte";
 
 	import { state as app } from "$lib/state.svelte.js";
@@ -121,30 +120,6 @@
 	}}
 />
 
-	<SettingsDialog
-		open={app.dialog === "settings"}
-		providers={app.providers}
-		selectedProvider={app.selectedProvider}
-		selectedModel={app.selectedModel}
-		apiKey={app.settingsApiKey}
-		configured={app.configured}
-		refreshing={app.pendingAction?.type === "refresh-providers"}
-		onOpenChange={(o) => {
-			if (!o) app.closeDialog();
-		}}
-		onConfigure={(pid, key, model) => app.configureRuntime(pid, key, model)}
-		onRefreshProviders={() => app.refreshProviders()}
-	/>
-
-<RolesDialog
-	open={app.dialog === "roles"}
-	roles={app.roles}
-	onAddRole={(name, def) => app.addRole(name, def)}
-	onOpenChange={(o) => {
-		if (!o) app.closeDialog();
-	}}
-/>
-
 <McpApprovalDialog
 	open={app.dialog === "mcp-approval"}
 	server={app.pendingMcpApproval?.server ?? ""}
@@ -167,12 +142,9 @@
 			selected={app.selected}
 			statuses={app.agentStatuses}
 			roles={app.roles}
-			rolesExpanded={app.rolesExpanded}
 			onSelect={(id) => app.selectAgent(id)}
 			onCreateClick={() => app.openDialog("new-agent")}
 			onRemoveAgent={(id) => app.removeAgent(id)}
-			onRolesClick={() => app.openDialog("roles")}
-			onToggleRoles={() => app.toggleRoles()}
 			mcpConfigs={app.mcpConfigs}
 			mcpConnections={app.mcpConnections}
 			mcpExpanded={app.mcpExpanded}
@@ -240,7 +212,7 @@
 			<Button
 				variant="ghost"
 				size="icon-xs"
-				onclick={() => app.openDialog("settings")}
+				onclick={() => goto("/settings")}
 				title="Settings"
 				aria-label="Settings"
 			>

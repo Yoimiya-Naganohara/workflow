@@ -143,13 +143,7 @@
 		<div class="px-3 pb-2 flex flex-col gap-1 max-h-48 overflow-y-auto no-scrollbar">
 			{#if configs.length === 0 && connections.length === 0}
 				<div class="flex flex-col items-center gap-2 py-6 text-center px-2">
-					<div class="size-8 rounded-full bg-muted/50 flex items-center justify-center">
-						<Plug class="size-3.5 text-muted-foreground/40" />
-					</div>
 					<p class="text-xs text-muted-foreground">No MCP servers</p>
-					<Button variant="outline" size="xs" onclick={() => { showAddForm = true; }}>
-						<Plus class="size-3" /> Add Server
-					</Button>
 				</div>
 			{:else}
 				{#each configs as config (config.name)}

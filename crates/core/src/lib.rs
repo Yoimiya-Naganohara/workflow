@@ -24,10 +24,8 @@ use workflow_role::{Role, RoleId, RolePool};
 use workflow_tool::ToolError;
 use workflow_tool::{
     RoleChecker,
-    get_project_info::GetProjectInfo,
     list_agents::ListAgents,
     orchestrate::{AgentFactory, Orchestrate},
-    read_project_file::ReadProjectFile,
     send_message::SendMessage,
 };
 
@@ -355,14 +353,9 @@ impl Runtime {
             workflow_mcp::tool::RemoveMcpServer::new(Arc::clone(&mcp_manager_cell));
         let mcp_call_tool = workflow_mcp::tool::CallMcpTool::new(Arc::clone(&mcp_manager_cell));
 
-        let project_cell: Arc<Option<workflow_config::ProjectConfig>> =
-            Arc::new(config.project.clone());
-
         let tool_handle = ToolServer::new()
             .tool(SendMessage::new(Arc::clone(&agent_pool)))
             .tool(ListAgents::new(Arc::clone(&agent_pool)))
-            .tool(GetProjectInfo::new(Arc::clone(&project_cell)))
-            .tool(ReadProjectFile::new(Arc::clone(&project_cell)))
             .tool(mcp_install_tool)
             .tool(mcp_list_tool)
             .tool(mcp_remove_tool)

@@ -637,6 +637,7 @@ class AppState {
             await this.saveUserConfig();
         } catch (e) {
             this.error = `configure: ${e}`;
+            throw e;
         }
     };
 

@@ -62,8 +62,8 @@ describe("state", () => {
 
 	it("openDialog and closeDialog manage dialog state", () => {
 		expect(state.dialog).toBeNull();
-		state.openDialog("settings");
-		expect(state.dialog).toBe("settings");
+		state.openDialog("new-agent");
+		expect(state.dialog).toBe("new-agent");
 		state.closeDialog();
 		expect(state.dialog).toBeNull();
 	});

@@ -81,9 +81,7 @@ async fn async_main(project_path: Option<String>) -> anyhow::Result<()> {
     });
 
     if runtime.project().is_some() {
-        eprintln!(
-            "💡 Agents can use `get_project_info` and `read_project_file` tools to explore the project."
-        );
+        eprintln!("📂 Project: {}", runtime.project().unwrap().name());
     }
 
     loop {

@@ -120,13 +120,7 @@
                 </div>
             {:else}
                 <div class="flex flex-col items-center gap-2 py-4 text-center px-2">
-                    <div class="size-8 rounded-full bg-muted/50 flex items-center justify-center">
-                        <Folder class="size-3.5 text-muted-foreground/40" />
-                    </div>
                     <p class="text-xs text-muted-foreground">No project open</p>
-                    <Button variant="outline" size="xs" onclick={() => { showAddForm = true; }}>
-                        <Plus class="size-3" /> Open Folder
-                    </Button>
                 </div>
             {/if}
 
