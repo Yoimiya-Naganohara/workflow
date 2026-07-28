@@ -10,7 +10,6 @@
 		Terminal,
 		Globe,
 		Shield,
-		Loader2,
 	} from "@lucide/svelte";
 	import { cn } from "$lib/utils";
 	import type { McpConnectionInfo, McpServerConfig } from "$lib/types";

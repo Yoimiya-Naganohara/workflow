@@ -4,7 +4,7 @@
 	import { Input } from "$lib/components/ui/input";
 	import { Textarea } from "$lib/components/ui/textarea";
 	import { Card } from "$lib/components/ui/card";
-	import { Brain, Plus, Pencil, Trash2, Check, X as XIcon } from "@lucide/svelte";
+	import { Brain, Plus, Check, X as XIcon } from "@lucide/svelte";
 	import type { RoleInfo } from "$lib/types";
 
 	let {

@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { getContext } from "svelte";
-	import { toggleMode } from "mode-watcher";
 	import { Button } from "$lib/components/ui/button";
 	import { ScrollArea } from "$lib/components/ui/scroll-area";
 	import { Tooltip, TooltipContent, TooltipTrigger } from "$lib/components/ui/tooltip";
