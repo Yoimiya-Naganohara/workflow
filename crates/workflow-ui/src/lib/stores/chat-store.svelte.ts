@@ -11,6 +11,7 @@ export class ChatStore {
 	#eventLogTrimmed = 0;
 	#pinIdCounter = 0;
 	#PIN_STORAGE_KEY = "workflow-ui:pinned";
+	#lastStreamingText = "";
 
 	chatItems: ChatItem[] = $derived.by(() => {
 		let lastTextIdx = -1;
@@ -20,7 +21,13 @@ export class ChatStore {
 				break;
 			}
 		}
-		const isStreaming = lastTextIdx >= 0 && this.running;
+		const lastText = lastTextIdx >= 0 ? this.messages[lastTextIdx].text : "";
+		// Only mark as streaming when text content is actively changing.
+		// This avoids the SvelteMarkdown bug where toggling streaming on an
+		// already-complete message clears its content.
+		const textChanged = lastText !== this.#lastStreamingText;
+		this.#lastStreamingText = lastText;
+		const isStreaming = lastTextIdx >= 0 && this.running && textChanged;
 		const prev = this.#chatItemCache;
 		const next: ChatItem[] = [];
 		let changed = prev.length !== this.messages.length;
