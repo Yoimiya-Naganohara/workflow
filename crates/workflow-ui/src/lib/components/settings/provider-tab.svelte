@@ -1,8 +1,6 @@
 <script lang="ts">
-	import CheckIcon from "@lucide/svelte/icons/check";
-	import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
-	import EyeOffIcon from "@lucide/svelte/icons/eye-off";
-	import ChevronsUpDownIcon from "@lucide/svelte/icons/chevrons-up-down";
+	import { Check, RefreshCw, EyeOff, ChevronsUpDown, Loader2 } from "@lucide/svelte";
+	import { goto } from "$app/navigation";
 	import { tick } from "svelte";
 	import * as Command from "$lib/components/ui/command";
 	import * as Popover from "$lib/components/ui/popover";
@@ -10,6 +8,7 @@
 	import { Input } from "$lib/components/ui/input";
 	import { Card } from "$lib/components/ui/card";
 	import { cn } from "$lib/utils";
+	import { state as app } from "$lib/state.svelte.js";
 	import type { ProviderEntry, ProviderModel } from "$lib/types";
 
 	let {
@@ -30,10 +29,30 @@
 		onRefresh: () => void;
 	} = $props();
 
+	let saving = $state(false);
+	let saveError = $state("");
+	const needsApiKey = $derived(!!providers.find((p) => p.id === localProvider)?.api_url);
+
+	async function handleSave() {
+		saving = true;
+		saveError = "";
+		try {
+			await app.configureRuntime(localProvider, localApiKey, localModel);
+			goto("/");
+		} catch (e) {
+			saveError = `${e}`;
+		} finally {
+			saving = false;
+		}
+	}
+
+	function handleBack() {
+		goto("/");
+	}
+
 	const loading = $derived(providers.length === 0 && refreshing);
 	const currentProvider = $derived(providers.find((p) => p.id === localProvider));
 	const availableModels = $derived(currentProvider?.models ?? []);
-	const needsApiKey = $derived(!!currentProvider?.api_url);
 
 	let providerOpen = $state(false);
 	let modelOpen = $state(false);
@@ -77,7 +96,7 @@
 		<div class="flex items-center justify-between">
 			<span class="text-xs font-medium text-muted-foreground">Available Providers</span>
 			<Button variant="ghost" size="icon-xs" disabled={refreshing} onclick={onRefresh}>
-				<RefreshCwIcon class="size-3" />
+				<RefreshCw class="size-3" />
 			</Button>
 		</div>
 
@@ -95,7 +114,7 @@
 							disabled={loading}
 						>
 							{selectedProviderName || (loading ? "Loading providers..." : providers.length === 0 ? "No providers available" : "Select a provider")}
-							<ChevronsUpDownIcon class="size-4 opacity-50 shrink-0" />
+							<ChevronsUpDown class="size-4 opacity-50 shrink-0" />
 						</Button>
 					{/snippet}
 				</Popover.Trigger>
@@ -107,7 +126,7 @@
 							<Command.Group>
 								{#each providers as p (p.id)}
 									<Command.Item value={p.id} onSelect={() => handleSelectProvider(p.id)}>
-										<CheckIcon class={cn("me-2 size-4", localProvider !== p.id && "text-transparent")} />
+										<Check class={cn("me-2 size-4", localProvider !== p.id && "text-transparent")} />
 										{p.name}
 									</Command.Item>
 								{/each}
@@ -133,7 +152,7 @@
 								disabled={availableModels.length === 0}
 							>
 								{selectedModelName || (availableModels.length === 0 ? "No models available" : "Select a model")}
-								<ChevronsUpDownIcon class="size-4 opacity-50 shrink-0" />
+								<ChevronsUpDown class="size-4 opacity-50 shrink-0" />
 							</Button>
 						{/snippet}
 					</Popover.Trigger>
@@ -145,7 +164,7 @@
 								<Command.Group>
 									{#each availableModels as m (m.id)}
 										<Command.Item value={m.id} onSelect={() => handleSelectModel(m.id)}>
-											<CheckIcon class={cn("me-2 size-4", localModel !== m.id && "text-transparent")} />
+											<Check class={cn("me-2 size-4", localModel !== m.id && "text-transparent")} />
 											{m.name}{m.supports_tools ? " (tools)" : ""}
 										</Command.Item>
 									{/each}
@@ -169,7 +188,7 @@
 
 		{#if configured}
 			<div class="flex items-center gap-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20 px-3 py-2">
-				<CheckIcon class="size-3.5 text-emerald-500 shrink-0" />
+				<Check class="size-3.5 text-emerald-500 shrink-0" />
 				<p class="text-xs text-emerald-600 dark:text-emerald-400">
 					Configured: {localProvider} / {localModel}
 				</p>
@@ -178,9 +197,26 @@
 
 		{#if !refreshing && providers.length === 0 && !loading}
 			<div class="flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-2">
-				<EyeOffIcon class="size-3.5 text-muted-foreground/50 shrink-0" />
+				<EyeOff class="size-3.5 text-muted-foreground/50 shrink-0" />
 				<p class="text-xs text-muted-foreground/60">No providers found. Click refresh to fetch from network.</p>
 			</div>
 		{/if}
 	</Card>
+
+	<!-- Footer -->
+	<div class="flex items-center justify-end gap-2">
+		{#if saveError}
+			<p class="text-xs text-red-500 flex-1">{saveError}</p>
+		{/if}
+		<Button variant="outline" onclick={handleBack} disabled={saving}>Cancel</Button>
+		<Button
+			disabled={saving || !localProvider || !localModel || (needsApiKey && !localApiKey)}
+			onclick={handleSave}
+		>
+			{#if saving}
+				<Loader2 class="size-3.5 animate-spin mr-1" />
+			{/if}
+			Save
+		</Button>
+	</div>
 </div>

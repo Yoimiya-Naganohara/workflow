@@ -1,10 +1,7 @@
 <script lang="ts">
 	import { goto } from "$app/navigation";
 	import { invoke } from "@tauri-apps/api/core";
-	import ArrowLeft from "@lucide/svelte/icons/arrow-left";
-		import Database from "@lucide/svelte/icons/database";
-		import User from "@lucide/svelte/icons/user";
-		import Loader2 from "@lucide/svelte/icons/loader-2";
+	import { ArrowLeft, Database, Plug, User } from "@lucide/svelte";
 	import { onMount } from "svelte";
 	import { Button } from "$lib/components/ui/button";
 	import { cn } from "$lib/utils";
@@ -13,24 +10,19 @@
 
 	import ProviderTab from "$lib/components/settings/provider-tab.svelte";
 	import RolesTab from "$lib/components/settings/roles-tab.svelte";
+	import McpTab from "$lib/components/settings/mcp-tab.svelte";
 
 	// ── Tabs ────────────────────────────────────────────
 	const TABS = [
-		{ id: "provider", label: "Provider" },
-		{ id: "roles", label: "Roles" },
-	] as const;
+		{ id: "provider", label: "Provider", icon: Database },
+		{ id: "mcp", label: "MCP", icon: Plug },
+		{ id: "roles", label: "Roles", icon: User },
+	];
 	let activeTab = $state("provider");
 
 	// ── Provider state ──────────────────────────────────
 	let providers = $state<ProviderEntry[]>([]);
 	let refreshing = $state(false);
-	let saving = $state(false);
-	let saveError = $state("");
-
-	let localProvider = $state(app.selectedProvider);
-	let localModel = $state(app.selectedModel);
-	let localApiKey = $state(app.settingsApiKey);
-	const needsApiKey = $derived(!!providers.find((p) => p.id === localProvider)?.api_url);
 
 	async function loadProviders() {
 		refreshing = true;
@@ -74,7 +66,7 @@
 			roles = await invoke<RoleInfo[]>("add_role", { name, definition: def });
 			app.roles = roles;
 		} catch (e) {
-			saveError = `add role: ${e}`;
+			console.error("add role:", e);
 		}
 	}
 
@@ -83,7 +75,7 @@
 			roles = await invoke<RoleInfo[]>("remove_role", { name });
 			app.roles = roles;
 		} catch (e) {
-			saveError = `delete: ${e}`;
+			console.error("delete role:", e);
 		}
 	}
 
@@ -91,20 +83,6 @@
 	onMount(async () => {
 		await Promise.all([loadProviders(), loadRoles()]);
 	});
-
-	// ── Actions ─────────────────────────────────────────
-	async function handleSave() {
-		saving = true;
-		saveError = "";
-		try {
-			await app.configureRuntime(localProvider, localApiKey, localModel);
-			goto("/");
-		} catch (e) {
-			saveError = `${e}`;
-		} finally {
-			saving = false;
-		}
-	}
 
 	function handleBack() {
 		goto("/");
@@ -123,22 +101,18 @@
 	<div class="flex flex-1 min-h-0">
 		<!-- Tab sidebar -->
 		<nav class="w-44 shrink-0 border-r border-border bg-muted/20 p-2 space-y-1 overflow-y-auto">
-			{#each TABS as tab}
+			{#each TABS as { id, label, icon: Icon } (id)}
 				<button
 					class={cn(
 						"w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition-colors text-left",
-						activeTab === tab.id
+						activeTab === id
 							? "bg-accent text-accent-foreground shadow-sm"
 							: "text-muted-foreground hover:text-foreground hover:bg-muted/50",
 					)}
-					onclick={() => { activeTab = tab.id; }}
+					onclick={() => { activeTab = id; }}
 				>
-					{#if tab.id === "provider"}
-						<Database class="size-3.5 shrink-0" />
-					{:else}
-						<User class="size-3.5 shrink-0" />
-					{/if}
-					{tab.label}
+					<Icon class="size-3.5 shrink-0" />
+					{label}
 				</button>
 			{/each}
 		</nav>
@@ -147,13 +121,20 @@
 		<div class="flex-1 min-h-0 overflow-y-auto m-6">
 			{#if activeTab === "provider"}
 				<ProviderTab
-					bind:localProvider
-					bind:localModel
-					bind:localApiKey
+					bind:localProvider={app.selectedProvider}
+					bind:localModel={app.selectedModel}
+					bind:localApiKey={app.settingsApiKey}
 					{providers}
 					{refreshing}
 					configured={app.configured}
 					onRefresh={handleRefresh}
+				/>
+			{:else if activeTab === "mcp"}
+				<McpTab
+					configs={app.mcpConfigs}
+					connections={app.mcpConnections}
+					onAdd={(config) => app.addMcpServer(config)}
+					onRemove={(name) => app.removeMcpServer(name)}
 				/>
 			{:else}
 				<RolesTab
@@ -163,22 +144,5 @@
 				/>
 			{/if}
 		</div>
-	</div>
-
-	<!-- Bottom bar -->
-	<div class="shrink-0 border-t border-border px-6 py-3 flex items-center justify-end gap-2">
-		{#if saveError}
-			<p class="text-xs text-red-500 flex-1">{saveError}</p>
-		{/if}
-		<Button variant="outline" onclick={handleBack} disabled={saving}>Cancel</Button>
-		<Button
-			disabled={saving || !localProvider || !localModel || (needsApiKey && !localApiKey)}
-			onclick={handleSave}
-		>
-			{#if saving}
-				<Loader2 class="size-3.5 animate-spin mr-1" />
-			{/if}
-			Save
-		</Button>
 	</div>
 </div>

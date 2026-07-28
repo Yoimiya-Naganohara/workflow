@@ -123,12 +123,6 @@
 			onSelect={(id) => app.selectAgent(id)}
 			onCreateClick={() => app.openDialog("new-agent")}
 			onRemoveAgent={(id) => app.removeAgent(id)}
-			mcpConfigs={app.mcpConfigs}
-			mcpConnections={app.mcpConnections}
-			mcpExpanded={app.mcpExpanded}
-			onToggleMcp={() => app.toggleMcp()}
-			onAddMcpServer={(config) => app.addMcpServer(config)}
-			onRemoveMcpServer={(name) => app.removeMcpServer(name)}
 			projectPath={app.projectPath}
 			projectName={app.projectName}
 			projectExpanded={app.projectExpanded}
