@@ -94,7 +94,7 @@ class AppState {
 		for (const a of this.agents) {
 			map.set(a.id, a.current_task ? "thinking" : "idle");
 		}
-		if (this.selected == null) return map;
+		if (this.selected == null || !this.running) return map;
 		for (let i = this.messages.length - 1; i >= 0; i--) {
 			const m = this.messages[i];
 			if (m.type === "user") continue;
