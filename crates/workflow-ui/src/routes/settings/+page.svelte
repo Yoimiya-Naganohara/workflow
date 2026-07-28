@@ -2,6 +2,9 @@
 	import { goto } from "$app/navigation";
 	import { invoke } from "@tauri-apps/api/core";
 	import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+		import Database from "@lucide/svelte/icons/database";
+		import User from "@lucide/svelte/icons/user";
+		import Loader2 from "@lucide/svelte/icons/loader-2";
 	import { onMount } from "svelte";
 	import { Button } from "$lib/components/ui/button";
 	import { cn } from "$lib/utils";
@@ -131,9 +134,9 @@
 					onclick={() => { activeTab = tab.id; }}
 				>
 					{#if tab.id === "provider"}
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 shrink-0"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="9" y1="21" x2="9" y2="9" /></svg>
+						<Database class="size-3.5 shrink-0" />
 					{:else}
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 shrink-0"><path d="M12 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" /><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /></svg>
+						<User class="size-3.5 shrink-0" />
 					{/if}
 					{tab.label}
 				</button>
@@ -173,7 +176,7 @@
 			onclick={handleSave}
 		>
 			{#if saving}
-				<svg class="size-3.5 animate-spin mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+				<Loader2 class="size-3.5 animate-spin mr-1" />
 			{/if}
 			Save
 		</Button>

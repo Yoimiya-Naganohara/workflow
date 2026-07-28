@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { AlertTriangle, X } from "@lucide/svelte";
 	import ExecutionTimeline from "$lib/components/chat/execution-timeline.svelte";
 	import ChatInput from "$lib/components/chat/chat-input.svelte";
 	import type {
@@ -57,16 +58,7 @@
 	{#if error}
 		<div class="animate-in shrink-0 mx-3 mb-2">
 			<div class="flex items-start gap-2.5 rounded-lg bg-destructive/8 border border-destructive/20 px-3 py-2">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					class="size-3.5 shrink-0 mt-0.5 text-destructive"
-				><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>
+				<AlertTriangle class="size-3.5 shrink-0 mt-0.5 text-destructive" />
 				<p class="flex-1 text-xs text-destructive leading-relaxed">
 					{error}
 				</p>
@@ -75,16 +67,7 @@
 					class="shrink-0 mt-0.5 text-destructive/50 hover:text-destructive transition-colors"
 					aria-label="Dismiss error"
 				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						class="size-3"
-					><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+					<X class="size-3" />
 				</button>
 			</div>
 		</div>

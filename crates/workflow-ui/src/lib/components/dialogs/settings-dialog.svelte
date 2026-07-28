@@ -1,5 +1,7 @@
 <script lang="ts">
     import CheckIcon from "@lucide/svelte/icons/check";
+    import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
+    import EyeOffIcon from "@lucide/svelte/icons/eye-off";
     import ChevronsUpDownIcon from "@lucide/svelte/icons/chevrons-up-down";
     import { tick } from "svelte";
     import * as Command from "$lib/components/ui/command";
@@ -94,10 +96,7 @@
                 {/if}
             </div>
             <Button variant="ghost" size="icon-xs" disabled={refreshing} onclick={onRefreshProviders}>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3">
-                    <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-                    <path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-                </svg>
+                <RefreshCwIcon class="size-3" />
             </Button>
         </div>
 
@@ -204,9 +203,7 @@
 
         {#if configured}
             <div class="flex items-center gap-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20 px-3 py-2">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-emerald-500 shrink-0">
-                    <path d="M20 6 9 17l-5-5" />
-                </svg>
+                <CheckIcon class="size-3.5 text-emerald-500 shrink-0" />
                 <p class="text-xs text-emerald-600 dark:text-emerald-400">
                     Configured: {selectedProvider} / {selectedModel}
                 </p>
@@ -215,10 +212,7 @@
 
         {#if !refreshing && providers.length === 0 && !loading}
             <div class="flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-2">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-muted-foreground/50 shrink-0">
-                    <line x1="1" y1="1" x2="23" y2="23" /><path d="M16.72 3.7A10 10 0 0 0 3.7 16.72" />
-                    <path d="M7.28 20.3A10 10 0 0 0 20.3 7.28" />
-                </svg>
+                <EyeOffIcon class="size-3.5 text-muted-foreground/50 shrink-0" />
                 <p class="text-xs text-muted-foreground/60">No providers found. Click refresh to fetch from network.</p>
             </div>
         {/if}
