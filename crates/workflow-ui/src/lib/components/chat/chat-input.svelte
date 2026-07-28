@@ -71,7 +71,8 @@
 				variant="ghost"
 				size="icon-xs"
 				type="button"
-				disabled={disabled}
+				disabled
+				title="Attachments (coming soon)"
 				class="rounded-full"
 			>
 				<Plus class="size-4" />
@@ -83,7 +84,8 @@
 				variant="ghost"
 				size="icon-xs"
 				type="button"
-				disabled={disabled}
+				disabled
+				title="Voice input (coming soon)"
 				class="rounded-full hover:bg-muted-foreground/10"
 			>
 				<Mic class="size-4" />

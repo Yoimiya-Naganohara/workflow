@@ -13,7 +13,7 @@ export type ConversationMessage =
 	| { type: "user"; text: string }
 	| { type: "text"; text: string }
 	| { type: "thinking"; text: string }
-	| { type: "tool"; text: string; result: string | null }
+	| { type: "tool"; text: string; result: string | null; is_error?: boolean }
 	| { type: "error"; text: string };
 
 export interface RuntimeSnapshot {
@@ -47,7 +47,7 @@ export interface PinnedMessage {
 	text: string;
 	type: "user" | "assistant" | "thinking" | "tool" | "error";
 	result?: string | null;
-	status?: "done" | "running";
+	status?: "done" | "running" | "error";
 	timestamp: number;
 	agentId: AgentId | null;
 	agentRole?: string;
@@ -81,11 +81,16 @@ export interface ChatItem {
 	type: "user" | "assistant" | "thinking" | "tool" | "error";
 	text: string;
 	result?: string | null;
-	status?: "running" | "done";
+	status?: "running" | "done" | "error";
 	streaming?: boolean;
 }
 
 // ── MCP types ─────────────────────────────────────────────────
+
+export interface LogEntry {
+	ts: number;
+	event: UiEvent;
+}
 
 export interface McpConnectionInfo {
 	name: string;

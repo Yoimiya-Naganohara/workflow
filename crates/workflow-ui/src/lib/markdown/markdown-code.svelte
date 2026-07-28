@@ -14,15 +14,21 @@
 	let settledText = $state('');
 	let settled = $state(false);
 
+	let lastHighlightTime = $state(0);
+	const MIN_INTERVAL = 100; // ms
+
 	// Self-contained raf-debounce: highlights one frame after text stops
-	// changing. During active streaming, each chunk cancels the previous
-	// frame so highlighting only lands when text is stable. Needs no
-	// external streaming signal — works for both streaming and static.
+	// changing, with a minimum interval to avoid excessive calls during
+	// high-frequency streaming updates. Each new chunk cancels the
+	// previous frame so highlighting only lands when text is stable.
 	$effect(() => {
 		const t = text;
 		settled = false;
 		settledText = '';
+		const now = performance.now();
+		const delay = Math.max(0, MIN_INTERVAL - (now - lastHighlightTime));
 		const raf = requestAnimationFrame(() => {
+			lastHighlightTime = performance.now();
 			settledText = t;
 			settled = true;
 		});

@@ -223,6 +223,8 @@ pub enum ConversationMessage {
     Tool {
         text: String,
         result: Option<String>,
+        #[serde(default)]
+        is_error: bool,
     },
     #[serde(rename = "error")]
     Error { text: String },
@@ -708,19 +710,27 @@ impl Runtime {
             AgentEvent::ToolCall { name, params } => messages.push(ConversationMessage::Tool {
                 text: format!("{name}: {params}"),
                 result: None,
+                is_error: false,
             }),
             AgentEvent::ToolResult { name, result } => {
+                let is_error = result.starts_with("error:")
+                    || result.starts_with("Error:")
+                    || result.starts_with("failed:")
+                    || result.starts_with("Failed:");
                 if let Some(ConversationMessage::Tool {
                     result: tool_result,
+                    is_error: error_flag,
                     ..
                 }) = messages.iter_mut().rev().find(|message| {
-                    matches!(message, ConversationMessage::Tool { text, result: None } if text.split(": ").next() == Some(name.as_str()))
+                    matches!(message, ConversationMessage::Tool { text, result: None, .. } if text.split(": ").next() == Some(name.as_str()))
                 }) {
                     *tool_result = Some(result.clone());
+                    *error_flag = is_error;
                 } else {
                     messages.push(ConversationMessage::Tool {
                         text: name.clone(),
                         result: Some(result.clone()),
+                        is_error,
                     });
                 }
             }

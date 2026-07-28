@@ -13,6 +13,8 @@ use workflow_mcp::config::McpConfigSource;
 use workflow_mcp::{McpConnectionInfo, McpServerConfig};
 use workflow_providers::service::ProviderService;
 
+const WORKFLOW_DIR: &str = ".workflow";
+
 struct AppState {
     runtime: Mutex<Option<Arc<Runtime>>>,
     service: Mutex<ProviderService>,
@@ -445,7 +447,7 @@ fn roles_path() -> PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".workflow").join("roles.json")
+    PathBuf::from(home).join(WORKFLOW_DIR).join("roles.json")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

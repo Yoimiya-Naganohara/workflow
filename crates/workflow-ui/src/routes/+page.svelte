@@ -15,6 +15,7 @@
 	let showGraph = $state(false);
 	let showPins = $state(true);
 	let panelWidth = $state(320);
+	let userResized = $state(false);
 
 	const STORAGE_KEY = "workflow-ui:layout";
 
@@ -36,6 +37,7 @@
 	}
 
 	function handleResize(deltaX: number) {
+		userResized = true;
 		panelWidth = Math.max(180, panelWidth + deltaX);
 	}
 
@@ -85,7 +87,21 @@
 			if (e.matches) showSidebar = false;
 		});
 		app.init();
-		return () => app.destroy();
+
+		const ro = new ResizeObserver(() => {
+			if (!userResized) {
+				panelWidth = calcDefaultWidth();
+			} else {
+				const max = window.innerWidth - 240;
+				if (panelWidth > max) panelWidth = Math.max(180, max);
+			}
+		});
+		ro.observe(document.body);
+
+		return () => {
+			app.destroy();
+			ro.disconnect();
+		};
 	});
 </script>
 

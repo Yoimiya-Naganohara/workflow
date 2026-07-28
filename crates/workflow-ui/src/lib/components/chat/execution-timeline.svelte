@@ -45,27 +45,20 @@
 		userScrolledUp = !isNearBottom(scrollContainer);
 	}
 
-	let prevLen = $state(0);
+	let prevLen = 0;
+	let prevLastId: number | null = null;
 
 	$effect(() => {
 		const len = items.length;
-		if (len > prevLen && scrollContainer && !userScrolledUp) {
-			queueMicrotask(() => scrollToBottom());
-		}
-		prevLen = len;
-	});
+		const last = items[len - 1];
+		if (!scrollContainer || userScrolledUp) return;
 
-	let prevLastId = $state<number | null>(null);
-	$effect(() => {
-		const last = items[items.length - 1];
-		if (!last || !scrollContainer) return;
-		if (last.id !== prevLastId) {
-			prevLastId = last.id;
-			return;
-		}
-		if (!userScrolledUp) {
+		if (len > prevLen || (last && last.id !== prevLastId)) {
 			queueMicrotask(() => scrollToBottom());
 		}
+
+		prevLen = len;
+		prevLastId = last?.id ?? null;
 	});
 </script>
 

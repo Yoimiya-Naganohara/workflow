@@ -89,18 +89,7 @@
 			};
 		});
 
-		const sfEdges: Edge[] = [];
-		for (let i = 1; i < agents.length; i++) {
-			sfEdges.push({
-				id: `e-${agents[i - 1].id}-${agents[i].id}`,
-				source: String(agents[i - 1].id),
-				target: String(agents[i].id),
-				type: "smoothstep",
-				animated: true,
-			});
-		}
-
-		return { sfNodes, sfEdges };
+		return { sfNodes, sfEdges: [] as Edge[] };
 	}
 
 	// ── Dagre layout ──────────────────────────────────────────
@@ -144,10 +133,10 @@
 	// ── Single effect: rebuild on any change ──
 	$effect(() => {
 		agents; statuses; selected; expandedNodeId; chatItems;
-		const { sfNodes, sfEdges } = buildFlow();
-		const laid = layoutNodes(sfNodes, sfEdges);
+		const { sfNodes } = buildFlow();
+		const laid = layoutNodes(sfNodes, []);
 		nodes = laid;
-		edges = sfEdges;
+		edges = [];
 	});
 
 	// ── Sync: collapse expanded node when selected from outside ──
@@ -244,9 +233,5 @@
 		width: 100% !important;
 		height: 100% !important;
 	}
-	/* Subtle edge styling */
-	:global(.svelte-flow__edge-path) {
-		stroke: var(--foreground) !important;
-		stroke-opacity: 0.2 !important;
-	}
+
 </style>

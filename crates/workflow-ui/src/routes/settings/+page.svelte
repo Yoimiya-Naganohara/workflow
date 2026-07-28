@@ -24,12 +24,16 @@
 	let providers = $state<ProviderEntry[]>([]);
 	let refreshing = $state(false);
 
-	async function loadProviders() {
+	async function fetchProviders(forceRefresh: boolean) {
 		refreshing = true;
 		try {
-			providers = await invoke<ProviderEntry[]>("list_providers");
-			if (providers.length === 0) {
+			if (forceRefresh) {
 				providers = await invoke<ProviderEntry[]>("fetch_providers");
+			} else {
+				providers = await invoke<ProviderEntry[]>("list_providers");
+				if (providers.length === 0) {
+					providers = await invoke<ProviderEntry[]>("fetch_providers");
+				}
 			}
 		} catch {
 			providers = [];
@@ -38,16 +42,9 @@
 		}
 	}
 
-	async function handleRefresh() {
-		refreshing = true;
-		try {
-			providers = await invoke<ProviderEntry[]>("fetch_providers");
-		} catch {
-			providers = [];
-		} finally {
-			refreshing = false;
-		}
-	}
+	const loadProviders = () => fetchProviders(false);
+
+	const handleRefresh = () => fetchProviders(true);
 
 	// ── Roles state ─────────────────────────────────────
 	let roles = $state<RoleInfo[]>([]);

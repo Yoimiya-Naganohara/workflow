@@ -15,7 +15,7 @@
 		name: raw,
 		result,
 		status,
-	}: { name: string; result?: string; status: "running" | "done" } = $props();
+	}: { name: string; result?: string; status: "running" | "done" | "error" } = $props();
 	let expanded = $state(false);
 
 	let toolName = $derived(raw.split(": ")[0]);
@@ -52,15 +52,7 @@
 		return Zap;
 	}
 
-	let isError = $derived(
-		!!(
-			result &&
-			(result.startsWith("error:") ||
-				result.startsWith("Error:") ||
-				result.startsWith("failed:") ||
-				result.startsWith("Failed:"))
-		),
-	);
+	let isError = $derived(status === "error");
 
 	let formattedResult = $derived.by(() => {
 		if (!result) return null;

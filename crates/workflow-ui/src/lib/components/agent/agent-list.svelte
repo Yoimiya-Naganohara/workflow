@@ -22,41 +22,13 @@
 		onRemoveAgent: (id: AgentId) => void;
 	} = $props();
 
-	function statusColor(status: AgentStatus): string {
-		switch (status) {
-			case "thinking":
-			case "running-tool":
-				return "bg-amber-500";
-			case "responding":
-				return "bg-emerald-500";
-			case "error":
-				return "bg-red-500";
-			default:
-				return "bg-muted-foreground/30";
-		}
-	}
-
-	function statusIcon(status: AgentStatus) {
-		switch (status) {
-			case "thinking":
-			case "running-tool":
-				return Loader2;
-			case "error":
-				return AlertCircle;
-			default:
-				return CircleDot;
-		}
-	}
-
-	function statusLabel(status: AgentStatus): string {
-		switch (status) {
-			case "thinking": return "Thinking";
-			case "running-tool": return "Running tool";
-			case "responding": return "Responding";
-			case "error": return "Error";
-			default: return "Idle";
-		}
-	}
+	const STATUS_CONFIG: Record<AgentStatus, { color: string; icon: any; label: string; animate: boolean }> = {
+	    idle:         { color: "bg-muted-foreground/30", icon: CircleDot,   label: "Idle",        animate: false },
+	    thinking:     { color: "bg-amber-500",           icon: Loader2,     label: "Thinking",     animate: true },
+	    "running-tool": { color: "bg-amber-500",           icon: Loader2,  label: "Running tool", animate: true },
+	    responding:   { color: "bg-emerald-500",          icon: CircleDot,  label: "Responding",   animate: false },
+	    error:        { color: "bg-red-500",              icon: AlertCircle,label: "Error",        animate: false },
+	};
 </script>
 
 <div class="flex items-center justify-between px-3 py-2 shrink-0">
@@ -76,8 +48,8 @@
 	<div class="py-1.5 px-2 flex flex-col gap-0.5" role="listbox" aria-label="Agent list">
 		{#each agents as agent (agent.id)}
 			{@const status = statuses.get(agent.id) ?? "idle"}
-			{@const StatusIcon = statusIcon(status)}
-			{@const isActive = status === "thinking" || status === "running-tool" || status === "responding"}
+			{@const StatusIcon = STATUS_CONFIG[status].icon}
+			{@const isActive = STATUS_CONFIG[status].animate}
 			<button
 				class={cn(
 					"w-full flex items-start gap-2 px-2 py-1.5 text-xs rounded-md text-left group relative",
@@ -94,9 +66,9 @@
 					<div class="absolute left-0 w-0.5 rounded-full bg-foreground/30"></div>
 				{/if}
 				<div class="relative shrink-0 mt-0.5">
-					<div class={cn("w-0.5 h-2", statusColor(status))}></div>
+					<div class={cn("w-0.5 h-2", STATUS_CONFIG[status].color)}></div>
 					{#if isActive}
-						<div class={cn("absolute inset-0 size-2 w-0.5 h-2 animate-ping opacity-75", statusColor(status))}></div>
+						<div class={cn("absolute inset-0 size-2 w-0.5 h-2 animate-ping opacity-75", STATUS_CONFIG[status].color)}></div>
 					{/if}
 				</div>
 				<div class="flex-1 min-w-0">
@@ -118,7 +90,7 @@
 					{:else if status !== "idle"}
 						<p class="text-[11px] text-muted-foreground/50 mt-0.5 leading-tight flex items-center gap-1">
 							<StatusIcon class={cn("size-2.5", isActive && "animate-spin")} />
-							{statusLabel(status)}
+							{STATUS_CONFIG[status].label}
 						</p>
 					{/if}
 				</div>
