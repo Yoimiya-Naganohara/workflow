@@ -19,3 +19,7 @@ workflow-config = { path = "../config" }
 workflow-mcp = { path = "../mcp" }
 tracing.workspace = true
 dashmap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio-test.workspace = true

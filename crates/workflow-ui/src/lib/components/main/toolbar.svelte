@@ -8,6 +8,8 @@
 		Pin,
 		Settings,
 	} from "@lucide/svelte";
+	import SessionSelector from "./session-selector.svelte";
+	import type { SessionMeta } from "$lib/types";
 
 	let {
 		showSidebar,
@@ -16,6 +18,12 @@
 		onToggleSidebar,
 		onToggleGraph,
 		onTogglePins,
+		sessions = [],
+		activeSessionId = null,
+		onCreateSession,
+		onSwitchSession,
+		onDeleteSession,
+		onRenameSession,
 	}: {
 		showSidebar: boolean;
 		showGraph: boolean;
@@ -23,10 +31,24 @@
 		onToggleSidebar: () => void;
 		onToggleGraph: () => void;
 		onTogglePins: () => void;
+		sessions?: SessionMeta[];
+		activeSessionId?: number | null;
+		onCreateSession?: (name: string) => void;
+		onSwitchSession?: (id: number) => void;
+		onDeleteSession?: (id: number) => void;
+		onRenameSession?: (id: number, name: string) => Promise<boolean>;
 	} = $props();
 </script>
 
 <div class="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-card shrink-0">
+	<SessionSelector
+		{sessions}
+		activeId={activeSessionId}
+		onCreate={(name: string) => onCreateSession?.(name)}
+		onSwitch={(id: number) => onSwitchSession?.(id)}
+		onDelete={(id: number) => onDeleteSession?.(id)}
+		onRename={async (id: number, name: string) => onRenameSession?.(id, name) ?? false}
+	/>
 	<Button
 		variant="ghost"
 		size="icon-xs"

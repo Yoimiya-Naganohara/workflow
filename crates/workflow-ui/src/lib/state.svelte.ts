@@ -9,17 +9,20 @@ import type {
 	AgentStatus,
 	ChatItem,
 	RuntimeSnapshot,
+	SessionMeta,
 } from "./types";
 export type { LogEntry } from "./types";
 
 import { AgentStore } from "./stores/agent-store.svelte.js";
 import { ChatStore } from "./stores/chat-store.svelte.js";
 import { ConfigStore } from "./stores/config-store.svelte.js";
+import { SessionStore } from "./stores/session-store.svelte.js";
 
 class AppState {
 	agent = new AgentStore();
 	chat = new ChatStore();
 	config = new ConfigStore();
+	session = new SessionStore();
 
 	// ── Private fields ─────────────────────────────────────────
 	#unlisten: (() => void) | null = null;
@@ -84,6 +87,37 @@ class AppState {
 	set mcpConnections(v) { this.config.mcpConnections = v; }
 	get mcpExpanded() { return this.config.mcpExpanded; }
 	set mcpExpanded(v) { this.config.mcpExpanded = v; }
+
+	// ── Session delegation ──────────────────────────────────────
+	get sessions() { return this.session.sessions; }
+	set sessions(v) { this.session.sessions = v; }
+	get activeSessionId() { return this.session.activeId; }
+	set activeSessionId(v) { this.session.activeId = v; }
+
+	loadSessions = () => this.session.loadSessions();
+
+	createSession = async (name: string) => {
+		await this.session.createSession(name);
+		await this.pull(null);
+		this.loadRoles();
+	};
+
+	switchSession = async (id: number) => {
+		await this.session.switchSession(id);
+		await this.pull(null);
+		this.loadRoles();
+	};
+
+	deleteSession = async (id: number) => {
+		await this.session.deleteSession(id);
+		if (this.activeSessionId != null) {
+			await this.pull(null);
+			this.loadRoles();
+		}
+	};
+
+	renameSession = (id: number, name: string) => this.session.renameSession(id, name);
+	saveSessions = () => this.session.saveSessions();
 
 	// ── Derived properties ─────────────────────────────────────
 
@@ -416,6 +450,7 @@ class AppState {
 		this.loadProviders();
 		this.loadMcpConfigs();
 		this.loadMcpConnections();
+		this.loadSessions();
 		this.chat.loadPinnedMessages();
 
 		const updateTheme = () => {

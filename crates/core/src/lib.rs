@@ -1,3 +1,5 @@
+pub mod sessions;
+
 use std::{
     collections::HashSet,
     num::NonZeroUsize,
@@ -14,7 +16,7 @@ use rig::{
     providers::openai::CompletionsClient, tool::server::ToolServer,
     vector_store::VectorStoreIndexDyn,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{OnceCell, broadcast};
 pub use workflow_agent::agent_pool::AgentInfo;
 use workflow_agent::{
@@ -212,7 +214,7 @@ pub struct RoleInfo {
     pub definition: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ConversationMessage {
     #[serde(rename = "user")]

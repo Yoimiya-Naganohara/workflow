@@ -153,9 +153,15 @@
 			{showSidebar}
 			{showGraph}
 			{showPins}
+			sessions={app.sessions}
+			activeSessionId={app.activeSessionId}
 			onToggleSidebar={toggleSidebar}
 			onToggleGraph={toggleGraph}
 			onTogglePins={togglePins}
+			onCreateSession={(name) => app.createSession(name)}
+			onSwitchSession={(id) => app.switchSession(id)}
+			onDeleteSession={(id) => app.deleteSession(id)}
+			onRenameSession={(id, name) => app.renameSession(id, name)}
 		/>
 
 		<div class="flex flex-1 min-h-0">

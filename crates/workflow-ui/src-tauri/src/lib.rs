@@ -8,7 +8,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_decoration::WebviewWindowExt;
 use tauri_plugin_dialog::DialogExt;
 use workflow_config::{ProjectConfig, UserConfig};
-use workflow_core::{Runtime, RuntimeConfig, RuntimeSnapshot, WorkflowEvent};
+use workflow_core::{
+    Runtime, RuntimeConfig, RuntimeSnapshot, WorkflowEvent,
+    sessions::{SessionMeta, Sessions},
+};
 use workflow_mcp::config::McpConfigSource;
 use workflow_mcp::{McpConnectionInfo, McpServerConfig};
 use workflow_providers::service::ProviderService;
@@ -17,6 +20,8 @@ const WORKFLOW_DIR: &str = ".workflow";
 
 struct AppState {
     runtime: Mutex<Option<Arc<Runtime>>>,
+    sessions: Mutex<Sessions>,
+    active_session: Mutex<Option<u32>>,
     service: Mutex<ProviderService>,
 }
 
@@ -241,7 +246,14 @@ async fn configure_runtime(
     };
     let runtime = Arc::new(Runtime::try_new(runtime_config).map_err(|e| e.to_string())?);
     spawn_event_bridge(app, Arc::clone(&runtime));
-    *state.runtime.lock().await = Some(runtime);
+    *state.runtime.lock().await = Some(Arc::clone(&runtime));
+
+    // Create a default session wrapping this runtime.
+    let mut sessions = state.sessions.lock().await;
+    if sessions.is_empty() {
+        let id = sessions.create_with_runtime("Default", runtime);
+        *state.active_session.lock().await = Some(id);
+    }
     Ok(())
 }
 
@@ -590,6 +602,90 @@ fn load_config() -> Result<Option<UserConfig>, String> {
     UserConfig::load().map_err(|e| e.to_string())
 }
 
+// ============================================================================
+//  Session commands
+// ============================================================================
+
+/// Return the currently active runtime, or an error if none is configured.
+#[allow(dead_code)]
+async fn active_runtime(state: &State<'_, AppState>) -> Result<Arc<Runtime>, String> {
+    if let Some(runtime) = state.runtime.lock().await.clone() {
+        return Ok(runtime);
+    }
+    Err("runtime not configured".to_string())
+}
+
+#[tauri::command]
+async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionMeta>, String> {
+    let sessions = state.sessions.lock().await;
+    let metas: Vec<SessionMeta> = sessions.list().into_iter().cloned().collect();
+    Ok(metas)
+}
+
+#[tauri::command]
+async fn create_session(state: State<'_, AppState>, name: String) -> Result<SessionMeta, String> {
+    let mut sessions = state.sessions.lock().await;
+    let id = sessions.create(&name).await.map_err(|e| e.to_string())?;
+    let meta = sessions.get_ref(id).map(|s| s.meta.clone()).unwrap();
+
+    // Update the active runtime to point to this session.
+    if let Some(session) = sessions.get_ref(id) {
+        *state.runtime.lock().await = Some(session.runtime.clone());
+        *state.active_session.lock().await = Some(id);
+    }
+    Ok(meta)
+}
+
+#[tauri::command]
+async fn switch_session(state: State<'_, AppState>, id: u32) -> Result<SessionMeta, String> {
+    let sessions = state.sessions.lock().await;
+    let session = sessions
+        .get_ref(id)
+        .ok_or_else(|| format!("session {id} not found"))?;
+    let meta = session.meta.clone();
+    *state.runtime.lock().await = Some(session.runtime.clone());
+    *state.active_session.lock().await = Some(id);
+    Ok(meta)
+}
+
+#[tauri::command]
+async fn delete_session(state: State<'_, AppState>, id: u32) -> Result<(), String> {
+    let mut sessions = state.sessions.lock().await;
+    sessions.remove(id);
+
+    // If the deleted session was active, clear the runtime.
+    if *state.active_session.lock().await == Some(id) {
+        *state.runtime.lock().await = None;
+        *state.active_session.lock().await = None;
+    }
+
+    // Remove the persisted file.
+    let path = sessions.dir().join(format!("session_{id}.json"));
+    let _ = std::fs::remove_file(&path);
+    Ok(())
+}
+
+#[tauri::command]
+async fn rename_session(
+    state: State<'_, AppState>,
+    id: u32,
+    name: String,
+) -> Result<SessionMeta, String> {
+    let mut sessions = state.sessions.lock().await;
+    let session = sessions
+        .get(id)
+        .ok_or_else(|| format!("session {id} not found"))?;
+    session.meta.name = name;
+    let meta = session.meta.clone();
+    Ok(meta)
+}
+
+#[tauri::command]
+async fn save_sessions(state: State<'_, AppState>) -> Result<u32, String> {
+    let sessions = state.sessions.lock().await;
+    sessions.save().await.map_err(|e| e.to_string())
+}
+
 fn spawn_event_bridge(app: AppHandle, runtime: Arc<Runtime>) {
     tauri::async_runtime::spawn(async move {
         let mut events = runtime.subscribe();
@@ -650,7 +746,14 @@ pub fn run() {
         .setup(|app| {
             let service = Mutex::new(ProviderService::new());
             let runtime = Mutex::new(None);
-            app.manage(AppState { runtime, service });
+            let sessions = Mutex::new(Sessions::new());
+            let active_session = Mutex::new(None);
+            app.manage(AppState {
+                runtime,
+                sessions,
+                active_session,
+                service,
+            });
 
             #[cfg(desktop)]
             {
@@ -684,6 +787,12 @@ pub fn run() {
             list_mcp_configs,
             add_mcp_server,
             remove_mcp_server,
+            list_sessions,
+            create_session,
+            switch_session,
+            delete_session,
+            rename_session,
+            save_sessions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

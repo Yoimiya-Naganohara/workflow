@@ -55,6 +55,15 @@ export interface PinnedMessage {
 
 export type DialogId = "new-agent" | "mcp-approval";
 
+// ── Session types ────────────────────────────────────────────────
+
+export interface SessionMeta {
+	id: number;
+	name: string;
+	created_at: number;
+	last_used_at: number;
+}
+
 export type PendingAction =
 	| { type: "send"; agentId: AgentId }
 	| { type: "create-agent" }
