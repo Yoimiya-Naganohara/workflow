@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { Plus, Layers, Trash2, Check, Pencil, X } from "@lucide/svelte";
+	import { Plus, Layers, Trash2, Check, Pencil, X, Folder, FolderX } from "@lucide/svelte";
+	import { invoke } from "@tauri-apps/api/core";
 	import { Button } from "$lib/components/ui/button";
 	import * as Popover from "$lib/components/ui/popover";
 	import { cn } from "$lib/utils";
@@ -8,17 +9,21 @@
 	let {
 		sessions,
 		activeId,
+		defaultName = "",
 		onCreate,
 		onSwitch,
 		onDelete,
 		onRename,
+		onSetProject,
 	}: {
 		sessions: SessionMeta[];
 		activeId: number | null;
+		defaultName?: string;
 		onCreate: (name: string) => void;
 		onSwitch: (id: number) => void;
 		onDelete: (id: number) => void;
 		onRename: (id: number, name: string) => Promise<boolean>;
+		onSetProject?: (id: number, projectPath: string | null) => void;
 	} = $props();
 
 	let open = $state(false);
@@ -30,6 +35,15 @@
 	);
 
 	function nextName(): string {
+		// Name the session after the opened project folder when available.
+		if (defaultName) {
+			let candidate = defaultName;
+			let i = 2;
+			while (sessions.some((s) => s.name === candidate)) {
+				candidate = `${defaultName} ${i++}`;
+			}
+			return candidate;
+		}
 		const prefix = "Session";
 		const nums = sessions
 			.map((s) => {
@@ -73,6 +87,20 @@
 	function handleDelete(e: Event, id: number) {
 		e.stopPropagation();
 		onDelete(id);
+	}
+
+	async function handleSetProject(e: Event, id: number) {
+		e.stopPropagation();
+		const picked = await invoke<string | null>("pick_folder");
+		// Only bind when a folder was actually picked; a cancelled picker
+		// leaves the current binding untouched.
+		if (picked) onSetProject?.(id, picked);
+	}
+
+	function projectLabel(s: SessionMeta): string {
+		if (!s.project) return "No project";
+		const parts = s.project.split(/[\\/]/);
+		return parts[parts.length - 1] || s.project;
 	}
 </script>
 
@@ -133,7 +161,26 @@
 							onclick={() => handleSelect(s.id)}
 						>
 							<Layers class="size-3 shrink-0 opacity-60" />
-							<span class="flex-1 truncate min-w-0">{s.name}</span>
+							<span class="flex-1 min-w-0">
+								<span class="block truncate">{s.name}</span>
+								<span class="block truncate text-[10px] opacity-60">
+									{s.project ? projectLabel(s) : "No project"}
+								</span>
+							</span>
+							<span
+								class="size-4 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-muted/50 transition-all text-muted-foreground/40 hover:text-foreground cursor-pointer"
+								onclick={(e) => handleSetProject(e, s.id)}
+								onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); handleSetProject(e, s.id); } }}
+								role="button"
+								tabindex="0"
+								title={s.project ? "Change project folder" : "Set project folder"}
+							>
+								{#if s.project}
+									<Folder class="size-2.5 text-primary" />
+								{:else}
+									<Folder class="size-2.5" />
+								{/if}
+							</span>
 							<span
 								class="size-4 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-muted/50 transition-all text-muted-foreground/40 hover:text-foreground cursor-pointer"
 								onclick={(e) => { e.stopPropagation(); startRename(e, s.id, s.name); }}

@@ -22,6 +22,9 @@ struct AppState {
     runtime: Mutex<Option<Arc<Runtime>>>,
     sessions: Mutex<Sessions>,
     active_session: Mutex<Option<u32>>,
+    /// Last [`RuntimeConfig`] used, so sessions can be rebuilt with a
+    /// different project binding.
+    runtime_config: Mutex<Option<RuntimeConfig>>,
     service: Mutex<ProviderService>,
 }
 
@@ -184,6 +187,22 @@ async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
     }
 }
 
+/// Resolve a user-provided project path to a canonical [`ProjectConfig`].
+///
+/// Accepts a directory or a file (the file's parent is used).
+fn resolve_project(path: &str) -> Result<ProjectConfig, String> {
+    let canonical = std::fs::canonicalize(path)
+        .map_err(|e| format!("Project path '{path}' does not exist: {e}"))?;
+    if canonical.is_dir() {
+        Ok(ProjectConfig::new(canonical.to_string_lossy().to_string()))
+    } else {
+        let parent = canonical
+            .parent()
+            .ok_or_else(|| format!("Project path '{path}' has no parent directory"))?;
+        Ok(ProjectConfig::new(parent.to_string_lossy().to_string()))
+    }
+}
+
 #[tauri::command]
 async fn configure_runtime(
     app: AppHandle,
@@ -223,18 +242,7 @@ async fn configure_runtime(
 
     // Resolve project path if provided.
     let project = match project_path {
-        Some(path) => {
-            let canonical = std::fs::canonicalize(&path)
-                .map_err(|e| format!("Project path '{}' does not exist: {e}", path))?;
-            if canonical.is_dir() {
-                Some(ProjectConfig::new(canonical.to_string_lossy().to_string()))
-            } else {
-                let parent = canonical
-                    .parent()
-                    .ok_or_else(|| format!("Project path '{}' has no parent directory", path))?;
-                Some(ProjectConfig::new(parent.to_string_lossy().to_string()))
-            }
-        }
+        Some(path) => Some(resolve_project(&path)?),
         None => None,
     };
 
@@ -242,18 +250,38 @@ async fn configure_runtime(
         provider: provider_config,
         model,
         agent_capacity: std::num::NonZeroUsize::new(100).expect("100 must be non-zero"),
-        project,
+        project: project.clone(),
     };
+    *state.runtime_config.lock().await = Some(runtime_config.clone());
     let runtime = Arc::new(Runtime::try_new(runtime_config).map_err(|e| e.to_string())?);
     spawn_event_bridge(app, Arc::clone(&runtime));
     *state.runtime.lock().await = Some(Arc::clone(&runtime));
 
-    // Create a default session wrapping this runtime.
+    // Name the session after the opened project folder, falling back to
+    // "Default" when no project is open.
+    let session_name = project
+        .as_ref()
+        .map(|p| p.name())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Default".to_string());
+
     let mut sessions = state.sessions.lock().await;
-    if sessions.is_empty() {
-        let id = sessions.create_with_runtime("Default", runtime);
-        *state.active_session.lock().await = Some(id);
+    let active_id = *state.active_session.lock().await;
+
+    // Reconfigured with a new project: rebind the active session to the new
+    // runtime, rename it after the folder, and keep the project in sync.
+    if let Some(id) = active_id {
+        if let Some(session) = sessions.get(id) {
+            session.meta.name = session_name;
+            session.meta.project = project.as_ref().map(|p| p.path.clone());
+            session.runtime = runtime;
+            return Ok(());
+        }
     }
+
+    // No active session (or a stale id): wrap the runtime in a new session.
+    let id = sessions.create_with_runtime(&session_name, runtime);
+    *state.active_session.lock().await = Some(id);
     Ok(())
 }
 
@@ -368,6 +396,42 @@ async fn snapshot(
     Ok(runtime.snapshot(selected).await)
 }
 
+/// Generate a session name from the first user message.
+fn message_session_name(message: &str) -> String {
+    let cleaned: String = message.chars().filter(|c| !c.is_control()).collect();
+    let trimmed = cleaned.trim();
+    if trimmed.len() > 55 {
+        format!("{}…", &trimmed[..55])
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Auto-name the active session if it still has a generic name.
+async fn auto_name_session(state: &State<'_, AppState>, message: &str) {
+    let active_id = *state.active_session.lock().await;
+    let Some(id) = active_id else { return };
+
+    // Check if the session has a generic name (read-only lock).
+    let needs_naming = {
+        let sessions = state.sessions.lock().await;
+        sessions.get_ref(id).map_or(false, |s| {
+            let n = &s.meta.name;
+            n == "New Session" || n == "Default" || n.starts_with("Session ")
+        })
+    };
+
+    if needs_naming {
+        let name = message_session_name(message);
+        if !name.is_empty() {
+            let mut sessions = state.sessions.lock().await;
+            if let Some(s) = sessions.get(id) {
+                s.meta.name = name;
+            }
+        }
+    }
+}
+
 #[tauri::command]
 async fn send(
     state: State<'_, AppState>,
@@ -384,10 +448,14 @@ async fn send(
         .initialize()
         .await
         .map_err(|error| error.to_string())?;
+    // Auto-name the session from the first user message (before consuming text).
+    auto_name_session(&state, &text).await;
+
     runtime
         .send_message(target, text)
         .await
         .map_err(|error| error.to_string())?;
+
     Ok(runtime.snapshot(Some(target)).await)
 }
 
@@ -623,9 +691,28 @@ async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionMeta>, S
 }
 
 #[tauri::command]
-async fn create_session(state: State<'_, AppState>, name: String) -> Result<SessionMeta, String> {
+async fn create_session(
+    state: State<'_, AppState>,
+    name: Option<String>,
+) -> Result<SessionMeta, String> {
+    // Default the name to the active project's folder name.
+    let folder_name = state
+        .runtime
+        .lock()
+        .await
+        .clone()
+        .and_then(|r| r.project().map(|p| p.name()));
+    let session_name = name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .or(folder_name)
+        .unwrap_or_else(|| "Default".to_string());
+
     let mut sessions = state.sessions.lock().await;
-    let id = sessions.create(&name).await.map_err(|e| e.to_string())?;
+    let id = sessions
+        .create(&session_name)
+        .await
+        .map_err(|e| e.to_string())?;
     let meta = sessions.get_ref(id).map(|s| s.meta.clone()).unwrap();
 
     // Update the active runtime to point to this session.
@@ -677,6 +764,58 @@ async fn rename_session(
         .ok_or_else(|| format!("session {id} not found"))?;
     session.meta.name = name;
     let meta = session.meta.clone();
+    Ok(meta)
+}
+
+/// Bind a session to a project folder (or unbind with `None`).
+///
+/// Rebuilds the session's [`Runtime`] with the project so agents see the
+/// project context, renames the session after the folder, and updates the
+/// active runtime if the session is currently active.
+#[tauri::command]
+async fn bind_session_project(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: u32,
+    project_path: Option<String>,
+) -> Result<SessionMeta, String> {
+    let runtime_config = state
+        .runtime_config
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "runtime not configured".to_string())?;
+
+    // Resolve and apply the new project binding.
+    let project = match project_path {
+        Some(path) => Some(resolve_project(&path)?),
+        None => None,
+    };
+    let mut runtime_config = runtime_config;
+    runtime_config.project = project.clone();
+
+    let runtime = Arc::new(Runtime::try_new(runtime_config).map_err(|e| e.to_string())?);
+    spawn_event_bridge(app, Arc::clone(&runtime));
+
+    let session_name = project
+        .as_ref()
+        .map(|p| p.name())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Default".to_string());
+
+    let mut sessions = state.sessions.lock().await;
+    let session = sessions
+        .get(session_id)
+        .ok_or_else(|| format!("session {session_id} not found"))?;
+    session.meta.name = session_name;
+    session.meta.project = project.as_ref().map(|p| p.path.clone());
+    session.runtime = runtime;
+    let meta = session.meta.clone();
+
+    // If the rebound session is active, point the runtime cache at it.
+    if *state.active_session.lock().await == Some(session_id) {
+        *state.runtime.lock().await = Some(session.runtime.clone());
+    }
     Ok(meta)
 }
 
@@ -748,10 +887,12 @@ pub fn run() {
             let runtime = Mutex::new(None);
             let sessions = Mutex::new(Sessions::new());
             let active_session = Mutex::new(None);
+            let runtime_config = Mutex::new(None);
             app.manage(AppState {
                 runtime,
                 sessions,
                 active_session,
+                runtime_config,
                 service,
             });
 
@@ -793,6 +934,7 @@ pub fn run() {
             delete_session,
             rename_session,
             save_sessions,
+            bind_session_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

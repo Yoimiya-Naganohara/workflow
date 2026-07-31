@@ -166,7 +166,7 @@ impl Agent {
     {
         //TODO: MAKE THIS CONFIGURABLE
         const MAX_TURNS: usize = 100;
-        const MAX_TOOL_RESULT_CHARS: usize = 100_000;
+        const MAX_TOOL_RESULT_CHARS: usize = 100_00;
         const CHANNEL_CAPACITY: usize = 1024;
 
         let (sender, inbox) = channel::<Message>(CHANNEL_CAPACITY);

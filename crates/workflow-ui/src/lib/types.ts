@@ -62,6 +62,7 @@ export interface SessionMeta {
 	name: string;
 	created_at: number;
 	last_used_at: number;
+	project?: string | null;
 }
 
 export type PendingAction =

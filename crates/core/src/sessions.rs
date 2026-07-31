@@ -27,6 +27,9 @@ pub struct SessionMeta {
     pub name: String,
     pub created_at: u64,
     pub last_used_at: u64,
+    /// Project folder path this session is bound to (if any).
+    #[serde(default)]
+    pub project: Option<String>,
 }
 
 /// An active session with its own [`Runtime`].
@@ -107,17 +110,18 @@ impl Sessions {
     pub async fn create(&mut self, name: &str) -> Result<SessionId, RuntimeError> {
         let id = self.allocate_id();
         let now = now_secs();
-        let meta = SessionMeta {
-            id,
-            name: name.to_string(),
-            created_at: now,
-            last_used_at: now,
-        };
         let runtime = match &self.config {
             Some(config) => Arc::new(Runtime::try_new(config.clone())?),
             None => Arc::new(Runtime::new()),
         };
         runtime.initialize().await?;
+        let meta = SessionMeta {
+            id,
+            name: name.to_string(),
+            created_at: now,
+            last_used_at: now,
+            project: runtime.project().map(|p| p.path.clone()),
+        };
         let session = Session { meta, runtime };
         self.sessions.insert(id, session);
         Ok(id)
@@ -135,6 +139,7 @@ impl Sessions {
             name: name.to_string(),
             created_at: now,
             last_used_at: now,
+            project: runtime.project().map(|p| p.path.clone()),
         };
         let session = Session { meta, runtime };
         self.sessions.insert(id, session);
@@ -245,6 +250,16 @@ impl Sessions {
             info!(count, "sessions loaded");
         }
         Ok(count)
+    }
+
+    /// Bind a session to a project folder path (or unbind with `None`).
+    ///
+    /// Only updates the metadata — rebinding the session's [`Runtime`] is
+    /// the caller's responsibility (it must be rebuilt with the project).
+    pub fn set_project(&mut self, id: SessionId, project: Option<String>) {
+        if let Some(session) = self.sessions.get_mut(&id) {
+            session.meta.project = project;
+        }
     }
 
     /// Remove a session by ID, returning it if it existed.
@@ -359,5 +374,43 @@ mod tests {
         let session = loaded.get(id);
         assert!(session.is_some());
         assert_eq!(session.unwrap().meta.name, "roundtrip");
+    }
+
+    #[tokio::test]
+    async fn set_project_updates_meta() {
+        let mut sessions = Sessions::new();
+        let id = sessions.create("project-session").await.unwrap();
+        assert!(sessions.get(id).unwrap().meta.project.is_none());
+
+        sessions.set_project(id, Some("/tmp/my-project".to_string()));
+        assert_eq!(
+            sessions.get(id).unwrap().meta.project.as_deref(),
+            Some("/tmp/my-project")
+        );
+
+        sessions.set_project(id, None);
+        assert!(sessions.get(id).unwrap().meta.project.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_field_roundtrips_through_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_path_buf();
+
+        let mut sessions = Sessions::new();
+        sessions.dir = dir_path.join("sessions");
+        let id = sessions.create("proj-roundtrip").await.unwrap();
+        sessions.set_project(id, Some("/tmp/proj".to_string()));
+        sessions.save().await.unwrap();
+
+        let mut loaded = Sessions::new();
+        loaded.dir = sessions.dir.clone();
+        loaded.next_id = 50;
+        loaded.load().await.unwrap();
+
+        assert_eq!(
+            loaded.get_ref(id).unwrap().meta.project.as_deref(),
+            Some("/tmp/proj")
+        );
     }
 }

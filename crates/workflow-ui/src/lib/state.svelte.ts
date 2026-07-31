@@ -100,12 +100,14 @@ class AppState {
 		await this.session.createSession(name);
 		await this.pull(null);
 		this.loadRoles();
+		this.refreshProject();
 	};
 
 	switchSession = async (id: number) => {
 		await this.session.switchSession(id);
 		await this.pull(null);
 		this.loadRoles();
+		this.refreshProject();
 	};
 
 	deleteSession = async (id: number) => {
@@ -118,6 +120,16 @@ class AppState {
 
 	renameSession = (id: number, name: string) => this.session.renameSession(id, name);
 	saveSessions = () => this.session.saveSessions();
+
+	bindSessionProject = async (id: number, projectPath: string | null) => {
+		await this.session.bindSessionProject(id, projectPath);
+		if (this.activeSessionId === id) {
+			// Rebound runtime: refresh everything from the new runtime.
+			await this.pull(null);
+			this.loadRoles();
+			this.refreshProject();
+		}
+	};
 
 	// ── Derived properties ─────────────────────────────────────
 
@@ -222,6 +234,8 @@ class AppState {
 			this.selected = s.selected as AgentId;
 			this.messages = s.messages;
 			this.error = "";
+			// Refresh session list to pick up auto-generated session name.
+			this.loadSessions();
 		} catch (e) {
 			this.error = `send: ${e}`;
 		} finally {

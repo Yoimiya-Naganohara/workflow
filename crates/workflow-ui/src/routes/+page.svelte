@@ -155,6 +155,7 @@
 			{showPins}
 			sessions={app.sessions}
 			activeSessionId={app.activeSessionId}
+			defaultSessionName={app.projectName}
 			onToggleSidebar={toggleSidebar}
 			onToggleGraph={toggleGraph}
 			onTogglePins={togglePins}
@@ -162,6 +163,7 @@
 			onSwitchSession={(id) => app.switchSession(id)}
 			onDeleteSession={(id) => app.deleteSession(id)}
 			onRenameSession={(id, name) => app.renameSession(id, name)}
+			onSetProject={(id, path) => app.bindSessionProject(id, path)}
 		/>
 
 		<div class="flex flex-1 min-h-0">

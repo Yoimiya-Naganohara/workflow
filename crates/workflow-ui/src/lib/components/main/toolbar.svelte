@@ -20,10 +20,12 @@
 		onTogglePins,
 		sessions = [],
 		activeSessionId = null,
+		defaultSessionName = "",
 		onCreateSession,
 		onSwitchSession,
 		onDeleteSession,
 		onRenameSession,
+		onSetProject,
 	}: {
 		showSidebar: boolean;
 		showGraph: boolean;
@@ -33,10 +35,12 @@
 		onTogglePins: () => void;
 		sessions?: SessionMeta[];
 		activeSessionId?: number | null;
+		defaultSessionName?: string;
 		onCreateSession?: (name: string) => void;
 		onSwitchSession?: (id: number) => void;
 		onDeleteSession?: (id: number) => void;
 		onRenameSession?: (id: number, name: string) => Promise<boolean>;
+		onSetProject?: (id: number, projectPath: string | null) => void;
 	} = $props();
 </script>
 
@@ -44,10 +48,12 @@
 	<SessionSelector
 		{sessions}
 		activeId={activeSessionId}
+		defaultName={defaultSessionName}
 		onCreate={(name: string) => onCreateSession?.(name)}
 		onSwitch={(id: number) => onSwitchSession?.(id)}
 		onDelete={(id: number) => onDeleteSession?.(id)}
 		onRename={async (id: number, name: string) => onRenameSession?.(id, name) ?? false}
+		onSetProject={(id: number, path: string | null) => onSetProject?.(id, path)}
 	/>
 	<Button
 		variant="ghost"

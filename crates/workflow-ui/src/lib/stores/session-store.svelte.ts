@@ -63,6 +63,24 @@ export class SessionStore {
 		}
 	};
 
+	bindSessionProject = async (id: number, projectPath: string | null): Promise<boolean> => {
+		try {
+			const meta = await invoke<SessionMeta>("bind_session_project", {
+				sessionId: id,
+				projectPath,
+			});
+			const s = this.sessions.find((s) => s.id === id);
+			if (s) {
+				s.name = meta.name;
+				s.project = meta.project;
+			}
+			return true;
+		} catch (e) {
+			console.error("bind session project:", e);
+			return false;
+		}
+	};
+
 	saveSessions = async () => {
 		try {
 			await invoke<number>("save_sessions");
