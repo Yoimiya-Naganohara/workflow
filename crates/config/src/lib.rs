@@ -223,6 +223,7 @@ impl ConfigSource for DefaultConfigSource {
         Ok(vec![ProviderConfig {
             id: "openai".to_string(),
             name: "OpenAI".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
             ..Default::default()
         }])
     }

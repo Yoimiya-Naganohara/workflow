@@ -83,14 +83,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_deserialize_api_json() {
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let path = std::fs::canonicalize(manifest_dir.join("../../api.json"))
-            .expect("api.json not found at workspace root");
-        let data = tokio::fs::read_to_string(&path)
-            .await
-            .expect("read api.json");
+        // The providers registry format (https://models.dev/api.json) is a
+        // map of provider id -> ProviderInfo. Use an inline fixture so the
+        // test does not depend on a checked-in snapshot of the registry.
+        let data = r#"{
+            "openai": {
+                "id": "openai",
+                "name": "OpenAI",
+                "api": "https://api.openai.com/v1",
+                "env": ["OPENAI_API_KEY"],
+                "models": {
+                    "gpt-4o": {
+                        "id": "gpt-4o",
+                        "name": "GPT-4o",
+                        "tool_call": true,
+                        "cost": { "input": 2.5, "output": 10.0, "cache_read": 1.25 }
+                    }
+                }
+            }
+        }"#;
         let map: HashMap<String, ProviderInfo> =
-            serde_json::from_str(&data).expect("deserialize api.json");
+            serde_json::from_str(data).expect("deserialize api.json");
         let providers: Vec<ProviderInfo> = map.into_values().collect();
         assert!(!providers.is_empty(), "no providers loaded");
         if let Some(p) = providers.first() {
