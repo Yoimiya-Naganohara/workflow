@@ -277,10 +277,10 @@ impl Sessions {
         self.sessions.get(&id)
     }
 
-    /// List all session metadata.
+    /// List all session metadata, most recently used first.
     pub fn list(&self) -> Vec<&SessionMeta> {
         let mut metas: Vec<&SessionMeta> = self.sessions.values().map(|s| &s.meta).collect();
-        metas.sort_by_key(|m| m.last_used_at);
+        metas.sort_by_key(|m| std::cmp::Reverse(m.last_used_at));
         metas
     }
 

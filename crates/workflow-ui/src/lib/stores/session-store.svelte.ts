@@ -13,6 +13,8 @@ export class SessionStore {
 	loadSessions = async () => {
 		try {
 			this.sessions = await invoke<SessionMeta[]>("list_sessions");
+			const active = await invoke<SessionMeta | null>("get_active_session");
+			this.activeId = active?.id ?? null;
 		} catch (e) {
 			console.error("load sessions:", e);
 		}
@@ -34,6 +36,8 @@ export class SessionStore {
 		try {
 			await invoke<SessionMeta>("switch_session", { id });
 			this.activeId = id;
+			// Refresh ordering (most recently used first).
+			this.sessions = await invoke<SessionMeta[]>("list_sessions");
 		} catch (e) {
 			console.error("switch session:", e);
 		}
@@ -42,10 +46,12 @@ export class SessionStore {
 	deleteSession = async (id: number) => {
 		try {
 			await invoke("delete_session", { id });
-			this.sessions = this.sessions.filter((s) => s.id !== id);
-			if (this.activeId === id) {
-				this.activeId = this.sessions[0]?.id ?? null;
-			}
+			// The backend keeps at least one active session (it activates the
+			// most recently used remaining one, or creates a fresh one when
+			// none are left), so re-sync instead of picking locally.
+			this.sessions = await invoke<SessionMeta[]>("list_sessions");
+			const active = await invoke<SessionMeta | null>("get_active_session");
+			this.activeId = active?.id ?? null;
 		} catch (e) {
 			console.error("delete session:", e);
 		}

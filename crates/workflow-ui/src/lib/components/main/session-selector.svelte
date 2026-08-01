@@ -35,24 +35,15 @@
 	);
 
 	function nextName(): string {
-		// Name the session after the opened project folder when available.
-		if (defaultName) {
-			let candidate = defaultName;
-			let i = 2;
-			while (sessions.some((s) => s.name === candidate)) {
-				candidate = `${defaultName} ${i++}`;
-			}
-			return candidate;
+		// Name the session after the opened project folder when available,
+		// otherwise fall back to a generic "New Session" default.
+		const prefix = defaultName || "New Session";
+		let candidate = prefix;
+		let i = 2;
+		while (sessions.some((s) => s.name === candidate)) {
+			candidate = `${prefix} ${i++}`;
 		}
-		const prefix = "Session";
-		const nums = sessions
-			.map((s) => {
-				const m = s.name.match(/^Session (\d+)$/);
-				return m ? parseInt(m[1], 10) : 0;
-			})
-			.filter((n) => n > 0);
-		const max = nums.length > 0 ? Math.max(...nums) : 0;
-		return `${prefix} ${max + 1}`;
+		return candidate;
 	}
 
 	function handleCreate() {
@@ -97,6 +88,10 @@
 		if (picked) onSetProject?.(id, picked);
 	}
 
+	function focusInput(node: HTMLInputElement) {
+		node.focus();
+	}
+
 	function projectLabel(s: SessionMeta): string {
 		if (!s.project) return "No project";
 		const parts = s.project.split(/[\\/]/);
@@ -128,7 +123,7 @@
 								type="text"
 								bind:value={renameValue}
 								class="flex-1 min-w-0 bg-muted/20 rounded px-1.5 py-0.5 text-xs outline-none focus:ring-1 focus:ring-ring border border-border/30"
-								autofocus
+								use:focusInput
 								onkeydown={(e) => {
 									if (e.key === "Enter") confirmRename();
 									if (e.key === "Escape") cancelRename();

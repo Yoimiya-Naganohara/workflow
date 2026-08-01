@@ -258,12 +258,12 @@ async fn configure_runtime(
     *state.runtime.lock().await = Some(Arc::clone(&runtime));
 
     // Name the session after the opened project folder, falling back to
-    // "Default" when no project is open.
+    // "New Session" when no project is open.
     let session_name = project
         .as_ref()
         .map(|p| p.name())
         .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "Default".to_string());
+        .unwrap_or_else(|| "New Session".to_string());
 
     let mut sessions = state.sessions.lock().await;
     let active_id = *state.active_session.lock().await;
@@ -417,7 +417,10 @@ async fn auto_name_session(state: &State<'_, AppState>, message: &str) {
         let sessions = state.sessions.lock().await;
         sessions.get_ref(id).map_or(false, |s| {
             let n = &s.meta.name;
-            n == "New Session" || n == "Default" || n.starts_with("Session ")
+            n == "New Session"
+                || n == "Default"
+                || n.starts_with("Session ")
+                || n.starts_with("New Session ")
         })
     };
 
@@ -674,6 +677,13 @@ fn load_config() -> Result<Option<UserConfig>, String> {
 //  Session commands
 // ============================================================================
 
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 /// Return the currently active runtime, or an error if none is configured.
 #[allow(dead_code)]
 async fn active_runtime(state: &State<'_, AppState>) -> Result<Arc<Runtime>, String> {
@@ -691,7 +701,17 @@ async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionMeta>, S
 }
 
 #[tauri::command]
+async fn get_active_session(state: State<'_, AppState>) -> Result<Option<SessionMeta>, String> {
+    let sessions = state.sessions.lock().await;
+    let active_id = *state.active_session.lock().await;
+    Ok(active_id
+        .and_then(|id| sessions.get_ref(id))
+        .map(|s| s.meta.clone()))
+}
+
+#[tauri::command]
 async fn create_session(
+    app: AppHandle,
     state: State<'_, AppState>,
     name: Option<String>,
 ) -> Result<SessionMeta, String> {
@@ -706,13 +726,16 @@ async fn create_session(
         .map(|n| n.trim().to_string())
         .filter(|n| !n.is_empty())
         .or(folder_name)
-        .unwrap_or_else(|| "Default".to_string());
+        .unwrap_or_else(|| "New Session".to_string());
 
     let mut sessions = state.sessions.lock().await;
     let id = sessions
         .create(&session_name)
         .await
         .map_err(|e| e.to_string())?;
+    if let Some(session) = sessions.get_ref(id) {
+        spawn_event_bridge(app, Arc::clone(&session.runtime));
+    }
     let meta = sessions.get_ref(id).map(|s| s.meta.clone()).unwrap();
 
     // Update the active runtime to point to this session.
@@ -725,10 +748,11 @@ async fn create_session(
 
 #[tauri::command]
 async fn switch_session(state: State<'_, AppState>, id: u32) -> Result<SessionMeta, String> {
-    let sessions = state.sessions.lock().await;
+    let mut sessions = state.sessions.lock().await;
     let session = sessions
-        .get_ref(id)
+        .get(id)
         .ok_or_else(|| format!("session {id} not found"))?;
+    session.meta.last_used_at = now_secs();
     let meta = session.meta.clone();
     *state.runtime.lock().await = Some(session.runtime.clone());
     *state.active_session.lock().await = Some(id);
@@ -736,19 +760,48 @@ async fn switch_session(state: State<'_, AppState>, id: u32) -> Result<SessionMe
 }
 
 #[tauri::command]
-async fn delete_session(state: State<'_, AppState>, id: u32) -> Result<(), String> {
+async fn delete_session(app: AppHandle, state: State<'_, AppState>, id: u32) -> Result<(), String> {
     let mut sessions = state.sessions.lock().await;
+    let was_active = *state.active_session.lock().await == Some(id);
     sessions.remove(id);
-
-    // If the deleted session was active, clear the runtime.
-    if *state.active_session.lock().await == Some(id) {
-        *state.runtime.lock().await = None;
-        *state.active_session.lock().await = None;
-    }
 
     // Remove the persisted file.
     let path = sessions.dir().join(format!("session_{id}.json"));
     let _ = std::fs::remove_file(&path);
+
+    // Never leave the app without an active session: when the active one
+    // was deleted, activate the most recently used remaining session, or
+    // create a fresh one when none are left.
+    if was_active || sessions.is_empty() {
+        let next_id = if sessions.is_empty() {
+            let config = state.runtime_config.lock().await.clone();
+            match config {
+                // Reuse the configured provider so the replacement session
+                // keeps working without reopening the settings dialog.
+                Some(config) => {
+                    let runtime = Arc::new(Runtime::try_new(config).map_err(|e| e.to_string())?);
+                    spawn_event_bridge(app, Arc::clone(&runtime));
+                    sessions.create_with_runtime("New Session", runtime)
+                }
+                None => {
+                    let id = sessions
+                        .create("New Session")
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    if let Some(session) = sessions.get_ref(id) {
+                        spawn_event_bridge(app, Arc::clone(&session.runtime));
+                    }
+                    id
+                }
+            }
+        } else {
+            sessions.list()[0].id
+        };
+        *state.active_session.lock().await = Some(next_id);
+        if let Some(session) = sessions.get_ref(next_id) {
+            *state.runtime.lock().await = Some(session.runtime.clone());
+        }
+    }
     Ok(())
 }
 
@@ -801,7 +854,7 @@ async fn bind_session_project(
         .as_ref()
         .map(|p| p.name())
         .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "Default".to_string());
+        .unwrap_or_else(|| "New Session".to_string());
 
     let mut sessions = state.sessions.lock().await;
     let session = sessions
@@ -884,15 +937,39 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let service = Mutex::new(ProviderService::new());
-            let runtime = Mutex::new(None);
-            let sessions = Mutex::new(Sessions::new());
-            let active_session = Mutex::new(None);
-            let runtime_config = Mutex::new(None);
+
+            // Restore persisted sessions, then activate the most recently
+            // used one so the UI resumes where the user left off. When
+            // nothing was restored, create a default session so the app
+            // never starts without an active runtime.
+            let mut sessions = Sessions::new();
+            if let Err(e) = tauri::async_runtime::block_on(sessions.load()) {
+                eprintln!("failed to load sessions: {e}");
+            }
+            if sessions.is_empty() {
+                match tauri::async_runtime::block_on(sessions.create("New Session")) {
+                    Ok(id) => {
+                        if let Some(session) = sessions.get_ref(id) {
+                            spawn_event_bridge(app.handle().clone(), Arc::clone(&session.runtime));
+                        }
+                    }
+                    Err(e) => eprintln!("failed to create initial session: {e}"),
+                }
+            }
+            let active_id = sessions
+                .list()
+                .into_iter()
+                .max_by_key(|m| m.last_used_at)
+                .map(|m| m.id);
+            let runtime = active_id
+                .and_then(|id| sessions.get_ref(id))
+                .map(|s| s.runtime.clone());
+
             app.manage(AppState {
-                runtime,
-                sessions,
-                active_session,
-                runtime_config,
+                runtime: Mutex::new(runtime),
+                sessions: Mutex::new(sessions),
+                active_session: Mutex::new(active_id),
+                runtime_config: Mutex::new(None),
                 service,
             });
 
@@ -929,6 +1006,7 @@ pub fn run() {
             add_mcp_server,
             remove_mcp_server,
             list_sessions,
+            get_active_session,
             create_session,
             switch_session,
             delete_session,
