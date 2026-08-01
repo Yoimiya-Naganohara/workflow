@@ -16,9 +16,11 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-decoration = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 workflow-core = { path = "../../core" }
 workflow-providers = { path = "../../providers" }
 workflow-config = { path = "../../config" }
+workflow-mcp = { path = "../../mcp" }

@@ -1,7 +1,5 @@
 //! Agent workflow tools — LLM-callable tools for inter-agent communication.
 //!
-//! Agent workflow tools — LLM-callable tools for inter-agent communication.
-//!
 //! Each tool implements [`rig::tool::Tool`] and can be registered on a
 //! [`rig::tool::server::ToolServer`].
 pub mod list_agents;

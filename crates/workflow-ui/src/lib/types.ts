@@ -13,7 +13,7 @@ export type ConversationMessage =
 	| { type: "user"; text: string }
 	| { type: "text"; text: string }
 	| { type: "thinking"; text: string }
-	| { type: "tool"; text: string; result: string | null }
+	| { type: "tool"; text: string; result: string | null; is_error?: boolean }
 	| { type: "error"; text: string };
 
 export interface RuntimeSnapshot {
@@ -41,7 +41,29 @@ export type UiEvent =
 	| { type: "mcp_disconnected"; server: string }
 	| { type: "mcp_tool_needs_approval"; request_id: string; server: string; tool: string; arguments: Record<string, unknown> };
 
-export type DialogId = "new-agent" | "settings" | "roles" | "mcp-approval";
+export interface PinnedMessage {
+	id: number;
+	chatItemId: number;
+	text: string;
+	type: "user" | "text" | "thinking" | "tool" | "error";
+	result?: string | null;
+	status?: "done" | "running" | "error";
+	timestamp: number;
+	agentId: AgentId | null;
+	agentRole?: string;
+}
+
+export type DialogId = "new-agent" | "mcp-approval";
+
+// ── Session types ────────────────────────────────────────────────
+
+export interface SessionMeta {
+	id: number;
+	name: string;
+	created_at: number;
+	last_used_at: number;
+	project?: string | null;
+}
 
 export type PendingAction =
 	| { type: "send"; agentId: AgentId }
@@ -66,9 +88,43 @@ export interface ProviderEntry {
 
 export interface ChatItem {
 	id: number;
-	type: "user" | "assistant" | "thinking" | "tool" | "error";
+	type: "user" | "text" | "thinking" | "tool" | "error";
 	text: string;
 	result?: string | null;
-	status?: "running" | "done";
+	status?: "running" | "done" | "error";
 	streaming?: boolean;
+}
+
+// ── MCP types ─────────────────────────────────────────────────
+
+export interface LogEntry {
+	ts: number;
+	event: UiEvent;
+}
+
+export interface McpConnectionInfo {
+	name: string;
+	tool_names: string[];
+}
+
+export interface McpServerConfig {
+	name: string;
+	transport: McpTransport;
+	dangerous_tools?: string[];
+}
+
+export type McpTransport =
+	| { type: "stdio"; command: string; args: string[]; env?: Record<string, string> }
+	| { type: "sse"; url: string }
+	| { type: "streamable_http"; url: string };
+
+/** Data payload for custom SvelteFlow AgentNode */
+export interface AgentNodeData extends Record<string, unknown> {
+	id: number;
+	role: string;
+	task: string | null;
+	status: AgentStatus;
+	roleColor: string;
+	expanded?: boolean;
+	chatItems?: ChatItem[];
 }

@@ -39,6 +39,7 @@ impl Tool for ListAgents {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         Ok(self.pool.list_agents().await)
     }

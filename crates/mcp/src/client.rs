@@ -137,20 +137,27 @@ impl McpClientManager {
         &self.tool_server_handle
     }
 
-    /// Connect to all configured MCP servers.
+    /// Connect to all configured MCP servers in parallel.
     ///
     /// Failed connections are logged as warnings but do not abort other
     /// connections — best-effort semantics.
     pub async fn connect_all(&self, configs: &[McpServerConfig]) {
-        for config in configs {
-            if let Err(e) = self.connect_one(config).await {
-                warn!(
-                    server = %config.name,
-                    error = %e,
-                    "Failed to connect to MCP server"
-                );
-            }
-        }
+        let tasks: Vec<_> = configs
+            .iter()
+            .map(|config| {
+                let config = config.clone();
+                async move {
+                    if let Err(e) = self.connect_one(&config).await {
+                        warn!(
+                            server = %config.name,
+                            error = %e,
+                            "Failed to connect to MCP server"
+                        );
+                    }
+                }
+            })
+            .collect();
+        futures::future::join_all(tasks).await;
     }
 
     /// Connect to a single MCP server.
@@ -257,11 +264,12 @@ impl McpClientManager {
         }
     }
 
-    /// Disconnect all MCP servers.
+    /// Disconnect all MCP servers, shutting down each service gracefully.
     pub async fn disconnect_all(&self) {
         let mut conns = self.connections.lock().await;
-        conns.clear();
-        info!("Disconnected from all MCP servers");
+        for (name, _) in conns.drain() {
+            info!(server = %name, "Disconnected from MCP server");
+        }
     }
 
     /// Get the peer for a connected server, for dispatching tool calls.
@@ -318,7 +326,7 @@ impl McpClientManager {
 
         // User config takes precedence.
         if let Some(dangerous) = &conn.server_config.dangerous_tools {
-            return dangerous.contains(&"*".to_string()) || dangerous.contains(&tool.to_string());
+            return dangerous.iter().any(|d| d == "*") || dangerous.iter().any(|d| d == tool);
         }
 
         // Fall back to the server's own annotation.

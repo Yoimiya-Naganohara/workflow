@@ -1,5 +1,7 @@
+pub mod sessions;
+
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     num::NonZeroUsize,
     sync::{
         Arc, Mutex, RwLock,
@@ -7,13 +9,15 @@ use std::{
     },
 };
 
+use dashmap::DashMap;
+
 use rig::{
     client::CompletionClient, memory::InMemoryConversationMemory,
     providers::openai::CompletionsClient, tool::server::ToolServer,
     vector_store::VectorStoreIndexDyn,
 };
-use serde::Serialize;
-use tokio::sync::{OnceCell, RwLock as AsyncRwLock, broadcast};
+use serde::{Deserialize, Serialize};
+use tokio::sync::{OnceCell, broadcast};
 pub use workflow_agent::agent_pool::AgentInfo;
 use workflow_agent::{
     Agent, AgentEvent, AgentId, ControlMessage, Message,
@@ -138,6 +142,8 @@ pub struct RuntimeConfig {
     pub provider: ProviderConfig,
     pub model: String,
     pub agent_capacity: NonZeroUsize,
+    /// Optional project configuration when a project is opened.
+    pub project: Option<workflow_config::ProjectConfig>,
 }
 
 impl RuntimeConfig {
@@ -161,6 +167,7 @@ impl RuntimeConfig {
                     provider,
                     model,
                     agent_capacity: default.agent_capacity,
+                    project: None,
                 }
             }
             None => default,
@@ -183,6 +190,7 @@ impl Default for RuntimeConfig {
             model: "big-pickle".to_owned(),
             agent_capacity: NonZeroUsize::new(DEFAULT_AGENT_CAPACITY)
                 .expect("DEFAULT_AGENT_CAPACITY must be non-zero"),
+            project: None,
         }
     }
 }
@@ -206,7 +214,7 @@ pub struct RoleInfo {
     pub definition: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ConversationMessage {
     #[serde(rename = "user")]
@@ -219,6 +227,8 @@ pub enum ConversationMessage {
     Tool {
         text: String,
         result: Option<String>,
+        #[serde(default)]
+        is_error: bool,
     },
     #[serde(rename = "error")]
     Error { text: String },
@@ -286,7 +296,7 @@ impl WorkflowEvent {
 pub struct Runtime {
     agent_pool: Arc<AgentPool>,
     roles: Arc<RwLock<RolePool>>,
-    messages: Arc<AsyncRwLock<HashMap<AgentId, Vec<ConversationMessage>>>>,
+    messages: Arc<DashMap<AgentId, Vec<ConversationMessage>>>,
     events: broadcast::Sender<WorkflowEvent>,
     factory: AgentFactory,
     observer: Arc<RwLock<Option<AgentObserver>>>,
@@ -294,6 +304,7 @@ pub struct Runtime {
     next_id: Arc<AtomicU32>,
     initialized: OnceCell<()>,
     mcp_manager: Arc<workflow_mcp::McpClientManager>,
+    project: Option<workflow_config::ProjectConfig>,
 }
 
 impl Default for Runtime {
@@ -335,6 +346,7 @@ impl Runtime {
             Arc::clone(&roles),
             Arc::clone(&handle_cell),
             Arc::clone(&observer),
+            config.project.clone(),
         );
 
         // Shared cell so the install_mcp_server tool can resolve the manager.
@@ -411,7 +423,7 @@ impl Runtime {
         Ok(Self {
             agent_pool,
             roles,
-            messages: Arc::new(AsyncRwLock::new(HashMap::new())),
+            messages: Arc::new(DashMap::new()),
             events,
             factory,
             observer,
@@ -419,6 +431,7 @@ impl Runtime {
             next_id,
             initialized: OnceCell::new(),
             mcp_manager,
+            project: config.project,
         })
     }
 
@@ -502,8 +515,6 @@ impl Runtime {
             .ok_or(RuntimeError::AgentNotFound(id))?;
 
         self.messages
-            .write()
-            .await
             .entry(id)
             .or_default()
             .push(ConversationMessage::User { text: text.clone() });
@@ -541,10 +552,8 @@ impl Runtime {
         let messages = match selected {
             Some(id) => self
                 .messages
-                .read()
-                .await
                 .get(&id)
-                .cloned()
+                .map(|e| e.clone())
                 .unwrap_or_default(),
             None => Vec::new(),
         };
@@ -573,9 +582,22 @@ impl Runtime {
         self.list_roles()
     }
 
+    pub fn remove_role(&self, name: &str) -> Vec<RoleInfo> {
+        self.roles
+            .write()
+            .expect("roles write lock poisoned")
+            .remove(&RoleId::from(name));
+        self.list_roles()
+    }
+
     /// Access the MCP client manager.
     pub fn mcp(&self) -> &workflow_mcp::McpClientManager {
         &self.mcp_manager
+    }
+
+    /// Access the project configuration, if a project is opened.
+    pub fn project(&self) -> Option<&workflow_config::ProjectConfig> {
+        self.project.as_ref()
     }
 
     /// Reload MCP server config and reconnect all servers.
@@ -671,7 +693,7 @@ impl Runtime {
                             .lock()
                             .expect("observed_agents lock poisoned")
                             .remove(&id);
-                        runtime.messages.write().await.remove(&id);
+                        runtime.messages.remove(&id);
                         let _ = runtime.events.send(WorkflowEvent::AgentRemoved(id));
                     }
                 }
@@ -680,27 +702,34 @@ impl Runtime {
     }
 
     async fn record_agent_event(&self, id: AgentId, event: &AgentEvent) {
-        let mut messages = self.messages.write().await;
-        let messages = messages.entry(id).or_default();
+        let mut messages = self.messages.entry(id).or_default();
         match event {
-            AgentEvent::Text(text) => append_text(messages, text, false),
-            AgentEvent::Reasoning(text) => append_text(messages, text, true),
+            AgentEvent::Text(text) => append_text(&mut messages, text, false),
+            AgentEvent::Reasoning(text) => append_text(&mut messages, text, true),
             AgentEvent::ToolCall { name, params } => messages.push(ConversationMessage::Tool {
                 text: format!("{name}: {params}"),
                 result: None,
+                is_error: false,
             }),
             AgentEvent::ToolResult { name, result } => {
+                let is_error = result.starts_with("error:")
+                    || result.starts_with("Error:")
+                    || result.starts_with("failed:")
+                    || result.starts_with("Failed:");
                 if let Some(ConversationMessage::Tool {
                     result: tool_result,
+                    is_error: error_flag,
                     ..
                 }) = messages.iter_mut().rev().find(|message| {
-                    matches!(message, ConversationMessage::Tool { text, result: None } if text.split(": ").next() == Some(name.as_str()))
+                    matches!(message, ConversationMessage::Tool { text, result: None, .. } if text.split(": ").next() == Some(name.as_str()))
                 }) {
                     *tool_result = Some(result.clone());
+                    *error_flag = is_error;
                 } else {
                     messages.push(ConversationMessage::Tool {
                         text: name.clone(),
                         result: Some(result.clone()),
+                        is_error,
                     });
                 }
             }
@@ -813,9 +842,11 @@ fn make_agent_factory(
     roles: Arc<RwLock<RolePool>>,
     handle_cell: Arc<Mutex<Option<rig::tool::server::ToolServerHandle>>>,
     observer: Arc<RwLock<Option<AgentObserver>>>,
+    project: Option<workflow_config::ProjectConfig>,
 ) -> AgentFactory {
     let client = client.clone();
     let model = model.to_owned();
+    let project_context = project.map(|p| build_project_context(&p));
     Arc::new(move |id, requested_role| {
         let handle = handle_cell
             .lock()
@@ -835,16 +866,28 @@ fn make_agent_factory(
         } else {
             requested_role
         };
+
+        // Build preamble with optional project context.
+        let preamble = match &project_context {
+            Some(ctx) => format!(
+                "{}\n\n{}\n\n{}",
+                role.definition(),
+                ctx,
+                workflow_agent::protocol::A2A_SYSTEM_PROMPT
+            ),
+            None => format!(
+                "{}\n{}",
+                role.definition(),
+                workflow_agent::protocol::A2A_SYSTEM_PROMPT
+            ),
+        };
+
         let rig_agent = client
             .agent(&model)
             .tool_server_handle(handle)
             .memory(InMemoryConversationMemory::new())
             .conversation(id.to_string())
-            .preamble(&format!(
-                "{}\n{}",
-                role.definition(),
-                workflow_agent::protocol::A2A_SYSTEM_PROMPT
-            ))
+            .preamble(&preamble)
             .build();
         let agent = Arc::new(Agent::new(id, agent_role, rig_agent));
         if let Some(observer) = observer
@@ -856,6 +899,15 @@ fn make_agent_factory(
         }
         agent
     })
+}
+
+/// Build a project context string that describes the opened project.
+fn build_project_context(project: &workflow_config::ProjectConfig) -> String {
+    format!(
+        "You are working on project: {} at {}",
+        project.name(),
+        project.path
+    )
 }
 
 #[cfg(test)]

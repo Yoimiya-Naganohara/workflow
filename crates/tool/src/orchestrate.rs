@@ -93,15 +93,8 @@ impl Orchestrate {
         role: &str,
         reserved: &HashSet<AgentId>,
     ) -> Result<Arc<Agent>, ToolError> {
-        let agents = self.pool.list_agents().await;
-        for info in &agents {
-            if info.role == role
-                && info.current_task.is_none()
-                && !reserved.contains(&info.id)
-                && let Some(agent) = self.pool.get_agent(&info.id).await
-            {
-                return Ok(agent);
-            }
+        if let Some(agent) = self.pool.find_idle_agent(role, reserved).await {
+            return Ok(agent);
         }
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -167,6 +160,7 @@ impl Tool for Orchestrate {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(task_count = args.tasks.len()))]
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let tasks = args.tasks;
 
@@ -230,12 +224,27 @@ impl Tool for Orchestrate {
         let mut waves: Vec<Vec<usize>> = Vec::new();
         let mut id_to_wave: Vec<usize> = vec![0; tasks.len()];
 
+        // Critical path DP (computed inline during wave BFS)
+        let mut dist: Vec<usize> = vec![0; tasks.len()];
+        let mut prev: Vec<Option<usize>> = vec![None; tasks.len()];
+
         while !queue.is_empty() {
             let wave: Vec<usize> = queue.drain(..).collect();
             let wave_idx = waves.len();
 
             for &idx in &wave {
                 id_to_wave[idx] = wave_idx;
+
+                // Update critical-path distance from dependencies
+                for dep in &tasks[idx].depend_on {
+                    let dep_idx = by_id[dep];
+                    let d = dist[dep_idx] + 1;
+                    if d > dist[idx] {
+                        dist[idx] = d;
+                        prev[idx] = Some(dep_idx);
+                    }
+                }
+
                 for &dep_idx in &dependents[idx] {
                     in_degree[dep_idx] -= 1;
                     if in_degree[dep_idx] == 0 {
@@ -254,23 +263,7 @@ impl Tool for Orchestrate {
             ));
         }
 
-        // Critical path
-        let mut dist: Vec<usize> = vec![0; tasks.len()];
-        let mut prev: Vec<Option<usize>> = vec![None; tasks.len()];
-
-        for wave in &waves {
-            for &idx in wave {
-                for dep in &tasks[idx].depend_on {
-                    let dep_idx = by_id[dep];
-                    let d = dist[dep_idx] + 1;
-                    if d > dist[idx] {
-                        dist[idx] = d;
-                        prev[idx] = Some(dep_idx);
-                    }
-                }
-            }
-        }
-
+        // Critical path reconstruction
         let mut max_dist = 0;
         let mut max_idx = 0;
         for (i, &d) in dist.iter().enumerate() {
@@ -351,7 +344,10 @@ impl Tool for Orchestrate {
 
                     let mut receiver = t.agent.receiver();
                     if let Err(e) = t.agent.send(Message::User(prompt)).await {
-                        eprintln!("orchestrate: failed to dispatch task '{}': {e}", t.task_id);
+                        tracing::error!(
+                            "orchestrate: failed to dispatch task '{}': {e}",
+                            t.task_id
+                        );
                         continue;
                     }
 
@@ -389,10 +385,10 @@ impl Tool for Orchestrate {
                             task_results.insert(task_id, output);
                         }
                         Ok(Err(e)) => {
-                            eprintln!("orchestrate: task failed: {e}");
+                            tracing::error!("orchestrate: task failed: {e}");
                         }
                         Err(e) => {
-                            eprintln!("orchestrate: task join error: {e}");
+                            tracing::error!("orchestrate: task join error: {e}");
                         }
                     }
                 }
@@ -427,7 +423,7 @@ fn suggest_roles(requested: &str, available: &[String]) -> Vec<String> {
                 .filter(|w| !w.is_empty())
                 .collect();
 
-            let score = requested_words
+            let mut score = requested_words
                 .iter()
                 .filter(|rw| {
                     name_words
@@ -435,6 +431,11 @@ fn suggest_roles(requested: &str, available: &[String]) -> Vec<String> {
                         .any(|nw| nw.contains(**rw) || rw.contains(nw))
                 })
                 .count();
+
+            // Boost exact matches so they appear first
+            if name_lower == requested_lower {
+                score = score.saturating_add(100);
+            }
 
             (name.clone(), score)
         })

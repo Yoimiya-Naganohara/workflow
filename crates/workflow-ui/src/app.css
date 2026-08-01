@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./lib/styles/typography.css";
+@import "@xyflow/svelte/dist/style.css";
 
 @layer base {
   :root {

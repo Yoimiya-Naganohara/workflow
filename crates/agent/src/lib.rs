@@ -166,7 +166,8 @@ impl Agent {
     {
         //TODO: MAKE THIS CONFIGURABLE
         const MAX_TURNS: usize = 100;
-        const CHANNEL_CAPACITY: usize = 32;
+        const MAX_TOOL_RESULT_CHARS: usize = 100_00;
+        const CHANNEL_CAPACITY: usize = 1024;
 
         let (sender, inbox) = channel::<Message>(CHANNEL_CAPACITY);
         let (controls, control_inbox) = unbounded_channel::<ControlMessage>();
@@ -210,11 +211,23 @@ impl Agent {
                                     .unwrap_or_else(|| "unknown".to_string());
                                 let result_text = tool_result.content.iter()
                                     .filter_map(|c| match c {
-                                        rig::completion::message::ToolResultContent::Text(t) => Some(t.text.clone()),
+                                        rig::completion::message::ToolResultContent::Text(t) => Some(t.text.as_str()),
                                         _ => None,
                                     })
                                     .collect::<Vec<_>>()
                                     .join("\n");
+                                // Truncate overly large tool results to keep context manageable.
+                                let result_text = if result_text.len() > MAX_TOOL_RESULT_CHARS {
+                                    let cutoff = result_text.floor_char_boundary(MAX_TOOL_RESULT_CHARS);
+                                    format!(
+                                        "{}...\n\n[Tool result truncated at {} characters (original was {} bytes). Use targeted queries for full data.]",
+                                        &result_text[..cutoff],
+                                        MAX_TOOL_RESULT_CHARS,
+                                        result_text.len(),
+                                    )
+                                } else {
+                                    result_text
+                                };
                                 Some(AgentEvent::ToolResult { name, result: result_text })
                             }
                         },
