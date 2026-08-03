@@ -4,12 +4,12 @@ pub mod protocol;
 use async_stream::stream;
 use futures::{Stream, StreamExt};
 use rig::{
-    agent::MultiTurnStreamItem,
+    agent::{AgentHook, Flow, MultiTurnStreamItem, StepEvent},
     completion::CompletionModel,
     message::Text,
     streaming::{StreamedAssistantContent, StreamedUserContent},
 };
-use std::{collections::HashMap, pin::Pin, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, pin::Pin, sync::Arc};
 use tokio::sync::{
     Mutex, RwLock,
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel},
@@ -164,9 +164,7 @@ impl Agent {
     where
         M: CompletionModel + 'static,
     {
-        //TODO: MAKE THIS CONFIGURABLE
         const MAX_TURNS: usize = 100;
-        const MAX_TOOL_RESULT_CHARS: usize = 100_00;
         const CHANNEL_CAPACITY: usize = 1024;
 
         let (sender, inbox) = channel::<Message>(CHANNEL_CAPACITY);
@@ -216,18 +214,9 @@ impl Agent {
                                     })
                                     .collect::<Vec<_>>()
                                     .join("\n");
-                                // Truncate overly large tool results to keep context manageable.
-                                let result_text = if result_text.len() > MAX_TOOL_RESULT_CHARS {
-                                    let cutoff = result_text.floor_char_boundary(MAX_TOOL_RESULT_CHARS);
-                                    format!(
-                                        "{}...\n\n[Tool result truncated at {} characters (original was {} bytes). Use targeted queries for full data.]",
-                                        &result_text[..cutoff],
-                                        MAX_TOOL_RESULT_CHARS,
-                                        result_text.len(),
-                                    )
-                                } else {
-                                    result_text
-                                };
+                                // Oversized results are truncated before they ever
+                                // reach the model context by the `ToolResultLimit`
+                                // hook registered when the agent was built.
                                 Some(AgentEvent::ToolResult { name, result: result_text })
                             }
                         },
@@ -409,6 +398,80 @@ impl Agent {
     }
 }
 
+// ── Tool result length limit ─────────────────────────────────
+
+/// Default cap for a single tool result, in bytes, admitted to the model
+/// context.
+pub const DEFAULT_MAX_TOOL_RESULT_CHARS: usize = 10_000;
+
+/// A rig [`AgentHook`] that truncates tool results longer than `max_chars`
+/// *before the model sees them*.
+///
+/// rig executes tools before streaming their results and feeds the full
+/// output back into the model context on the next turn, so truncating streamed
+/// events downstream does not bound the context. Replacing the result in this
+/// hook keeps the actual model context — and everything derived from it
+/// (streamed events, transcripts) — within the limit.
+#[derive(Debug, Clone, Copy)]
+pub struct ToolResultLimit {
+    max_chars: usize,
+}
+
+impl ToolResultLimit {
+    /// Create a hook that truncates results to at most `max_chars` bytes.
+    pub fn new(max_chars: usize) -> Self {
+        Self { max_chars }
+    }
+
+    /// Read the cap from the `WORKFLOW_MAX_TOOL_RESULT_CHARS` environment
+    /// variable, falling back to [`DEFAULT_MAX_TOOL_RESULT_CHARS`].
+    pub fn from_env() -> Self {
+        let max_chars = std::env::var("WORKFLOW_MAX_TOOL_RESULT_CHARS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(DEFAULT_MAX_TOOL_RESULT_CHARS);
+        Self::new(max_chars)
+    }
+}
+
+impl Default for ToolResultLimit {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_TOOL_RESULT_CHARS)
+    }
+}
+
+impl<M: CompletionModel> AgentHook<M> for ToolResultLimit {
+    async fn on_event(&self, event: StepEvent<'_, M>) -> Flow {
+        match event {
+            StepEvent::ToolResult { result, .. } => {
+                match truncate_tool_result(result, self.max_chars) {
+                    Cow::Borrowed(_) => Flow::Continue,
+                    Cow::Owned(truncated) => Flow::RewriteResult { result: truncated },
+                }
+            }
+            _ => Flow::Continue,
+        }
+    }
+}
+
+/// Truncate `result` to at most `max_chars` bytes (on a char boundary),
+/// appending a note with the original length so the model knows the data was
+/// trimmed and can issue targeted follow-up calls.
+fn truncate_tool_result<'a>(result: &'a str, max_chars: usize) -> Cow<'a, str> {
+    if result.len() <= max_chars {
+        return Cow::Borrowed(result);
+    }
+    let cutoff = result.floor_char_boundary(max_chars);
+    let mut truncated = String::with_capacity(cutoff + 96);
+    truncated.push_str(&result[..cutoff]);
+    truncated.push_str("...\n\n[Tool result truncated at ");
+    truncated.push_str(&max_chars.to_string());
+    truncated.push_str(" characters (original was ");
+    truncated.push_str(&result.len().to_string());
+    truncated.push_str(" bytes). Use targeted queries for full data.]");
+    Cow::Owned(truncated)
+}
+
 // ── Tests ────────────────────────────────────────────────────
 #[cfg(test)]
 mod budget_tests {
@@ -433,7 +496,53 @@ mod budget_tests {
 }
 
 #[cfg(test)]
-use rig::agent::{AgentHook, Flow, StepEvent};
+mod tool_result_limit_tests {
+    use super::*;
+
+    #[test]
+    fn short_results_are_returned_unchanged() {
+        let result = "short";
+        assert!(matches!(
+            truncate_tool_result(result, 10_000),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn boundary_length_results_are_kept() {
+        let result = "x".repeat(20);
+        assert!(matches!(
+            truncate_tool_result(&result, 20),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn long_results_are_truncated_with_note() {
+        let result = "x".repeat(10_000);
+        let Cow::Owned(text) = truncate_tool_result(&result, 20) else {
+            panic!("long result must be truncated");
+        };
+        assert!(text.starts_with(&"x".repeat(20)));
+        assert!(text.contains("..."));
+        assert!(text.contains("[Tool result truncated at 20 characters"));
+        assert!(text.contains("original was 10000 bytes"));
+        assert!(text.contains("Use targeted queries for full data."));
+        // Truncated output (prefix + note) stays well below the original.
+        assert!(text.len() < result.len());
+    }
+
+    #[test]
+    fn truncates_at_char_boundary() {
+        // "é" is 2 bytes in UTF-8; a 21-byte cap must cut at 20 bytes.
+        let result = "é".repeat(50);
+        let Cow::Owned(text) = truncate_tool_result(&result, 21) else {
+            panic!("long result must be truncated");
+        };
+        assert!(text.starts_with(&"é".repeat(10)));
+        assert!(text.is_char_boundary(text.len()));
+    }
+}
 
 #[cfg(test)]
 struct ToolAudit;

@@ -847,6 +847,9 @@ fn make_agent_factory(
     let client = client.clone();
     let model = model.to_owned();
     let project_context = project.map(|p| build_project_context(&p));
+    // Tool results longer than this cap are truncated before reaching the
+    // model context; override with the WORKFLOW_MAX_TOOL_RESULT_CHARS env var.
+    let tool_result_limit = workflow_agent::ToolResultLimit::from_env();
     Arc::new(move |id, requested_role| {
         let handle = handle_cell
             .lock()
@@ -888,6 +891,7 @@ fn make_agent_factory(
             .memory(InMemoryConversationMemory::new())
             .conversation(id.to_string())
             .preamble(&preamble)
+            .add_hook(tool_result_limit)
             .build();
         let agent = Arc::new(Agent::new(id, agent_role, rig_agent));
         if let Some(observer) = observer
